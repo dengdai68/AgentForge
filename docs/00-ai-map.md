@@ -126,3 +126,5 @@ Runtime 安装状态：cli-environment.runtimeInstalled 按实际执行 PATH 只
 跨 Runtime 插件源标准与冻结执行计划见 [docs/26](26-runtime-plugin-compatibility.md)；入口 `server/runtime/plugin-compatibility.mjs`，DeepSeek 原生组件物化 `dsh-extensions.mjs`。已有安装兼容性由当前适配器派生，不能依赖历史 providers。
 
 市场卡片在 web/marketplace.mjs 只保留版本/ID 与详情；Runtime 兼容信息保留在详情和员工选择器。三 Runtime、两源格式与三种 MCP 传输的真实兼容验证入口为 scripts/test-plugin-runtimes-real.mjs。
+
+正式安装包回归 scripts/test-packaged-electron.mjs 在隔离 HOME/PATH 验证 Codex 缺失时关闭并拒绝启用，再安装只供检查存在的可执行夹具验证开关更新；不依赖或调用操作者的 Codex。

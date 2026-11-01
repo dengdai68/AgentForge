@@ -733,6 +733,15 @@ try {
     assert.equal(status,400,'packaged HTTP rejects retired extension input');
   }
   assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,3);
+  // This HOME/PATH deliberately has no ambient Runtime. Verify that the
+  // installation gate rejects toggles, then install a presence-only fixture
+  // before testing the enabled setting; never depend on the operator's Codex.
+  const absentCodex=cliProfiles.items.find(item=>item.provider==='codex');
+  assert.equal(absentCodex.installed,false);
+  assert.equal(absentCodex.enabled,false);
+  await assert.rejects(packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({enabled:true})),/Runtime 未安装/);
+  await writeFile(join(shellBin,'codex'),'#!/bin/sh\necho "presence-only fixture must not execute" >&2\nexit 71\n',{mode:0o755});
+  assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.find(item=>item.provider==='codex').installed,true);
   await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({enabled:false}));
   assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.find(item=>item.provider==='codex').enabled,false);
   await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({enabled:true}));
