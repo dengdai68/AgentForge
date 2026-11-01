@@ -428,15 +428,13 @@ test("task creation presents explicit acceptance criteria before execution", asy
   assert.match(source, /验收标准最多 20 条/);
 });
 
-test("task launch discloses local execution without claiming a sandbox", async () => {
+test("task creation keeps optional criteria and a small workspace hint without execution boilerplate", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const modal = source.slice(source.indexOf("function newTaskModal()"), source.indexOf("function workflowNodeRow("));
-  assert.match(modal, /aria-label="本机执行与资料边界"/);
-  assert.match(modal, /工作目录不是沙箱，工具可能访问目录外文件和网络/);
-  assert.match(modal, /任务资料可能发送至配置的模型服务/);
-  assert.doesNotMatch(modal, /只在指定工作目录内工作/);
-  const settings = await readFile(new URL("../web/settings.mjs", import.meta.url), "utf8");
-  assert.doesNotMatch(settings, /本机执行说明与版本|启动目录<\/dt>/);
+  assert.match(modal, /系统工作根目录/);
+  assert.doesNotMatch(modal, /data-task-execution-boundary|modal-intro|团队项目经理/);
+  assert.match(modal, /class="task-acceptance"/);
+  assert.doesNotMatch(modal, /<details[^>]+open/);
 });
 
 test("inline form validation clears stale errors only after the affected control changes", async () => {
@@ -594,14 +592,12 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   }
 });
 
-test("task form shows node staffing guidance without preassigning a role", async () => {
+test("task form selects team and workflow without expanded staffing details or preassignments", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const start = source.indexOf("function taskAssignmentMarkup("), end = source.indexOf("function syncTaskAssignments", start);
-  const state = { workflowTemplates: [{ id: "flow", nodes: [{ id: "testing", title: "开发验证", staffingGuidance: "能复现问题并给出测试证据" }] }] };
-  const render = new Function("state", "esc", source.slice(start, end) + "; return taskAssignmentMarkup;")(state, value => String(value));
-  const html = render({ workflowTemplateId: { value: "flow" } });
-  assert.match(html, /能复现问题并给出测试证据/);
-  assert.doesNotMatch(html, /nodeAssignment_|<select/);
+  const modal = source.slice(source.indexOf("function newTaskModal()"), source.indexOf("function workflowNodeRow("));
+  assert.match(modal, /name="workflowTemplateId"/);
+  assert.match(modal, /name="teamId"/);
+  assert.doesNotMatch(modal, /node-assignment-panel|staffingGuidance|nodeAssignment_/);
   assert.doesNotMatch(source, /input.nodeAssignments =/);
 });
 
@@ -622,7 +618,7 @@ test("console subscription invalidates stale visits and preserves history during
     close() { this.closed = true; }
     emit(event) { this.handlers["run-event"]({ data: JSON.stringify(event) }); }
   }
-  const connect = new Function("state", "consolePages", "EventSource", "setTimeout", "clearTimeout", "workspaceView", "setLiveIndicator", "loadConsolePage", "loadWorkspace", "renderConsolePage", `let workspaceRefreshTimer, consoleRenderTimer; ${code}; return connectEvents;`)(state, pages, EventSource, (fn) => { timers.push(fn); return timers.length; }, () => {}, () => ({ tab: "console" }), () => {}, () => {}, () => {}, () => {});
+  const connect = new Function("state", "consolePages", "EventSource", "setTimeout", "clearTimeout", "workspaceView", "setLiveIndicator", "loadConsolePage", "loadWorkspace", "renderConsolePage", "$", "getSelection", `let workspaceRefreshTimer, consoleRenderTimer; ${code}; return connectEvents;`)(state, pages, EventSource, (fn) => { timers.push(fn); return timers.length; }, () => {}, () => ({ tab: "console" }), () => {}, () => {}, () => {}, () => {}, () => null, () => null);
   connect("run");
   const page = pages.get("run:agent"); assert.equal(page.loaded, false); assert.deepEqual(page.events, []);
   page.loaded = true; page.browsingHistory = true;
@@ -685,14 +681,14 @@ test("collaboration view projects routing and replies without runtime operation 
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const project = (workspace) => collaborationRecords(workspace, { formatTime: (value) => value });
   const data = { run: { manager: { id: "pm", name: "经理" }, participants: [{ id: "a", name: "架构师" }], task: { workflowSnapshot: { nodes: [{ id: "design", title: "设计" }] } } }, messages: [{ id: "q", createdAt: "2026-01-01", sender: { type: "agent", name: "架构师" }, recipient: { type: "human", name: "你" }, kind: "clarification_question", content: "策略？" }, { id: "a", createdAt: "2026-01-02", sender: { type: "human", name: "你" }, recipient: { type: "agent", name: "架构师" }, replyToMessageId: "q", content: "策略 A" }], dispatches: [{ id: "d", createdAt: "2026-01-01", recipientAgentId: "a", workflowNodeId: "design", purpose: "node", messageIds: [], traceIds: [], attempts: 1, status: "done" }], events: [{ id: "tool", type: "runtime.event", message: "Bash private tool input" }] };
-  const records = project(data); assert.equal(records.length, 2); assert.equal(records.find(item => item.id === "q").status, "已回答"); assert.match(records.find(item => item.id === "a").reply, /策略/); assert.equal(records.some(item => item.id === "tool"), false);
+  const records = project(data); assert.equal(records.length, 3); assert.equal(records.find(item => item.id === "q").status, "当前：已回答"); assert.match(records.find(item => item.id === "a").reply, /策略/); assert.equal(records.some(item => item.id === "tool"), false);
   data.dispatches.unshift({ id: "pm-dispatch", createdAt: "2026-01-01", recipientAgentId: "pm", workflowNodeId: "design", purpose: "manager", messageIds: [], traceIds: [], attempts: 1, status: "done" });
   data.dispatches[1].dedupeKey = "handoff:pm-dispatch"; data.dispatches[1].messageIds = ["q", "a"];
-  assert.equal(project(data).some(item => item.id === "d"), false);
+  assert.equal(project(data).some(item => item.id === "d"), true);
   assert.ok(source.indexOf('id="collaboration-mode"') < source.indexOf('id="directory-mode"')); assert.ok(source.indexOf('id="directory-mode"') < source.indexOf('id="console-mode"'));
   assert.match(source, /data-ws-tab="collaboration"/); assert.doesNotMatch(source, /id="clarification-launcher"/);
   assert.doesNotMatch(source, /<summary>关联记录<\/summary>|data-collaboration-id/);
-  assert.match(source, /item\.traceId \? `<button class="text-action trace-link" data-open-collaboration-trace/);
+  assert.match(source, /item\.traceId \|\| item\.executionTraceId \? `<button class="text-action trace-link" data-open-collaboration-trace/);
 });
 
 test("workspace file rows match the two-cell markup and bound wide-screen navigation", async () => {
@@ -1897,7 +1893,7 @@ test("collaboration is chronological without pinned acceptance duplicates and un
     if (!elements.has(id)) elements.set(id, { innerHTML: "", addEventListener() {} });
     return elements.get(id);
   };
-  const render = new Function("$", "state", "workspaceView", "collaborationRecords", "collaborationMessageMarkup", "exactTime", "esc", "sendInstruction", `${renderSource}; return renderCollaboration;`)(select, { workspace }, () => view, collaborationRecords, text => `<p>${esc(text)}</p>`, String, esc, () => {});
+  const render = new Function("$", "state", "workspaceView", "collaborationRecords", "collaborationMessageMarkup", "exactTime", "esc", "sendInstruction", "refreshCollaborationBodies", `${renderSource}; return renderCollaboration;`)(select, { workspace }, () => view, collaborationRecords, text => `<p>${esc(text)}</p>`, String, esc, () => {}, () => {});
   workspace.run.task.archivedAt = null;
   workspace.messages = [
     { id: 'manager-final', kind: 'manager_decision', sender: { type: 'agent', name: '经理' }, recipient: { type: 'team', name: '团队' }, content: '最终交接结论', createdAt: '2026-10-19T00:00:00Z' },
@@ -1912,7 +1908,9 @@ test("collaboration is chronological without pinned acceptance duplicates and un
     assert.equal((html.match(/最终交接结论/g) || []).length, 1);
     assert.ok(html.indexOf('最终交接结论') < html.indexOf('新的提问'));
     assert.equal(select('#instruction-text').disabled, false);
-    assert.doesNotMatch(html, /collaboration-review|经理交接说明|等待人类确认|停止答疑/);
+    assert.doesNotMatch(html, /collaboration-review|经理交接说明|停止答疑/);
+    assert.equal((html.match(/等待人类确认/g) || []).length, 1, "acceptance transition stays in its chronological position");
+    assert.ok(html.indexOf("等待人类确认") < html.indexOf("新的提问"));
     assert.doesNotMatch(html, /data-open-completion-confirm|workspace-acceptance/);
   }
   view.collaborationFilter = "human";
@@ -2043,6 +2041,33 @@ console.log(JSON.stringify({type:"result",result}));
     assert.ok(workspace.run.acceptanceRequest.traceId);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+for (const malformed of [false, true]) {
+  test(`manager ${malformed ? 'incomplete' : 'missing'} decision receives a real correction dispatch instead of silently draining`, async () => {
+    const root = await directory('agentforge-manager-decision-');
+    try {
+      const executable = join(root, 'provider.mjs');
+      await writeFile(executable, `#!${process.execPath}
+const input = process.argv.at(-1) || '';
+const corrected = input.includes('本轮缺少 managerDecision');
+const result = corrected ? JSON.stringify({summary:'补齐明确的验收决定',managerDecision:{nextNodeId:null,nextAgentId:null,rationale:'经理明确提交人类验收'}}) : ${malformed ? "JSON.stringify({summary:'正文说已提交验收',managerDecision:{rationale:'缺少必填字段'}})" : "'正文说已提交验收'"};
+console.log(JSON.stringify({type:'result',subtype:'success',result}));
+`,{mode:0o755});
+      const store = createStore();
+      const task = store.createTask({...fixtureTaskInput(store),workspacePath:root,managerRuntime:{provider:'claude-code',executable}});
+      const run = store.createRun(task.id);
+      await executeRun(store,run.id,{runFilesRoot:join(root,'audit')});
+      const workspace = store.getRunWorkspace(run.id), dispatches=store.listDispatches(run.id);
+      assert.equal(workspace.run.status,'awaiting_acceptance');
+      assert.equal(workspace.traces.length,2);
+      assert.ok(dispatches.some(d=>d.dedupeKey.startsWith('routing:') && d.coordinationFollowup && d.status==='done'));
+      assert.ok(workspace.messages.some(m=>m.content==='正文说已提交验收'),'original report is preserved');
+      assert.ok(workspace.messages.some(m=>m.kind==='coordination_notice' && m.content.includes('本轮缺少 managerDecision')));
+      assert.equal(workspace.run.acceptanceRequest.traceId,workspace.traces.at(-1).id,'acceptance comes from the explicit corrected decision');
+      store.close();
+    } finally { await rm(root,{recursive:true,force:true}); }
+  });
+}
 
 test("prompt snapshot write failure does not block runtime or manager handoff", async () => {
   const root = await directory("agentforge-prompt-failure-");

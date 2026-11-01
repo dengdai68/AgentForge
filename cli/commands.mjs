@@ -6,7 +6,7 @@ const selection = object({
   mcpIds: strings('独立 MCP 版本 ID；从 mcps list 查询，可多个，必须兼容所选 Runtime。仅加载员工所选服务和平台历史工具，不继承全局 MCP 或 Codex Apps；Runtime 基础文件/Shell 工具仍可用。')
 }, ['pluginIds', 'mcpIds']);
 const runtime = object({
-  profileId: str('具名 Runtime 配置 ID，先 runtimes list。新建省略时选择现有Claude默认连接，没有连接须先在设置创建；员工不拥有连接参数。'),
+  profileId: str('固定 Runtime 配置 ID，先 runtimes list；省略默认 Claude Code。停用项不可新绑定，员工不拥有连接参数。'),
   extensionSelection: selection
 });
 const agent = object({
@@ -35,13 +35,11 @@ const node = object({
   artifactPaths: {type:'array',items:{type:'string',pattern:/^(?!\/)(?!.*\\)(?!.*\/\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*(?:^|\/)(?:\.git|\.agentforge|\.agentforge-workspace\.json)(?:\/|$))[^\0]+$/.source},description:'建议交付位置：工作目录内的规范相对文件或目录路径，如 artifacts/video/、reports/ 或 summary.md；缺省为空，由职责交付要求决定。不限定 docs，不是文件操作或接纳白名单，不能包含 .git/.agentforge 内部目录。'}
 }, ['id', 'title', 'staffingGuidance']);
 const workflow = object({ name: str('唯一工作流名称。'), description: str('适用目标和边界。'), nodes: { type: 'array', minItems: 1, items: node, description: '完整职责图；update 也是完整定义替换，先 get 再编辑。' } }, ['name', 'nodes']);
-const connection = object({
-  name: { ...str('唯一配置名称，最多120字符。'), maxLength: 120 },
-  provider: { type: 'string', enum: ['claude-code', 'codex'], description: '默认 claude-code；创建后不可更改。认证沿用本机 CLI。' },
-  model: str('模型名；空字符串使用 CLI 默认。建议取自 runtimes models PROVIDER 的真实列表，也接受手工输入。'), executable: { type: ['string', 'null'], description: 'CLI 绝对路径或可执行名，不附参数；空值使用服务 PATH。' },
-  profile: str('仅 Codex：本机 config.toml 的 profile 名称。'),
-  effort: { type: 'string', enum: ['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'], description: '思考等级；空字符串使用 CLI 默认。Claude Code 支持 low–max，Codex 另有 ultra；逐模型可用档位见 runtimes models PROVIDER，模型不支持的档位在调用时由 CLI 回退或拒绝。' }
-}, ['name']);
+const connection = { ...object({
+  enabled: { type: 'boolean', description: 'Runtime 可用开关；停用阻止新调用，不终止已开始的调用或移除员工绑定。' },
+  model: str('模型名；空字符串使用 CLI 默认，可从 runtimes models PROVIDER 查询或手工输入。'),
+  effort: { type: 'string', enum: ['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'], description: '思考等级；空字符串使用 CLI 默认。Claude Code 不支持 ultra；具体模型档位由真实目录决定。' }
+}), minProperties: 1 };
 const exampleAgent = { name: '内容编辑', kind: 'business', description: '中文知识文章编辑与结构化改写', systemPrompt: '只根据提供的事实和可核验材料交付；事实不足时向项目经理澄清。', roleId: null, capabilities: ['中文编辑', '事实核查'], runtime: { profileId: '<runtimes-list返回的ID>', extensionSelection: { pluginIds: [], mcpIds: [] } } };
 const role = object({
   name: { ...str('角色名称，必填，最多 80 字符；不要求唯一，引用以 ID 为准。'), maxLength: 80 },
@@ -55,8 +53,8 @@ export const resources = {
   tasks: { description: '创建和启动任务，查询进度、协作、待答澄清及交付；人类在界面最终确认。', path: '/api/tasks', key: 'tasks', operations: ['list', 'get', 'create', 'start', 'terminate', 'delete', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts'], schema: task, example: taskExample,
     disclosure: 'get 只展示任务自身字段及团队/工作流/经理的 ID、名称；相应配置用对应 get 命令查询。list 为摘要，create/start/message/reply 为回执，progress 只引用成员和待答问题；正文按需查 questions/collaboration/artifacts。文本与 JSON 使用同一投影，不返回内部冻结快照。',
     operationInputs: { message: { schema: message, example: { content: '补充资料：本次内容面向企业内部同事。', recipientAgentId: '<progress返回的成员ID>' } }, reply: { schema: reply, example: { replyToMessageId: '<questions返回的问题ID>', content: '采用中文，面向内部知识团队。' } } },
-    notes: ['terminate TASK_ID --yes 终止指定任务的最新执行（可用 --run 选择同任务执行），保留历史；delete TASK_ID --yes 永久删除任务、运行记录和本地交付快照。活跃任务先 terminate，再 delete；删除不会代替终止。', 'create 只创建待启动任务，不调用模型；start ID 才启动真实执行，可能消耗已配置模型额度。', 'progress ID 读取权威状态、重心、成员、待答问题、风险和交付；无虚构百分比。失败投递展示类别、尝试次数、原因和下次重试时间；仅明确临时错误最多尝试三次；确定性或未知错误停止自动重试，原始错误脱敏保留，修复后在客户端人工恢复。', 'collaboration ID 最新在前，每页20项；questions ID 仅未答人类问题；artifacts ID 只列已接纳交付信息。', 'message ID 是普通指令，只入队；人类澄清未答时仍阻塞。', 'reply ID 必须精确指定未答人类问题，过期或跨执行问题拒绝；剩余问题未答仍阻塞。', 'progress 及协作读写默认最新 Run；--run 明确选择同任务历史 Run，并回显 runId。', '归档任务只读；最终完成须由人类在 客户端核对产物并确认。'] },
-  runtimes: { description: '共享 Claude Code/Codex 连接；扩展仍属于员工，冻结工作不变。', path: '/api/settings/runtime-profiles', key: 'profiles', operations: ['list', 'get', 'create', 'update', 'delete', 'test', 'models'], schema: connection, example: { name: '内容团队 Claude', provider: 'claude-code', model: '', executable: '', profile: '', effort: '' }, notes: ['update 完整连接字段替换，先 get；Provider 不可变。', 'delete 无当前员工引用的连接，需要 --yes；默认名称不构成保护，不删除CLI凭据或改写冻结历史。', 'test ID --yes 会实际调用模型，最长约90秒且可能消耗额度，不是业务交付。', 'models PROVIDER [--executable PATH] 查询 Provider 当前可用模型与逐模型思考档位；来源真实——Codex 用本机 codex debug models 目录，Claude Code 无离线列表命令，用内置别名加 settings.json/环境变量中的模型配置（绝不读取凭据键）；加载失败或空列表如实返回，不编造。', 'model 建议取自 models 查询结果，也接受手工输入并原样回读；模型与 effort 是否被账号/模型实际接受，以 test 和真实调用为准。'] },
+    notes: ['terminate TASK_ID --yes 终止指定任务的最新执行（可用 --run 选择同任务执行），保留历史；delete TASK_ID --yes 永久删除任务、运行记录和本地交付快照。活跃任务先 terminate，再 delete；删除不会代替终止。', 'create 只创建待启动任务，不调用模型；start ID 才启动真实执行，可能消耗已配置模型额度。', 'progress ID 读取权威状态、重心、成员、待答问题、风险和交付；无虚构百分比。失败投递展示类别、尝试次数、原因和下次重试时间；仅明确临时错误最多尝试三次；确定性或未知错误停止自动重试，原始错误脱敏保留，修复后在客户端人工恢复。', 'collaboration ID 展示全部任务消息、实际派工与协作状态，最新在前，每页20项；收件人表示处理对象，不划分公开/私密。消息与实际投递按 sourceMessageId、唯一的定向指令或已存投递/Trace 引用关联，正文只显示一次；未关联投递独立注明，不按正文或时间推测。记录 timestamp 是消息/事件发生时间；deliveries 是关联投递的当前状态（currentStatus、updatedAt、attempts），history 保留各次 Trace 的 started/ended 时间、失败与重试事件。经理 scope 为全流程协调，workflowNodeId 仅保留内部入口引用。已知员工交接 JSON 信封从 rawResponse 提取已记录的报告正文，原始消息和控制台事实不变。验收说明关联经理原文，人类完成记录用 acceptanceRecordId 引用该次验收；files 最多8个ID/名称引用，fileCount 为验收时已记录文件总数，完整文件列表用 artifacts 命令查询。不自动判定未验证事项或交付质量；questions ID 仅未答人类问题；artifacts ID 只列已接纳交付信息。', 'message ID 是普通指令，只入队；人类澄清未答时仍阻塞。', 'reply ID 必须精确指定未答人类问题，过期或跨执行问题拒绝；剩余问题未答仍阻塞。', 'progress 及协作读写默认最新 Run；--run 明确选择同任务历史 Run，并回显 runId。', '归档任务只读；最终完成须由人类在 客户端核对产物并确认。'] },
+  runtimes: { description: '固定 Claude Code/Codex，各一项；开关与模型配置共享，冻结工作不变。', path: '/api/settings/runtime-profiles', key: 'profiles', operations: ['list', 'get', 'update', 'test', 'models'], schema: connection, example: { enabled: true, model: '', effort: '' }, notes: ['每种 Provider 仅一项，不能 create/delete/命名；按 ID 或 claude-code/codex 引用。', 'update 是 model/effort/enabled 非空部分更新；名称、Provider、CLI 路径和 Codex profile 不可写。停用阻止新任务、沟通和后续调用，不中断已执行调用；重新启用后按原恢复入口继续。', 'test ID --yes 会实际调用模型，最长约90秒且可能消耗额度；停用时拒绝测试。', 'models PROVIDER 查询本机真实目录（Codex 用 codex debug models），不支持 --executable；目录可见不代表账号实际可用，失败如实返回，不编造。', 'model 也接受手工输入，effort 按 Provider 和已知模型支持校验；保存影响当前员工及后续工作，已有快照不变。'] },
   agents: { description: '数字员工：连接、提示词、能力、仓库、角色绑定和插件/MCP选择。', path: '/api/agents', key: 'agents', operations: ['list', 'get', 'create', 'update', 'delete'], schema: agent, example: exampleAgent, notes: ['先 runtimes list、plugins list、mcps list 取得精确ID；需要绑定角色时先 roles list。', 'create/update 均可指定 active/inactive，默认 active；停用不改变冻结历史。', 'roleId 绑定至多一个角色：省略保持不变，显式 null 解除绑定；角色提示词与员工提示词共同进入应用系统/developer 指令，冻结任务保持创建时的角色文本。', 'update 合并提供的顶层字段及 runtime 顶层字段；显式 extensionSelection 完整替换，必须含 pluginIds/mcpIds。', '不再接受 skillIds、mcpJson 或手工路径；插件和 MCP 必须先安装再选择。', 'delete ID --yes 仅删除无真实引用的员工，不改变历史Task/Run。'] },
   roles: { description: '角色：一组数字员工可共用的纯文本系统提示词；不是员工类型、职责标签或权限规则。', path: '/api/roles', key: 'roles', operations: ['list', 'get', 'create', 'update', 'delete'], schema: role, example: { name: '事实核查员', prompt: '凡引用外部事实必须给出来源；无法核实时明确标注，不猜测。' }, notes: ['员工通过 roleId 绑定至多一个角色，也可不绑定；解绑用 agents update 显式 roleId: null。', '角色编辑只影响之后创建的任务与后续沟通投递；已创建 Task/Run 的冻结快照保持原提示词，历史仍可核验。', '角色变化不重建员工原生会话，下次调用生效；不承诺旧指令从原生历史中消除。', 'update ID --file role.json 为部分更新，至少提供 name 或 prompt 一项。', 'delete ID --yes 删除未被任何员工（含停用）绑定的角色；仍有绑定时服务拒绝并列出员工，须先解除绑定。'] },
   teams: { description: '团队人员池及唯一经理；自动包含本机人类，不是执行权限系统。', path: '/api/teams', key: 'teams', operations: ['list', 'get', 'create', 'update', 'delete'], schema: team, example: { name: '企业知识内容组', mission: '将可信内部资料整理为可核验内容', managerAgentId: '<kind=manager的员工ID>', memberAgentIds: ['<内容编辑员工ID>', '<独立审校员工ID>'] }, notes: ['至少一名可用业务成员和一位可用经理；新任务冻结当时成员。', 'update 未提交的字段保持原值；create 不接受 status。', 'delete ID --yes 删除未被使用的团队；存在真实引用时服务拒绝，不删除历史Task/Run或自动调整其他配置。'] },
@@ -85,10 +83,10 @@ export const guide = {
   sourceEntry: 'node cli/main.mjs ... 或 npm --silent run cli -- ...；普通 npm run 会打印脚本标题，AI解析JSON时使用静默入口。',
   purpose: '供人类和受信任 AI 配置团队并操作任务；先读分组 help/schema，用返回 ID 写入并重新读取验证。配置成功不等于模型、Skill/MCP 已执行或任务已完成。',
   transport: 'CLI 专属于客户端；源码和安装版均通过私有连接文件发现运行中的客户端，校验实例 ID 后才发送凭据。不连接 Web、不自动启动或切换服务；help/schema 离线可用。',
-  sequence: ['help / schema', '操作者 auth login --username 用户名（终端隐藏输入密码）；脚本显式 --password-stdin', 'runtimes list', 'runtimes models claude-code|codex（查询真实可用模型与思考档位）', 'plugins import --file source.json；plugins get PLUGIN_ID', 'mcps create --file mcp.json', 'roles create/update --file role.json（可选：共用提示词角色，供员工 roleId 绑定）', 'agents create/update --file employee.json', 'teams create/update --file team.json', 'workflows create/update --file workflow.json', '分别 get ID 回读核验；需要时经用户授权 runtimes test ID --yes'],
+  sequence: ['help / schema', 'auth status（默认复用客户端登录；未登录时才需 auth login）', 'runtimes list', 'runtimes models claude-code|codex（查询真实可用模型与思考档位）', 'plugins import --file source.json；plugins get PLUGIN_ID', 'mcps create --file mcp.json', 'roles create/update --file role.json（可选：共用提示词角色，供员工 roleId 绑定）', 'agents create/update --file employee.json', 'teams create/update --file team.json', 'workflows create/update --file workflow.json', '分别 get ID 回读核验；需要时经用户授权 runtimes test ID --yes'],
   syntax: 'agentforge [--json] <group> <operation> [ID] [--file path|-] [--yes] [--page 1|--all] [--search text] [--session-file /absolute/path]',
   help: ['help', 'agents', 'agents create --help', 'schema --json', 'schema workflows'],
-  auth: { login: 'auth login --username 用户名：回车后提示输入密码，隐藏输入；Ctrl+C/EOF 取消。脚本/AI通过显式 --password-stdin 管道输入；不接受 --password，不读取浏览器会话，复用目标实例的管理员认证。', status: 'auth status：验证本CLI会话；不输出cookie。', logout: 'auth logout：撤销本CLI会话，不停止任务/退出其他客户端。', storage: '默认 ~/.agentforge/cli-session.json；0600/目录0700，新登录会话默认不过期，主动退出或撤销后失效；可用--session-file隔离。切勿把会话交给不可信Agent。' },
+  auth: { login: 'auth login --username 用户名：回车后提示输入密码，隐藏输入；Ctrl+C/EOF 取消。脚本/AI通过显式 --password-stdin 管道输入；不接受 --password，不读取浏览器会话，复用目标实例的管理员认证。', status: 'auth status：验证客户端共享授权或独立 CLI 会话；不输出 cookie。', logout: 'auth logout：只撤销独立 CLI 会话；共享授权请在客户端退出登录，不停止任务。', storage: '默认优先使用客户端通过正式认证接口发布的私有委托授权，客户端退出即失效；不读取浏览器文件。独立登录保存在 ~/.agentforge/cli-session.json；0600/目录0700，新登录会话默认不过期，主动退出或撤销后失效；可用--session-file隔离。切勿把会话交给不可信Agent。' },
   input: 'create/update/import/message/reply 仅用--file JSON文件或--file - stdin对象；最多1MiB；不接受内联秘密。list默认每页20项，--all显式全部，--search仅过滤名称/说明。',
   readBeforeWrite: 'get含只读id/system/color/createdAt/employeeCount等元信息，不要原样回写整个读模型；按schema.properties构造输入。员工runtime只返回profileId/extensionSelection，不回写派生执行路径或manifest。',
   flags: [
@@ -98,8 +96,7 @@ export const guide = {
     ['--yes', 'delete/test 的明确确认；不会自动获得外部操作权限。Runtime 测试真实调用模型且可能消耗额度。'],
     ['--page N | --all', '仅 list：默认每页 20 项，N 为正整数；--all 返回所有匹配项，不可与 --page 混用。'],
     ['--search TEXT', '仅 list：按名称/说明不区分大小写包含匹配（角色另含提示词）；与分页组合，不改变服务端数据。'],
-    ['--session-file PATH', '本用户专用的会话文件绝对路径，默认 ~/.agentforge/cli-session.json；目录0700/文件0600，不要共享或提交。'],
-    ['--executable PATH', '仅 runtimes models：按该 CLI 绝对路径或可执行名查询模型目录；留空使用服务 PATH。'],
+    ['--session-file PATH', '显式指定时只用独立 CLI 会话，不复用客户端；默认独立会话 ~/.agentforge/cli-session.json；目录0700/文件0600，不要共享或提交。'],
     ['--endpoint-file PATH', '客户端开发/隔离测试：私有连接文件绝对路径，默认 ~/.agentforge/desktop/desktop-endpoint.json；通常无需指定。不会从文件读取会话或凭据。'],
     ['--username NAME', '仅 auth login：AgentForge管理员用户名；终端回车后隐藏输入密码（10–128字符），不是Claude/Codex登录。'],
     ['--password-stdin', '仅 auth login 的脚本/AI模式：从非TTY标准输入读取一行密码；交互终端不需要此参数，不支持 --password。']
@@ -114,7 +111,7 @@ export function documentation(group, operation) {
   if (group === 'auth' && (!operation || ['login', 'status', 'logout'].includes(operation))) return { group, operation, ...guide.auth, output: guide.output, exitCodes: guide.exitCodes, safety: guide.limits };
   const resource = resources[group];
   if (!Object.hasOwn(resources, group) || (operation && !resource.operations.includes(operation))) throw new Error('usage');
-  const partial = operation === 'update' && ['agents', 'teams', 'roles'].includes(group);
+  const partial = operation === 'update' && ['agents', 'teams', 'roles', 'runtimes'].includes(group);
   const input = resource.operationInputs?.[operation] || resource;
   const schema = { ...input.schema, ...(partial ? { required: [] } : {}), ...(operation === 'create' && group === 'teams' ? { properties: Object.fromEntries(Object.entries(resource.schema.properties).filter(([key]) => key !== 'status')) } : {}) };
   return { group, ...(operation ? { operation } : {}), ...resource, schema, example: input.example, inputMode: partial ? `partial patch（仅提交的字段更新${group === 'agents' ? '；runtime仅顶层合并' : ''}）` : input.inputMode || '完整对象；示例中的占位ID必须替换', readBeforeWrite: guide.readBeforeWrite, output: guide.output, safety: guide.limits };

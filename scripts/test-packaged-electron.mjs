@@ -89,7 +89,7 @@ assert.doesNotMatch(terminalHelp.stdout, /典型交付流程|核心概念|JSON �
 console.log('PASS bundled AI CLI offline schema without a global Node/PATH installation');
 // Signing a malformed archive does not prove its entries match the frozen
 // source. Read critical resources with the bundled Node/ASAR adapter first.
-const resourcePaths = ['LICENSE', 'NOTICE', 'web/icons/application.png', 'web/login.html', 'web/login.js', 'web/settings.mjs', 'apps/electron/main.mjs', 'server/index.mjs', 'cli/main.mjs'];
+const resourcePaths = ['LICENSE', 'NOTICE', 'web/icons/application.png', 'web/icons/application-ui.png', 'web/icons/application-dock.png', 'web/icons/trayTemplate.png', 'web/icons/trayTemplate@2x.png', 'web/login.html', 'web/login.js', 'web/settings.mjs', 'apps/electron/main.mjs', 'server/index.mjs', 'cli/main.mjs'];
 const resourceProof = await execute(executable, ['-e', `const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');console.log(JSON.stringify(${JSON.stringify(resourcePaths)}.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(path.join(${JSON.stringify(join(appBundle, 'Contents/Resources/app.asar'))},file))).digest('hex')])));`], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30000 });
 for (const [file, hash] of JSON.parse(resourceProof.stdout)) assert.equal(hash, createHash('sha256').update(await readFile(resolve(file))).digest('hex'), `packaged resource differs from frozen source: ${file}`);
 console.log('PASS packaged application resources match the frozen source');
@@ -229,7 +229,7 @@ async function waitFor(label, check, timeout = 90000) {
 
 async function installFixtureProvider() {
   const script = join(evidenceRoot, "provider.mjs");
-  const launcher = join(shellBin, "agentforge-shell-provider.mjs");
+  const launcher = join(shellBin, "claude");
   await writeFile(script, `
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -267,7 +267,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(result) }));
   await symlink(process.execPath, join(shellBin, "node"));
   await writeFile(launcher, `#!/usr/bin/env node\nimport {writeFileSync} from 'node:fs';\nif (!process.env.PATH.split(':').includes(${JSON.stringify(shellBin)})) throw new Error('shell-only CLI PATH missing');\ntry { await import(${JSON.stringify(pathToFileURL(script).href)}); } catch(error) { console.error(error); process.exitCode = 1; }\nwriteFileSync(${JSON.stringify(join(evidenceRoot, "fixture-provider.exit"))}, String(process.exitCode || 0));\n`);
   await chmod(launcher, 0o755);
-  return 'agentforge-shell-provider.mjs';
+  return 'claude';
 }
 
 async function runPackagedTask(page) {
@@ -280,7 +280,7 @@ async function runPackagedTask(page) {
   await page.getByText("已保存，仅新任务使用此目录。", { exact: true }).waitFor();
   await page.screenshot({ path: join(evidenceRoot, "packaged-workspace-settings.png"), animations: "disabled" });
   const fixture = await installFixtureProvider();
-  const connection = await api(page, '/api/settings/runtime-profiles', {method:'POST', body:{name:'打包执行夹具连接',provider:'claude-code',executable:fixture}});
+  const connection = (await api(page,'/api/settings/runtime-profiles')).profiles.find(item=>item.provider==='claude-code');
   const worker = await api(page, "/api/agents", { method: "POST", body: { name: "打包验证员工", capabilities: ["本地文件交付"], kind: "business", runtime: { profileId: connection.id } } });
   const manager = await api(page, "/api/agents", { method: "POST", body: { name: "打包任务经理", kind: "manager", runtime: { profileId: connection.id } } });
   const team = await api(page, "/api/teams", { method: "POST", body: { name: "打包 Beta 验证团队", memberAgentIds: [worker.agent.id], managerAgentId: manager.agent.id } });
@@ -296,10 +296,11 @@ async function runPackagedTask(page) {
   await form.waitFor();
   await form.locator('[name="title"]').fill(title);
   await form.locator('[name="objective"]').fill("验证已打包客户端能真实编排一个本地 Agent 交付、保留 Artifact，并由人类确认完成。");
+  await form.locator('.task-acceptance summary').click();
   await form.locator('[name="acceptanceCriteria"]').fill("生成可读取的 docs/packaged/report.md\n项目经理根据节点交接提交人类验收");
   await form.locator('[name="workflowTemplateId"]').selectOption(workflow.workflowTemplate.id);
   await form.locator('[name="teamId"]').selectOption(team.team.id);
-  await form.getByText("由项目经理选择执行成员", { exact: true }).waitFor();
+  assert.equal(await form.locator("#node-assignment-panel").count(), 0);
   assert.equal(await form.locator('[name^="nodeAssignment_"]').count(), 0);
   await form.getByRole("button", { name: "创建并开始", exact: true }).click();
   await form.waitFor({ state: "detached" });
@@ -315,7 +316,11 @@ async function runPackagedTask(page) {
   await activeRole.waitFor({timeout:20000});
   await activeRole.click();
   assert.notEqual(await activeRole.evaluate(el => getComputedStyle(el).backgroundColor), await page.locator('[data-execution-state="idle"]').first().evaluate(el => getComputedStyle(el).backgroundColor));
-  assert.equal(await activeRole.evaluate(el=>getComputedStyle(el).backgroundColor), 'rgb(238, 245, 255)', 'selected running role retains the semantic blue surface');
+  const semanticSurface = await activeRole.evaluate(el => {
+    const reference=document.createElement('i');reference.style.backgroundColor='var(--accent-soft)';el.append(reference);
+    const color=getComputedStyle(reference).backgroundColor;reference.remove();return color;
+  });
+  assert.equal(await activeRole.evaluate(el=>getComputedStyle(el).backgroundColor), semanticSurface, 'selected running role retains the shared semantic blue surface');
   await page.screenshot({path:join(evidenceRoot,'packaged-running-role.png')});
   const workspace = await waitFor("打包 Agent 协作、Artifact 与经理复核", async () => {
     const current = await api(page, `/api/runs/${started.run.id}/workspace`);
@@ -518,7 +523,6 @@ async function runPackagedTask(page) {
   await page.getByRole('button', { name: '返回任务列表', exact: true }).click();
   assert.equal(await search.locator('[name="name"]').inputValue(), title, 'back preserves the task search');
   await search.getByRole('button', { name: '重置', exact: true }).click();
-  await page.getByLabel(`${title}的更多操作`, { exact: true }).click();
   await page.locator(`[data-archive-task="${started.task.id}"]`).click();
   // Archiving confirms through the in-app confirmDialog (never a native dialog).
   const archiveConfirm = page.locator(".modal.confirm-dialog");
@@ -527,7 +531,6 @@ async function runPackagedTask(page) {
   await archiveConfirm.locator("[data-confirm-dialog-accept]").click();
   await page.getByText("任务已归档，交付记录已保留。", { exact: true }).waitFor();
   await page.locator('[data-task-center-page="archive"]').click();
-  await page.getByLabel(`${title}的更多操作`, { exact: true }).click();
   await page.locator(`[data-unarchive-task="${started.task.id}"]`).waitFor();
   await page.locator(`[data-unarchive-task="${started.task.id}"]`).click();
   await waitFor("Task restored from archive", async () => {
@@ -713,7 +716,7 @@ try {
   assert.equal(cliLogin.username, username);
   const cliProfiles = await packagedCli(['runtimes', 'list', '--all']);
   const humanProfiles = await packagedCli(['runtimes', 'list'], '', undefined, false);
-  assert.match(humanProfiles, /Runtime列表/); assert.match(humanProfiles, /Provider/); assert.match(humanProfiles, /模型/); assert.ok(!humanProfiles.startsWith('{'));
+  assert.match(humanProfiles, /Runtime列表/); assert.match(humanProfiles, /Runtime/); assert.match(humanProfiles, /模型/); assert.ok(!humanProfiles.startsWith('{'));
   assert.equal(cliProfiles.items.length, 2);
   for (const runtime of [{profileId:null},{profileId:cliProfiles.items[0].id,extensionSelection:null},{skillPaths:[]}]) {
     const rejected=await page.evaluate(async body=>{
@@ -729,12 +732,10 @@ try {
     const status=await page.evaluate(async body=>(await fetch('/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).status,input);
     assert.equal(status,400,'packaged HTTP rejects retired extension input');
   }
-  const unusedCodex = cliProfiles.items.find(profile => profile.provider === 'codex' && profile.employeeCount === 0);
-  assert.ok(unusedCodex);
-  await packagedCli(['runtimes', 'delete', unusedCodex.id, '--yes']);
-  assert.equal((await api(page, '/api/settings/runtime-profiles')).profiles.some(profile => profile.id === unusedCodex.id), false, 'an unused default is deletable');
-  const cliCustom = await packagedCli(['runtimes', 'create', '--file', '-'], JSON.stringify({ name: 'Packaged CLI disposable', provider: 'claude-code' }));
-  await packagedCli(['runtimes', 'delete', cliCustom.id, '--yes']);
+  assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,2);
+  await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({enabled:false}));
+  assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.find(item=>item.provider==='codex').enabled,false);
+  await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({enabled:true}));
   await packagedCli(['auth', 'logout']);
   await assert.rejects(execute(cliLauncher, ['agents', 'list', '--session-file', cliSession, '--endpoint-file', endpointFile]), error => error.code === 3 && error.stdout === '' && /AUTH_REQUIRED/.test(error.stderr) && /处理建议/.test(error.stderr));
   console.log('PASS bundled CLI real HTTP authentication, private session and Runtime create/delete without global Node');
@@ -774,32 +775,18 @@ try {
   assert.equal(fresh.agents.length, 3, 'only three editable employee examples');
   assert.ok(fresh.agents.every(employee => !('role' in employee)));
   assert.equal((await api(page, '/api/workflow-templates')).workflowTemplates.length, 1, 'only one example workflow');
-  const missingCli = await api(page, "/api/settings/runtime-profiles", { method: "POST", body: { name: "Missing CLI diagnosis fixture", provider: "claude-code", executable: join(evidenceRoot, "not-installed-cli") } });
-  const failure = await api(page, `/api/settings/runtime-profiles/${missingCli.id}/test`, { method: "POST", body: {} });
-  assert.equal(failure.ok, false);
-  const { filePath } = await api(page, "/api/settings/log-files");
-  const diagnostics = (await readFile(filePath, "utf8")).trim().split("\n").map(JSON.parse);
-  assert.ok(diagnostics.some(row => row.event === "provider.spawn_error" && row.error.code === "ENOENT"));
-  const diagnosis = diagnostics.find(row => row.event === "provider.launch_diagnostic");
-  assert.equal(diagnosis.candidates[0].exists, false);
-  assert.equal(diagnosis.workingDirectory.usable, true);
-  assert.ok(diagnosis.nextSteps.some(step => step.includes("设置 → Runtime")));
-  console.log("PASS packaged missing CLI: original ENOENT, actual PATH/cwd/candidates and actionable private-file diagnosis");
-  await page.goto(urlFor(page, '/settings/runtime'));
-  const deletable = page.locator(`[data-runtime-profile="${missingCli.id}"]`);
-  await deletable.waitFor();
-  assert.equal(await page.locator('[data-runtime-profile][open]').count(), 0);
-  assert.equal(await page.locator('[data-settings-page="runtime"]').innerText(), 'Runtime');
-  const referenced = cliProfiles.items.find(profile => profile.employeeCount > 0);
-  assert.equal(await page.locator(`[data-runtime-profile="${referenced.id}"] [data-delete-runtime]`).isDisabled(), true, 'real current-employee references prevent deletion, not built-in identity');
-  assert.equal(await page.getByText('本机执行说明与版本', { exact: true }).count(), 0);
-  await deletable.locator('summary').click(); await deletable.locator('[data-delete-runtime]').click();
-  await page.locator('[data-cancel-runtime-delete]').click();
-  assert.ok((await api(page, '/api/settings/runtime-profiles')).profiles.some(profile => profile.id === missingCli.id));
-  await deletable.locator('[data-delete-runtime]').click(); await page.locator('[data-confirm-runtime-delete]').click();
-  await deletable.waitFor({ state: 'detached' });
-  await page.screenshot({ path: join(evidenceRoot, 'packaged-runtime-collapsed.png') });
-  console.log('PASS packaged Runtime hierarchy, collapsed forms, reference rejection and unused-default/custom deletion');
+  // Fixed providers have no custom executable/deletion UI. Missing-command
+  // diagnostics are covered by Runtime tests; inspect the actual fixed inline editor.
+  await page.goto(urlFor(page,'/settings/runtime'));
+  await page.locator('.runtime-provider-row').first().waitFor();
+  assert.equal(await page.locator('.runtime-provider-row').count(),2);
+  await page.locator('.runtime-provider-row').first().locator('summary').click();
+  const runtimeDrawer=page.locator('.runtime-inline-editor');
+  await runtimeDrawer.waitFor();
+  assert.equal(await runtimeDrawer.locator('input,select').count(),2);
+  await runtimeDrawer.locator('..').locator('summary').click();
+  await page.screenshot({path:join(evidenceRoot,'packaged-runtime-fixed.png')});
+  console.log('PASS packaged fixed Runtime slots and model/effort disclosure');
   const exampleFlow = (await api(page, '/api/workflow-templates')).workflowTemplates[0];
   await api(page, `/api/workflow-templates/${exampleFlow.id}`, { method: 'DELETE', body: {} });
   for (const employee of fresh.agents) await api(page, `/api/agents/${employee.id}`, { method: 'DELETE', body: {} });
@@ -809,14 +796,14 @@ try {
   if (process.platform === "darwin") {
     await page.goto(urlFor(page, "/settings/general"));
     await page.getByText("尚未设置；首次关闭窗口时会询问，取消不会保存选择。", { exact: true }).waitFor();
-    assert.deepEqual(await page.evaluate(() => Object.keys(window.agentforgeDesktop).sort()), ["copyWorkspacePath", "getCliInstallation", "getPreferences", "installCli", "setCloseMode"]);
+    assert.deepEqual(await page.evaluate(() => Object.keys(window.agentforgeDesktop).sort()), ["checkAppUpdate", "copyWorkspacePath", "downloadAppUpdate", "getAppUpdateState", "getCliInstallation", "getPreferences", "installAppUpdate", "installCli", "onAppUpdate", "openWorkspaceDirectory", "setCloseMode"]);
     await page.locator('[data-settings-page="cli"]').click();
     await assert.rejects(page.evaluate(() => window.agentforgeDesktop.getPreferences()), /仅允许/);
     const cliHome = join(evidenceRoot, 'installed-cli-home');
     await mkdir(cliHome, { mode: 0o700 });
-    const originalHome = await desktop.evaluate(({ app }) => ({ home: app.getPath('home'), zdotdir: process.env.ZDOTDIR }));
+    const originalHome = await desktop.evaluate(({ app }) => ({ home: process.env.HOME, zdotdir: process.env.ZDOTDIR }));
     try {
-      await desktop.evaluate(({ app }, home) => { app.setPath('home', home); delete process.env.ZDOTDIR; }, cliHome);
+      await desktop.evaluate(({ app }, home) => { process.env.HOME = home; delete process.env.ZDOTDIR; }, cliHome);
       await page.locator('[data-cli-refresh]').click();
       await page.locator('[data-cli-install]:not([disabled])').waitFor();
       const cancelledWindow = desktop.waitForEvent('window');
@@ -851,16 +838,16 @@ try {
       assert.match(commandHelp.stdout, /runtime.extensionSelection.pluginIds/); assert.match(commandHelp.stdout, /JSON 输入模板/);
       const shell = { shell: installation.shell, home: cliHome };
       await packagedCli(['auth', 'login', '--username', username, '--password-stdin'], password + '\n', shell);
-      assert.match(await packagedCli(['runtimes', 'list'], '', shell, false), /Provider/);
-      const configured = await packagedCli(['runtimes', 'create', '--file', '-'], JSON.stringify({ name: 'Installed shell CLI proof', provider: 'claude-code' }), shell);
-      assert.ok((await api(page, '/api/settings/runtime-profiles')).profiles.some(item => item.id === configured.id));
-      await packagedCli(['runtimes', 'delete', configured.id, '--yes'], '', shell);
+      assert.match(await packagedCli(['runtimes', 'list'], '', shell, false), /Runtime/);
+      const configured = await packagedCli(['runtimes','get','codex'],'',shell);
+      await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({model:'',effort:''}),shell);
+      assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,2);
       await packagedCli(['auth', 'logout'], '', shell);
       await page.screenshot({ path: join(evidenceRoot, 'packaged-cli-installed.png'), animations: 'disabled' });
       console.log('PASS General styled host consent cancellation/installation and fresh-shell progressive help/login/configuration/HTTP readback/logout, fixture home only');
     } finally {
       await desktop.evaluate(({ app }, saved) => {
-        app.setPath('home', saved.home);
+        process.env.HOME = saved.home;
         if (saved.zdotdir === undefined) delete process.env.ZDOTDIR; else process.env.ZDOTDIR = saved.zdotdir;
       }, originalHome);
     }

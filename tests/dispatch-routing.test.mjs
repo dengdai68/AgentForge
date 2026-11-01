@@ -11,6 +11,31 @@ import { createSqlitePersistence } from "../server/persistence.mjs";
 import { createRunFiles } from "../server/run-files.mjs";
 import { dispatchBlocksHandoff, executeRun, requestHumanIntervention, scheduleManagerFollowup } from "../server/orchestrator.mjs";
 
+test('dispatch provenance is same-Run metadata and does not deliver or consume the source message', () => {
+  const store = createFixtureStore();
+  try {
+    const task = store.listTasks()[0], run = store.createRun(task.id);
+    store.updateRun(run.id, { status: 'running' }); store.setTaskStatus(task.id, 'running');
+    const message = store.addMessage({ runId: run.id, sender: { type: 'agent', id: run.manager.id, name: run.manager.name }, kind: 'manager_decision', content: '请分析需求' });
+    scheduleManagerFollowup(store, run.id, { id: 'source-delivery' }, { nextNodeId: 'requirements', nextAgentId: 'agent_analyst', rationale: '交给需求分析' }, message.id);
+    const delivery = store.listDispatches(run.id)[0];
+    assert.equal(delivery.sourceMessageId, message.id); assert.deepEqual(delivery.messageIds, []);
+    assert.equal(store.getRunWorkspace(run.id).messages.find(item => item.id === message.id).recipient.type, 'team');
+    assert.ok(store.memberInputMessages(delivery.id).some(item => item.id === message.id));
+    const otherTask = store.createTask({ title: "其他任务", objective: "来源隔离", teamId: task.teamId, workflowTemplateId: task.workflowTemplateId, workspacePath: task.workspacePath });
+    const other = store.createRun(otherTask.id);
+    const foreign = store.addMessage({ runId: other.id, content: '另一执行的消息' });
+    for (const sourceMessageId of [foreign.id, 'missing']) assert.throws(() => store.enqueueDispatch(run.id, { recipientAgentId: 'agent_tester', workflowNodeId: 'testing', purpose: 'node', sourceMessageId }), /来源消息不属于 Run/);
+    const human = store.submitHumanMessage(run.id, { recipientAgentId: 'agent_tester', content: '补充测试要求' });
+    assert.equal(store.listDispatches(run.id).find(item => item.messageIds.includes(human.message.id)).sourceMessageId, human.message.id);
+    const claimed = store.claimDispatch(run.id);
+    const question = store.askQuestion(claimed.id, { audience: 'agent', recipientAgentId: 'agent_engineer', question: '请核对实现边界' });
+    assert.equal(store.listDispatches(run.id).find(item => item.parentDispatchId === claimed.id).sourceMessageId, question.id);
+    store.pauseRun(run.id);
+    assert.ok(store.getRunWorkspace(run.id, { summary: true }).events.some(item => item.type === 'run.paused'));
+  } finally { store.close(); }
+});
+
 test('transient retries are bounded and consumed inputs are not replayed after a failed turn', async t => {
   const root = await mkdtemp(join(tmpdir(), 'af-retry-receipt-'));
   t.after(() => rm(root, { recursive:true, force:true }));
@@ -563,6 +588,12 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 
   const workspace = store.getRunWorkspace(run.id);
   assert.equal(workspace.run.status, "awaiting_acceptance", "manager controls the handoff to the human");
+  const workerDelivery = workspace.dispatches.find(item => item.recipientAgentId === "agent_engineer" && item.purpose === "node");
+  const decisionMessage = workspace.messages.find(item => item.id === workerDelivery.sourceMessageId);
+  assert.equal(decisionMessage.kind, "manager_decision");
+  assert.equal(decisionMessage.sender.id, run.manager.id);
+  const handoffMessage = workspace.messages.find(item => item.kind === "handoff" && item.sender.id === "agent_engineer");
+  assert.equal(workspace.dispatches.find(item => item.sourceMessageId === handoffMessage.id).recipientAgentId, run.manager.id);
   const engineerTrace = workspace.traces.find((trace) => trace.agentId === "agent_engineer" && trace.type === "node");
   assert.ok(engineerTrace, "the engineer ran a real node delivery through invokeDispatch");
   assert.equal(engineerTrace.workflowNodeId, "development", "formally dispatched node, never nodes[0]");

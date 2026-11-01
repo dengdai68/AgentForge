@@ -125,6 +125,7 @@ export function communicationCommands(state, save) {
       if (mentioned.some((key) => !roster.some((member) => member.id === key && member.status === "active"))) throw new Error("@ 成员不在当前团队或已停用");
       const recipients = thread.kind === "agent" ? [thread.targetId] : mentioned.length ? mentioned : roster.filter((member) => member.status === "active").map((member) => member.id);
       if (recipients.some((key) => !roster.some((member) => member.id === key && member.status === "active"))) throw new Error("数字员工已停用");
+      for (const agentId of recipients) this.assertRuntimeEnabled(state.agents.find(row => row.id === agentId).runtime);
       const message = { id: id("chat_message"), conversationId: key, clientRequestId, sender: { type: "human", id: "human_operator", name: "你" }, content, attachments, mentionAgentIds: mentioned, visibleToAgentIds: roster.map(member => member.id), createdAt: now(), replyToMessageId: null };
       const deliveries = recipients.map((agentId) => ({ id: id("chat_delivery"), conversationId: key, messageId: message.id, agentId, agentSnapshot: withRole(state.agents.find((row) => row.id === agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null }));
       state.communicationMessages.push(message); state.communicationDeliveries.push(...deliveries); thread.updatedAt = now(); save();

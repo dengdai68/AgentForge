@@ -22,11 +22,12 @@ function paragraph(value, columns, indent = '') {
 const groups = { tasks: '任务', agents: '数字员工', roles: '角色', teams: '团队', workflows: '工作流', runtimes: 'Runtime', plugins: '插件', mcps: 'MCP' };
 const operations = { list: '列出与搜索配置', get: '读取完整详情', create: '创建配置', update: '更新配置', delete: '删除允许删除的配置', test: '真实测试模型连接', import: '安装来源中的全部插件', models: '查询 Provider 可用模型与思考档位' };
 Object.assign(operations, {updates:'查询插件更新状态','check-updates':'立即检查Git插件更新','auto-update':'设置自动更新开关与周期'});
-const labels = { replacements: '覆盖版本', id: 'ID', name: '名称', description: '说明', kind: '类型', status: '状态', provider: 'Provider', model: '模型', executable: 'CLI 路径', profile: 'Codex profile', profileId: 'Runtime 配置 ID', runtime: '执行配置', systemPrompt: '执行与协作提示词', roleId: '绑定角色 ID', prompt: '共用系统提示词', capabilities: '能力', repository: '绑定仓库', memberAgentIds: '业务成员 ID', managerAgentId: '项目经理 ID', mission: '团队目标', nodes: '工作流节点', staffingGuidance: '人员需求', dependsOn: '前置节点', handoffFrom: '交接来源', deliverable: '交付要求', artifactPaths: '建议交付位置', extensionSelection: '扩展选择', pluginIds: '整插件版本 ID', mcpIds: 'MCP 版本 ID', username: '管理员', expiresAt: '会话到期时间', sessionFile: '私有会话文件', system: '系统配置', createdAt: '创建时间', updatedAt: '更新时间', logPath: '本机日志', testId: '连接测试 ID', unsupported: '未加载组件', plugins: '插件', skills: '技能', entries: '组件', effort: '思考等级', levels: '可选档位', models: '模型', notes: '来源说明', source: '来源', current: '当前生效', resolvedTo: '解析到模型', supportedInApi: 'API 可用', default: '默认档位' };
+const labels = { dispatchId: '投递 ID', sourceMessageId: '来源消息 ID', recipientAgentId: '接手成员 ID', workflowNodeId: '节点 ID', workflowNodeName: '节点', executionTraceId: '接手执行 Trace ID', attempts: '尝试次数', nextRetryAt: '下次重试', error: '失败原因', relatedDispatchIds: '关联投递 ID', eventType: '协作事件', senderType: '发起者类型', purpose: '投递用途', replacements: '覆盖版本', id: 'ID', name: '名称', description: '说明', kind: '类型', status: '状态', provider: 'Provider', enabled: '可用', model: '模型', executable: 'CLI 路径', profile: 'Codex profile', profileId: 'Runtime 配置 ID', runtime: '执行配置', systemPrompt: '执行与协作提示词', roleId: '绑定角色 ID', prompt: '共用系统提示词', capabilities: '能力', repository: '绑定仓库', memberAgentIds: '业务成员 ID', managerAgentId: '项目经理 ID', mission: '团队目标', nodes: '工作流节点', staffingGuidance: '人员需求', dependsOn: '前置节点', handoffFrom: '交接来源', deliverable: '交付要求', artifactPaths: '建议交付位置', extensionSelection: '扩展选择', pluginIds: '整插件版本 ID', mcpIds: 'MCP 版本 ID', username: '管理员', expiresAt: '会话到期时间', sessionFile: '私有会话文件', system: '系统配置', createdAt: '创建时间', updatedAt: '更新时间', logPath: '本机日志', testId: '连接测试 ID', unsupported: '未加载组件', plugins: '插件', skills: '技能', entries: '组件', effort: '思考等级', levels: '可选档位', models: '模型', notes: '来源说明', source: '来源', current: '当前生效', resolvedTo: '解析到模型', supportedInApi: 'API 可用', default: '默认档位' };
 Object.assign(labels, { deleted: '已删除', historyRetained: '历史文件保留' });
 Object.assign(labels, { previousId: '更新前 ID', employees: '已更新的员工引用' });
 Object.assign(labels, {enabled:'自动更新',intervalMinutes:'检查周期（分钟）',intervalMs:'检查间隔（毫秒）',running:'正在检查',lastCheckedAt:'最近检查',nextCheckAt:'下次检查',lastResult:'最近结果',checkedSources:'已检查来源',updatedPlugins:'已更新插件数',updates:'更新记录',errors:'未应用的来源',message:'说明'});
 Object.assign(labels, { compatibility:'Runtime 兼容性', supported:'支持', reasons:'不兼容原因', 'claude-code':'Claude Code', codex:'Codex', providers:'支持的 Runtime' });
+Object.assign(labels, { addressedRecipient:'原消息指向', routingNote:'实际路由说明', deliveries:'关联投递（当前状态）', history:'执行明细（实际发生时间）', scope:'处理范围', currentStatus:'当前投递状态', currentStatusCode:'当前投递状态码', sourceLink:'来源关联依据', sourceNotice:'来源说明', recipientName:'接手成员', previousError:'此前错误（原记录）', endedAt:'结束时间', statusLabel:'本次执行结果', relatedEvents:'关联状态记录', acceptanceRecordId:'对应验收记录 ID', confirmationNote:'确认说明', fileCount:'验收时已记录文件数', files:'文件引用（最多8项）', purposeCode:'投递用途代码' });
 const label = key => labels[key] ? `${labels[key]} (${key})` : text(key);
 Object.assign(labels, { team: '团队', workflow: '工作流', manager: '项目经理', workspacePath: '工作目录', title: '任务名称', objective: '用户目标', teamId: '团队 ID', workflowTemplateId: '工作流 ID', acceptanceCriteria: '验收要求', priority: '优先级', attempts: '尝试次数', lastErrorKind: '失败类别', lastError: '上次失败', nextRetryAt: '下次重试时间', taskId: '任务 ID', runId: '执行 ID', taskStatus: '任务状态', runStatus: '执行状态', currentFocus: '当前重心', pendingQuestions: '待答人类问题', pendingDispatches: '未结束投递', activeTraces: '正在执行', participants: '执行成员', openDefects: '未关闭缺陷', artifactCount: '已接纳交付数', acceptanceRequest: '经理验收交接', deliveryReview: '历史交付复核', nextAction: '下一步', content: '内容', replyToMessageId: '所回复问题 ID', recipientAgentId: '接收成员 ID', items: '记录', total: '总数', summary: '交付摘要', failure: '失败原因', timestamp: '时间', from: '发送方', to: '接收方' });
 function scalar(value, key) {
@@ -55,7 +56,7 @@ export function commandUsage(group, operation) {
   const id = ['get', 'update', 'delete', 'test'].includes(operation) ? ' ID' : operation === 'models' ? ' PROVIDER' : '';
   const file = ['create', 'update', 'import', 'auto-update'].includes(operation) ? ' --file FILE.json' : '';
   const yes = ['delete', 'test'].includes(operation) ? ' --yes' : '';
-  return `agentforge ${group} ${operation}${id}${file}${yes}${operation === 'models' ? ' [--executable PATH]' : ''}${operation === 'list' ? ' [--page N | --all] [--search TEXT]' : ''}`;
+  return `agentforge ${group} ${operation}${id}${file}${yes}${operation === 'list' ? ' [--page N | --all] [--search TEXT]' : ''}`;
 }
 function fields(schema, columns, prefix = '', nested = false) {
   return Object.entries(schema.properties || {}).flatMap(([name, field]) => {
@@ -110,7 +111,7 @@ function help(data, columns, { schema = false } = {}) {
     ...(data.group === 'auth' ? [] : [paragraph(data.description, columns)]),
     section('子命令', (data.group === 'auth' ? [
       ['login', '登录已有管理员账号'], ['status', '验证本 CLI 会话状态'], ['logout', '退出本 CLI 会话']
-    ] : data.operations.map(op => [op, data.group === 'tasks' ? ({ list: '搜索任务列表', get: '读取任务目标与要求', create: '创建待启动任务', start: '启动真实任务执行', terminate: '终止执行并保留记录', delete: '永久删除任务及本地记录', progress: '读取当前执行进度与下一步', collaboration: '查看协作消息（最新在前）', questions: '查询未答人类澄清', message: '向一位指定成员发送指令', reply: '按问题 ID 精确回复澄清', artifacts: '查询已接纳交付信息' })[op] : operations[op]])).map(([op, description]) => `  ${op.padEnd(14)} ${description}`).join('\n')),
+    ] : data.operations.map(op => [op, data.group === 'tasks' ? ({ list: '搜索任务列表', get: '读取任务目标与要求', create: '创建待启动任务', start: '启动真实任务执行', terminate: '终止执行并保留记录', delete: '永久删除任务及本地记录', progress: '读取当前执行进度与下一步', collaboration: '查看完整协作记录（消息、派工与状态）', questions: '查询未答人类澄清', message: '向一位指定成员发送指令', reply: '按问题 ID 精确回复澄清', artifacts: '查询已接纳交付信息' })[op] : operations[op]])).map(([op, description]) => `  ${op.padEnd(14)} ${description}`).join('\n')),
     `查看具体操作参数：在命令后加 --help，例如 agentforge ${data.group} ${data.group === 'auth' ? 'login' : 'list'} --help。`
   ].join('\n\n');
   if (data.group === 'auth') return [
@@ -150,13 +151,13 @@ function list(group, data, columns) {
     agents: [['类型', item => item.kind], ['状态', item => item.status], ['角色', item => item.roleId || '不绑定']],
     roles: [['提示词', item => (item.prompt || '').length > 60 ? item.prompt.slice(0, 60) + '…' : item.prompt || '—']],
     teams: [['状态', item => item.status]],
-    runtimes: [['Provider', item => item.provider], ['模型', item => item.model || 'CLI 默认'], ['思考等级', item => item.effort || 'CLI 默认']],
+    runtimes: [['可用', item => item.enabled ? '是' : '否'], ['模型', item => item.model || 'CLI 默认'], ['思考等级', item => item.effort || 'CLI 默认']],
     workflows: [['节点数', item => count(item.nodes)]],
     plugins: [['Runtime',item=>(item.providers || []).map(provider=>provider==='codex'?'Codex':'Claude Code').join(' / ') || '暂无兼容 Runtime'],['组件', item => `Skill ${item.components?.skills || 0} / Agent ${item.components?.agents || 0} / Hook ${item.components?.hooks || 0}`]],
     mcps: [['说明', item => item.description]]
   }[group];
-  const headings = ['ID', '名称', ...extra.map(([heading]) => heading)];
-  const rows = data.items.map(item => [item.id, item.name || item.title, ...extra.map(([, read]) => read(item))].map(value => text(value ?? '—').replaceAll('\n', ' ↵ ')));
+  const headings = ['ID', group === 'runtimes' ? 'Runtime' : '名称', ...extra.map(([heading]) => heading)];
+  const rows = data.items.map(item => [item.id, item.name || item.title || (item.provider === 'codex' ? 'Codex' : item.provider === 'claude-code' ? 'Claude Code' : ''), ...extra.map(([, read]) => read(item))].map(value => text(value ?? '—').replaceAll('\n', ' ↵ ')));
   const widths = headings.map((head, i) => rows.reduce((max, row) => Math.max(max, width(row[i])), width(head)));
   const body = rows.length ? widths.reduce((a, b) => a + b, 4) <= columns
     ? [headings, ...rows].map(row => row.map((cell, i) => cell + ' '.repeat(Math.max(0, widths[i] - width(cell)))).join('  ').trimEnd()).join('\n')
@@ -188,9 +189,9 @@ export function formatOutput(args, data, { columns = 100, help: isHelp = false }
     ];
     return [title, details(data, columns), section('按需查看', commands.map(command => '  ' + text(command)).join('\n'))].join('\n\n');
   }
-  const title = group === 'auth' ? { login: 'CLI 登录成功', status: 'CLI 会话有效', logout: 'CLI 已退出登录' }[operation]
+  const title = group === 'auth' ? { login: 'CLI 登录成功', status: 'CLI 会话有效', logout: 'CLI 独立会话退出结果' }[operation]
     : { get: `${groups[group]}详情`, create: `已创建${groups[group]}配置`, update: `已更新${groups[group]}配置`, delete: `已删除${groups[group]}配置`, import: '插件安装结果', test: 'Runtime 连接测试通过', models: 'Provider 模型目录' }[operation];
-  const next = group === 'auth' ? operation === 'logout' ? '仅撤销本 CLI 会话，不退出客户端、不停止任务。' : 'CLI 会话与浏览器独立；会话文件相当于本机管理员访问权限，切勿分享。下一步：agentforge runtimes list。'
+  const next = group === 'auth' ? operation === 'logout' ? '仅撤销本 CLI 会话，不退出客户端、不停止任务。' : '默认复用客户端登录，未登录时使用独立 CLI 会话；私有会话文件切勿分享。下一步：agentforge runtimes list。'
     : `下一步：agentforge ${group} list / get ID 回读；详细行为见 agentforge help ${group}。配置操作不代表 Task 已完成；连接与工具可用性须另外验证。`;
   const imported = (group === 'plugins' && operation === 'import') || (group === 'mcps' && operation === 'create');
   const receipt = imported && data.replacements ? `覆盖 ${data.replacements.length} 个已有版本；更新 ${data.employees?.length || 0} 位员工；历史配置保留。` : '';

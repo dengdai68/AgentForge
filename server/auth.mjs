@@ -48,7 +48,7 @@ export function createAuth({ databasePath, origins = [], bootstrapToken = "", no
   let bootstrapSessionToken = "", bootstrapSessionExpiresAt = 0;
   const cookie = (name, token, maxAge, origin) => `${name}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${origin.startsWith("https:") ? "; Secure" : ""}`;
   const account = () => db.prepare("SELECT * FROM administrator WHERE id=1").get();
-  const revoke = request => db.prepare("DELETE FROM sessions WHERE token_hash=?").run(digest(tokenFrom(request)));
+  const revoke = request => { const hash = digest(tokenFrom(request)); if (!cliGrants.delete(hash)) db.prepare("DELETE FROM sessions WHERE token_hash=?").run(hash); };
   const bootstrapEnabled = () => Boolean(bootstrapSecret || (bootstrapSessionToken && bootstrapSessionExpiresAt > now())) && !account();
   const bootstrapAuthorized = request => bootstrapEnabled() && bootstrapSessionExpiresAt > now() && sameToken(tokenFrom(request, bootstrapCookieName), bootstrapSessionToken);
   const bootstrapHeaderAuthorized = request => sameToken(typeof request.headers["x-agentforge-bootstrap"] === "string" ? request.headers["x-agentforge-bootstrap"] : "", bootstrapSecret);
@@ -58,10 +58,13 @@ export function createAuth({ databasePath, origins = [], bootstrapToken = "", no
     return bootstrapSessionToken;
   };
   const revokeBootstrapSession = () => { bootstrapSessionToken = ""; bootstrapSessionExpiresAt = 0; };
+  const cliGrants = new Map();
   function session(request) {
     const token = tokenFrom(request);
     if (!token) return null;
-    const row = db.prepare("SELECT expires_at FROM sessions WHERE token_hash=? AND (expires_at=0 OR expires_at>?)").get(digest(token), now());
+    const hash = digest(token), grant = cliGrants.get(hash);
+    const row = db.prepare("SELECT expires_at FROM sessions WHERE token_hash=? AND (expires_at=0 OR expires_at>?)").get(grant?.parentHash || hash, now());
+    if (grant && !row) cliGrants.delete(hash);
     return row ? { username: account()?.username, expiresAt: row.expires_at === 0 ? null : row.expires_at } : null;
   }
   function consumeAttempt(ip) {
@@ -182,6 +185,17 @@ export function createAuth({ databasePath, origins = [], bootstrapToken = "", no
         return true;
       }
       if (current.expiresAt === null) response.setHeader("Set-Cookie", cookie(sessionCookieName, tokenFrom(request), cookieLifetimeSeconds, origins.find(value => new URL(value).host === request.headers.host) || origins[0]));
+      if (path === "/api/auth/cli-session" && request.method === "POST") {
+        const parentHash = digest(tokenFrom(request));
+        if (cliGrants.has(parentHash)) { json(response, 403, { error: "客户端会话才能签发 CLI 授权" }); return true; }
+        for (const [hash, item] of cliGrants) if (!db.prepare("SELECT 1 FROM sessions WHERE token_hash=?").get(item.parentHash)) cliGrants.delete(hash);
+        let grant = [...cliGrants.values()].find(item => item.parentHash === parentHash);
+        if (!grant) {
+          grant = { parentHash, token: randomBytes(32).toString("hex") };
+          cliGrants.set(digest(grant.token), grant);
+        }
+        json(response, 200, { cookie: `${sessionCookieName}=${grant.token}`, expiresAt: current.expiresAt }); return true;
+      }
       if (path === "/api/auth/session" && request.method === "GET") { json(response, 200, current); return true; }
       return false;
     }

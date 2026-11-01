@@ -93,16 +93,17 @@ await mkdir(spacedDir, { recursive: true });
 const spacedCodex = join(spacedDir, "codex");
 await writeFile(spacedCodex, `#!/usr/bin/env node\nconsole.log('{"models":[{"slug":"spaced-model","display_name":"Spaced","description":"","visibility":"list","supported_in_api":true,"default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low","description":"x"}]}]}');\n`, { mode: 0o755 });
 const spacedCatalog = await api(`/api/settings/runtime-profiles/models?provider=codex&executable=${encodeURIComponent(spacedCodex)}`);
-if (spacedCatalog.status !== 200 || spacedCatalog.body.models?.[0]?.id !== "spaced-model") fail(`spaced/non-ASCII CLI path catalog: ${JSON.stringify(spacedCatalog.body)}`);
-console.log("PASS catalog query works for CLI paths containing spaces and non-ASCII characters");
+if(spacedCatalog.status!==400)fail('fixed Runtime must reject custom executable');
+const fixed = (await api('/api/settings/runtime-profiles')).body.profiles;
+const ccId=fixed.find(item=>item.provider==='claude-code').id, cxId=fixed.find(item=>item.provider==='codex').id;
 
 // 4. Save/readback profiles with effort; invalid effort rejected.
-const saved = await api("/api/settings/runtime-profiles", { method: "POST", body: { name: "E2E Claude effort", provider: "claude-code", model: "sonnet", executable: "", profile: "", effort: "high" } });
-if (saved.status !== 201 || saved.body.effort !== "high" || saved.body.model !== "sonnet") fail(`save: ${JSON.stringify(saved.body)}`);
-const invalid = await api("/api/settings/runtime-profiles", { method: "POST", body: { name: "E2E bad", provider: "claude-code", model: "", executable: "", profile: "", effort: "ultra" } });
+const saved = await api(`/api/settings/runtime-profiles/${ccId}`, { method: "PUT", body: { model: "sonnet", effort: "high" } });
+if (saved.status !== 200 || saved.body.effort !== "high" || saved.body.model !== "sonnet") fail(`save: ${JSON.stringify(saved.body)}`);
+const invalid = await api(`/api/settings/runtime-profiles/${ccId}`, { method: "PUT", body: { model: "", effort: "ultra" } });
 if (invalid.status !== 400 || !/思考等级/.test(invalid.body?.error || "")) fail("claude ultra must be rejected");
-const codexSaved = await api("/api/settings/runtime-profiles", { method: "POST", body: { name: "E2E Codex effort", provider: "codex", model: codexCatalog.body.models[0].id, executable: "", profile: "", effort: "ultra" } });
-if (codexSaved.status !== 201 || codexSaved.body.effort !== "ultra") fail(`codex save: ${JSON.stringify(codexSaved.body)}`);
+const codexSaved = await api(`/api/settings/runtime-profiles/${cxId}`, { method: "PUT", body: { model: codexCatalog.body.models[0].id, effort: "ultra" } });
+if (codexSaved.status !== 200 || codexSaved.body.effort !== "ultra") fail(`codex save: ${JSON.stringify(codexSaved.body)}`);
 const listed = await api("/api/settings/runtime-profiles");
 const found = listed.body.profiles.find(p => p.id === saved.body.id);
 if (!found || found.effort !== "high") fail("readback must preserve effort");
@@ -112,13 +113,13 @@ console.log("PASS save/readback with effort; invalid effort rejected");
 // it does not advertise; manual models keep unknown capability and are allowed.
 const limited = codexCatalog.body.models.find(m => m.levels.length && !m.levels.some(l => l.id === "ultra"));
 if (limited) {
-  const rejected = await api("/api/settings/runtime-profiles", { method: "POST", body: { name: "E2E unsupported effort", provider: "codex", model: limited.id, executable: "", profile: "", effort: "ultra" } });
+  const rejected = await api(`/api/settings/runtime-profiles/${cxId}`, { method: "PUT", body: { model: limited.id, effort: "ultra" } });
   if (rejected.status !== 400 || !/不支持思考等级/.test(rejected.body?.error || "")) fail(`known model must reject unadvertised effort: ${JSON.stringify(rejected.body)}`);
   console.log(`PASS known model ${limited.id} rejects unadvertised effort ultra (supports ${limited.levels.map(l => l.id).join("/")})`);
 } else console.log("NOTE every listed codex model advertises ultra; per-model rejection covered by unit tests");
-const manual = await api("/api/settings/runtime-profiles", { method: "POST", body: { name: "E2E manual model", provider: "codex", model: "manual-unknown-model", executable: "", profile: "", effort: "max" } });
-if (manual.status !== 201) fail(`manual model must stay saveable (unknown capability): ${JSON.stringify(manual.body)}`);
-await api(`/api/settings/runtime-profiles/${manual.body.id}`, { method: "DELETE", body: {} });
+const manual = await api(`/api/settings/runtime-profiles/${cxId}`, { method: "PUT", body: { model: "manual-unknown-model", effort: "max" } });
+if (manual.status !== 200) fail(`manual model must stay saveable (unknown capability): ${JSON.stringify(manual.body)}`);
+await api(`/api/settings/runtime-profiles/${cxId}`, {method:"PUT",body:{model:codexSaved.body.model,effort:codexSaved.body.effort}});
 console.log("PASS manual model with in-vocabulary effort remains saveable");
 
 // 5. Real CLI against this isolated instance via a private desktop endpoint file.

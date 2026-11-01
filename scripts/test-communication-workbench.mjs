@@ -22,15 +22,16 @@ const auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
 await auth.setAdministrator('communication-qa', password); auth.close();
 const store = createStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') });
 store.updateWorkspaceSettings({ workspaceRoot: join(root, 'work') });
-const missing = store.saveRuntimeProfile({ name: 'Controlled unavailable CLI', provider: 'claude-code', executable: join(root, 'missing-cli') });
+const missing = store.listRuntimeProfiles().find(item => item.provider === 'codex');
 const failedAgent = store.createAgent({ name: '失败诊断验收', runtime: { profileId: missing.id } });
-let profileId = missing.id;
+const profileId = store.listRuntimeProfiles().find(item => item.provider === 'claude-code').id;
+const bin = join(home,'test-bin'); await mkdir(bin);
+await writeFile(join(bin,'codex'), '#!/bin/sh\nprintf "Controlled missing CLI\\n" >&2\nexit 127\n', {mode:0o700});
 if (real) {
-  const actual = execFileSync('/usr/bin/which', ['claude'], { encoding: 'utf8' }).trim(), wrapper = join(root, 'real-claude');
-  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
-  await writeFile(wrapper, '#!/bin/sh\nHOME=' + quote(homedir()) + ' exec ' + quote(actual) + ' "$@"\n', { mode: 0o700 });
-  profileId = store.saveRuntimeProfile({ name: 'Real read-only Claude acceptance', provider: 'claude-code', executable: wrapper }).id;
-}
+  const actual = execFileSync('/usr/bin/which',['claude'],{encoding:'utf8'}).trim();
+  await writeFile(join(bin,'claude'), '#!/bin/sh\nHOME='+JSON.stringify(homedir())+' exec '+JSON.stringify(actual)+' "$@"\n',{mode:0o700});
+} else await writeFile(join(bin,'claude'),'#!/bin/sh\nprintf "Controlled missing CLI\\n" >&2\nexit 127\n',{mode:0o700});
+for(const name of ['.zprofile','.zshrc'])await writeFile(join(home,name),'export PATH='+JSON.stringify(bin)+':"$PATH"\n');
 const employee = store.createAgent({ name: '知识材料核对', description: '只根据真实文件核对企业内部材料', systemPrompt: '需要文件证据时实际读取附件。明确区分失败与已核对事实，不猜测附件内容、不联网、不修改业务文件。', runtime: { profileId } });
 const chat = store.openCommunication({ kind: 'agent', targetId: employee.id });
 const other = store.openCommunication({ kind: 'agent', targetId: failedAgent.id });

@@ -1,30 +1,32 @@
-/* Electron workbench. Independent presentation; shared DOM and commands remain authoritative. */
+/* Electron workbench. Shared DOM/brand tokens; density belongs to the host.
+   Native file dialogs load this sheet alone, so action/focus keep brand fallbacks. */
 html:root, html:root[data-theme] {
   --desktop-density:compact;
   --desktop-presentation:workbench;
   --desktop-sidebar-width:216px;
-  --desktop-action:#202124;
-  --desktop-sidebar-bg:#f7f7f8;
-  --desktop-hover:#f4f4f5;
-  --desktop-focus:#2563eb;
+  --desktop-action:var(--accent,#2558d9);
+  --desktop-action-hover:var(--accent-hover,#1e46b7);
+  --desktop-sidebar-bg:#f0f4fd;
+  --desktop-hover:var(--surface-soft);
+  --desktop-focus:var(--accent,#2558d9);
   --desktop-radius:5px;
-  --bg:#fafafa; --paper:#ffffff; --ink:#202124; --muted:#64666e;
-  --line:#e5e5e8; --dark:#18191c;
+  --bg:#f7f9ff; --paper:#ffffff; --ink:#17233d; --muted:#5f6e87;
+  --line:#dfe5f1; --dark:#0c1735;
   --lime:var(--desktop-action); --lime-dark:var(--desktop-action);
-  --surface-soft:#f7f7f8; --selection-bg:#ebebee;
+  --surface-soft:#f2f5fc; --selection-bg:#e8efff;
   --shadow:none; --shadow-hover:none;
   --danger:#c53838; --danger-ink:#a52a2a; --danger-soft:#fff1f0;
 }
 html:root[data-theme="warm"] {
-  --bg:#faf9f7; --desktop-sidebar-bg:#f6f5f3;
-  --desktop-hover:#f3f2ef; --surface-soft:#f6f5f3; --selection-bg:#ebe9e5;
+  --bg:#faf9fc; --desktop-sidebar-bg:#f3f2fa;
+  --desktop-hover:#f0eff8; --surface-soft:#f4f3fa; --selection-bg:#eaeaff;
 }
 
 /* The html anchor beats Web theme selectors regardless of injected sheet order. */
 html:root, html:root[data-theme] {
 body { background:var(--paper); font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 button,input,textarea,select { font-family:inherit; letter-spacing:normal; }
-::selection { background:#dbeafe; color:var(--ink); }
+::selection { background:var(--selection-bg); color:var(--ink); }
 :focus-visible { outline:2px solid var(--desktop-focus); outline-offset:2px; border-radius:4px; }
 .nav-item[data-desktop-restored-focus]:focus-visible { outline:none; }
 ::-webkit-scrollbar-thumb { background:#c7c7cc; border:2px solid var(--paper); border-radius:6px; }
@@ -39,7 +41,7 @@ button,input,textarea,select { font-family:inherit; letter-spacing:normal; }
 .nav-label-spaced { margin-top:18px; }
 .nav-item { min-height:32px; gap:9px; padding:6px 10px; border-radius:5px; color:var(--muted); font-size:13px; transition:none; }
 .nav-item:hover { color:var(--ink); background:var(--desktop-hover); }
-.nav-item.active { color:var(--ink); background:var(--selection-bg); box-shadow:none; font-weight:500; }
+.nav-item.active { color:var(--accent); background:var(--selection-bg); box-shadow:none; font-weight:500; }
 .nav-count,.nav-item.active .nav-count { padding:0 3px; background:transparent; color:var(--muted); font:11px ui-monospace,SFMono-Regular,monospace; }
 .nav-hint { margin-left:2px; color:#946200; font:10px -apple-system,BlinkMacSystemFont,sans-serif; }
 .sidebar-spacer { min-height:12px; }
@@ -53,7 +55,7 @@ button,input,textarea,select { font-family:inherit; letter-spacing:normal; }
 /* Consistent outline icons replace decorative Unicode, without changing accessible names. */
 .nav-icon { flex:none; width:16px; height:16px; font-size:0; color:var(--muted); }
 .nav-icon > svg { display:none; }
-.nav-item.active .nav-icon { color:var(--ink); }
+.nav-item.active .nav-icon { color:var(--accent); }
 [data-view="marketplace"] { --desktop-nav-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-6 6v4M6 8v3a6 6 0 0 0 6 6'/%3E%3C/svg%3E"); }
 [data-view="mcp-marketplace"] { --desktop-nav-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'%3E%3Ccircle cx='6' cy='6' r='3'/%3E%3Ccircle cx='18' cy='6' r='3'/%3E%3Ccircle cx='12' cy='18' r='3'/%3E%3Cpath d='M9 6h6M7.5 9l3 6M16.5 9l-3 6'/%3E%3C/svg%3E"); }
 .nav-icon::before { content:""; width:16px; height:16px; background:currentColor; mask:var(--desktop-nav-icon) center/16px 16px no-repeat; }
@@ -75,8 +77,8 @@ button,input,textarea,select { font-family:inherit; letter-spacing:normal; }
 .breadcrumb strong { color:var(--ink); font-weight:500; }
 .topbar-actions { gap:10px; }
 .live-indicator { color:var(--muted); font:11px -apple-system,BlinkMacSystemFont,sans-serif; }
-.live-indicator span { background:#27834a; box-shadow:none; }
-.live-indicator.off span { background:#a1a1aa; }
+.live-indicator .live-dot { background:#27834a; box-shadow:none; }
+.live-indicator.off .live-dot { background:#a1a1aa; }
 #notify-button { display:none; } /* Existing placeholder has no implemented action. */
 .view { padding:14px 18px 20px; animation:none; }
 .page-heading { align-items:center; gap:12px; margin-bottom:12px; min-height:30px; }
@@ -93,7 +95,7 @@ html #tasks-heading h2 { position:absolute; width:1px; height:1px; overflow:hidd
 .heading-actions { gap:6px; }
 .primary-button,.ghost-button,.danger-button,.small-button { min-height:30px; padding:5px 10px; border:1px solid var(--line); border-radius:5px; box-shadow:none; font-size:12px; font-weight:500; }
 .primary-button,.small-button.primary { background:var(--desktop-action); color:#fff; border-color:var(--desktop-action); }
-.primary-button:hover,.small-button.primary:hover { background:#36373b; color:#fff; border-color:#36373b; transform:none; box-shadow:none; }
+.primary-button:hover,.small-button.primary:hover { background:var(--desktop-action-hover); color:#fff; border-color:var(--desktop-action-hover); transform:none; box-shadow:none; }
 .ghost-button,.small-button { background:var(--paper); color:var(--ink); }
 .ghost-button:hover,.small-button:hover { background:var(--desktop-hover); color:var(--ink); border-color:#c8c8ce; }
 .danger-button,.small-button.danger { color:var(--danger-ink); background:var(--paper); border-color:var(--line); }
@@ -251,11 +253,11 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 #workspace-view { padding:0; }
 #run-workspace { border:0; border-radius:0; box-shadow:none; }
 #run-workspace .workspace-summary { padding:12px 18px; border-color:var(--line); }
-#run-workspace .workspace-summary h3 { margin:4px 0; font-size:18px; }
+#run-workspace .workspace-summary h3 { margin:4px 0; font-size:17px; }
 #run-workspace .workspace-summary-meta { padding-top:0; }
 #run-workspace .workspace-mode-tabs { padding:0 18px; gap:16px; border-bottom:1px solid var(--line); }
 #run-workspace .ws-tab { min-height:36px; margin:0; padding:8px 0; border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:var(--muted); font-size:12px; }
-#run-workspace .ws-tab.active { background:transparent; border-bottom-color:var(--ink); color:var(--ink); }
+#run-workspace .ws-tab.active { background:transparent; border-bottom-color:var(--accent); color:var(--accent); }
 #run-workspace .workspace-details .workspace-context { padding:0; }
 #run-workspace .collaboration-panel,#run-workspace .working-directory-panel { padding:0 18px 14px; }
 #run-workspace .workspace-grid { grid-template-columns:220px minmax(0,1fr); }
@@ -333,7 +335,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 .settings-nav button { min-height:32px; padding:7px 10px; border-radius:5px; font-size:12px; }
 .settings-section { padding:0 0 0 20px; border:0; border-left:1px solid var(--line); border-radius:0; box-shadow:none; }
 .settings-section h3 { margin:0 0 8px; font-size:15px; letter-spacing:0; }
-.settings-section details[data-runtime-profile] > summary h4 { font-size:13px; font-weight:500; letter-spacing:0; }
+.settings-section h4 { font-size:13px; font-weight:600; letter-spacing:0; }
 .settings-radio-group { gap:6px; }
 .settings-radio-group legend { margin-bottom:8px; font-size:12px; }
 .settings-radio-option { gap:9px; padding:8px 10px; border-radius:5px; }
@@ -362,6 +364,27 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 .settings-subheading { margin-top:18px; }
 .settings-note,.repository-access-boundary { margin:14px 0; padding:10px 12px; border:1px solid var(--line); border-radius:5px; background:var(--surface-soft); box-shadow:none; }
 .repository-access-card { padding:14px; border:1px solid var(--line); border-radius:6px; background:var(--paper); box-shadow:none; }
+/* Runtime and repository providers are secondary groups within one section. */
+[data-settings-panel="runtime"] > .settings-description,
+[data-settings-panel="repositories"] > .settings-description { margin-bottom:8px; }
+[data-settings-panel="runtime"] .repository-access-grid,
+[data-settings-panel="repositories"] .repository-access-grid { gap:0; }
+.runtime-provider-row { padding:10px 0; }
+.runtime-provider-actions { top:16px; }
+.runtime-config h4 { margin-bottom:3px; }
+.runtime-inline-editor { margin-top:12px; }
+.runtime-inline-editor .form-grid { grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:12px; }
+.runtime-inline-editor .form-field { margin-bottom:0; }
+.runtime-inline-editor .settings-description { margin-bottom:10px; }
+.runtime-inline-editor .form-actions { padding-top:8px; }
+[data-settings-panel="repositories"] .repository-access-boundary { margin:10px 0; padding:8px 10px; }
+[data-settings-panel="repositories"] .repository-access-card { padding:12px 0; border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; }
+[data-settings-panel="repositories"] .repository-access-card-head p { margin-top:3px; }
+[data-settings-panel="repositories"] .repository-access-card .field-hint { margin:8px 0; }
+[data-settings-panel="repositories"] .repository-access-card .form-actions { margin-top:8px; }
+.settings-radio-option { align-items:center; }
+.settings-radio-option input { margin:0; }
+.repository-token-row input,.repository-token-row button { box-sizing:border-box; height:36px; min-height:36px; }
 .runtime-details { margin:14px 0; }
 .runtime-details > div { padding:10px 0; border-color:var(--line); }
 .toast { border-radius:6px; }
@@ -414,6 +437,8 @@ body:has(.login-card) { background:var(--bg); }
   .sidebar .brand strong,.sidebar .brand small,.sidebar .workspace-card,.sidebar .nav-label,.sidebar .nav-text,.sidebar .nav-count,.sidebar .nav-hint,.sidebar .runtime-card,.sidebar .user-card > div:not(.user-avatar) { display:none; }
   .brand { padding:0; justify-content:center; }
   .user-card { flex-direction:column; align-items:center; padding-inline:0; gap:6px; }
+  .user-card .live-indicator { margin-left:0; }
+  .live-label { display:none; }
   .user-more { width:100%; padding:3px 0; font-size:10px; text-align:center; }
   .nav-item { justify-content:center; padding:7px; }
   .main-content { width:calc(100% - 64px); padding:0; }
@@ -454,7 +479,9 @@ body:has(.login-card) { background:var(--bg); }
 }
 }
 /* Task inventory and file readers share the workbench's restrained hierarchy. */
-html #tasks-view .task-search-form { gap:8px; padding:4px 0 14px; }
+html #tasks-view .task-search-form { gap:8px; padding:4px 0 0; }
+html #tasks-view #task-filter-bar { margin-bottom:8px; }
+html #tasks-view > .full-panel { padding:0; }
 html #tasks-view .task-search-form input,html #tasks-view .task-search-form select { min-height:32px; height:32px; padding:5px 9px; font-size:12px; border-radius:5px; }
 html #tasks-view .task-search-form button { min-height:32px; }
 html #tasks-table { padding:0; }
@@ -489,8 +516,6 @@ html:root, html:root[data-theme] {
   html #run-workspace .role-card { min-width:180px; }
 }
 
-.task-actions-menu .task-menu-item { font-size:12px; }
-
 /* Console Markdown bodies and Shell blocks follow the desktop type scale; the
    terminal theme itself stays identical to Web. */
 #run-workspace .console-markdown { font-size:12px; }
@@ -504,4 +529,10 @@ html:root, html:root[data-theme] {
 :is(.workflow-detail-modal,.workflow-editor-modal,.team-config-modal) .modal-scroll { display:block; min-height:0; overflow-y:auto; overflow-x:hidden; }
 @media(max-width:700px) {
   .modal.workflow-detail-modal,.modal.workflow-editor-modal,.modal.team-config-modal { max-height:calc(100dvh - 16px); }
+}
+
+html:root, html:root[data-theme] {
+.task-create-modal .modal-scroll { display:flex; }
+.task-create-modal #task-form input,.task-create-modal #task-form textarea,.task-create-modal #task-form select { font-size:13px; }
+.task-create-modal .task-description-field textarea { height:clamp(calc(6 * 1.65em + 18px),calc(100dvh - 350px),calc(12 * 1.65em + 18px)); min-height:calc(6 * 1.65em + 18px); max-height:calc(12 * 1.65em + 18px); line-height:1.65; resize:none; }
 }

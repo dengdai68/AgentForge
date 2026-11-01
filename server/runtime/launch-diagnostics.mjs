@@ -57,8 +57,8 @@ export async function diagnoseLaunch({ command, cwd, searchPath = "/usr/bin:/bin
   }
   if (!selected) {
     problems.push(candidates.some(item => item.exists) ? "CLI 候选存在但不是可执行文件，或当前用户无执行权限。" : "在本次服务实际使用的路径中未找到 CLI；尚不能断言此电脑未安装 CLI。");
-    nextSteps.push(`在这台 Mac 的终端运行 command -v ${provider === "Codex" ? "codex" : "claude"}，将结果的绝对路径填入「设置 → Runtime → CLI 路径」，保存后测试连接。不要填写目录、别名或带参数的整条命令。`);
-    if (commonLocations.some(item => item.usable)) nextSteps.push("commonLocations 中发现未包含在服务 PATH 的可执行文件。Finder 启动的 App 不会自动加载终端的 shell 配置；可显式配置该绝对路径。");
+    nextSteps.push(`在这台 Mac 的终端运行 command -v ${provider === "Codex" ? "codex" : "claude"}，检查该可执行文件已在登录 Shell 的 PATH 中；修复安装/PATH 后重新打开客户端，再在「设置 → Runtime」测试连接。`);
+    if (commonLocations.some(item => item.usable)) nextSteps.push("commonLocations 中发现未包含在服务 PATH 的可执行文件。客户端会尝试读取登录 Shell 环境；检查 Shell 配置能否正常结束，并在修复 PATH 后重新打开客户端。");
   }
   if (interpreter?.usable === false) {
     problems.push("CLI 脚本存在，但其 shebang 解释器不可用；常见情况是 /usr/bin/env node 无法在 App 的 PATH 中找到 Node。");

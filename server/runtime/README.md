@@ -33,3 +33,9 @@ Runtime 适配 Provider，不评价业务结果，不写 Store 状态。员工�
 模型目录：Codex 使用本机 `codex debug models`，Claude 使用本地模型配置与内置别名；不读取凭据键，不伪造目录。模型与 effort 透传现有 CLI。
 
 配置、扩展及安全边界见 [员工配置](../../docs/15-employee-runtime-configuration.md) 和 [Runtime](../../docs/08-real-local-agent-runtime.md)。
+
+控制台展示已保存的公开 thinking 正文；敏感片段仍过滤，首尾空白与换行规范化不标为脱敏。历史正文为空时明确说明“未保存可显示的思考正文”，不以“已脱敏”占位，不补造未公开或未保存内容。
+
+Runtime 可编辑项仅 model/effort，CLI 可执行文件按服务 PATH 发现；可用开关由 Store 和调用方校验，适配器不拥有开关状态。历史冻结 model/effort 继续传给 Provider。测试私有 CLI 用隔离 Shell PATH，不再创建具名连接或写自定义 executable。
+
+Claude stream-json 的 result 表示一轮结束，不表示整个进程结束。适配器跟踪原生 background_tasks_changed/task_started/task_notification：已知后台工作运行期间以及成功轮次等待原生后续工作时，不启动平台的无进展计时器；新正文/原生任务通知重新进入执行阶段，无后台工作时恢复计时。由 Claude 自身负责 print 后台等待上限，平台不增加另一套业务时限，也不在第一条成功 result 时提前结算。最终仍须进程正常退出且无结构化失败；取消、会话错误、API 重试上限与退出码校验不变。

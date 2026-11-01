@@ -54,7 +54,7 @@ test('workspace HTTP save creates missing directories, preserves existing files 
 test('collaboration aligns by sender, never by the human recipient or human filter',async()=>{
   const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8'),start=source.indexOf('function renderCollaboration('),end=source.indexOf('/* ---------- 任务空间数据与动作',start),dock={};
   const messages=[{id:'human',createdAt:'2026-01-01T00:00:00Z',sender:{type:'human',name:'操作者'},recipient:{type:'agent',name:'员工'},content:'HUMAN-CONTENT'},{id:'employee',createdAt:'2026-01-01T00:00:01Z',sender:{type:'agent',name:'员工'},recipient:{type:'human',name:'操作者'},content:'AGENT-TO-HUMAN'}];
-  const render=vm.runInNewContext(`${source.slice(start,end)};renderCollaboration`,{$:selector=>selector==='#collaboration-panel'?dock:{addEventListener(){}},state:{workspace:{pendingQuestions:[]}},workspaceView:()=>({draft:''}),collaborationRecords,acceptanceReview:()=>null,esc:String,exactTime:String,collaborationMessageMarkup:content=>content,sendInstruction(){}});
+  const render=vm.runInNewContext(`${source.slice(start,end)};renderCollaboration`,{$:selector=>selector==='#collaboration-panel'?dock:{addEventListener(){}},state:{workspace:{pendingQuestions:[]}},workspaceView:()=>({draft:''}),collaborationRecords,acceptanceReview:()=>null,esc:String,exactTime:String,collaborationMessageMarkup:content=>content,sendInstruction(){},refreshCollaborationBodies(){}});
   render({run:{id:'run',status:'paused',task:{}},messages},[]);
   const articles=dock.innerHTML.match(/<article[\s\S]*?<\/article>/g);assert.equal(articles.length,2);assert.match(articles[0],/class="collaboration-row from-human/);assert.match(articles[1],/AGENT-TO-HUMAN/);assert.doesNotMatch(articles[1],/from-human/);
 });
@@ -65,9 +65,9 @@ test('plugin and MCP empty/error states are outside their card grid, and search 
     const ui=createUI({api:async()=>{if(fail)throw Error('read failed');return {plugins:[],entries:[]};},esc:String});
     t.after(()=>ui.unmount());
     ui.mount(root);await new Promise(done=>setImmediate(done));
-    assert.match(root.innerHTML,/<div data-market-list hidden[^>]*><\/div><div class="market-directory-empty"/);
-    assert.equal(query('[data-market-list]').innerHTML,'');assert.equal(query('[data-market-list]').hidden,true);assert.match(query('[data-market-empty]').textContent,/尚未安装/);
-    query('input').oninput({target:{value:'missing'}});assert.equal(query('[data-market-empty]').textContent,'没有匹配项');
+    assert.match(root.innerHTML,/<div data-market-list hidden[^>]*><\/div><div class="directory-empty market-directory-empty"/);
+    assert.equal(query('[data-market-list]').innerHTML,'');assert.equal(query('[data-market-list]').hidden,true);assert.match(query('[data-market-empty]').innerHTML,/<strong>尚未安装/);
+    query('input').oninput({target:{value:'missing'}});assert.match(query('[data-market-empty]').innerHTML,/<strong>没有匹配的/);
     ui.unmount();fail=true;ui.mount(root);await new Promise(done=>setImmediate(done));assert.equal(query('[data-market-empty]').textContent,'read failed');assert.equal(query('[data-market-empty]').role,'alert');
     query('input').oninput({target:{value:'another search'}});assert.equal(query('[data-market-empty]').textContent,'read failed','typing after a failed read must not imply an empty catalog');
   }
@@ -132,8 +132,8 @@ test("Runtime headings stay subordinate and General uses an explicit native radi
   assert.doesNotMatch(settings, /本机执行说明与版本|data-control-version|<select[^>]*name="closeMode"/);
   for (const mode of ["quit", "tray"]) assert.match(settings, new RegExp(`type="radio" name="closeMode" value="${mode}" disabled`));
   assert.match(settings, /fieldset class="settings-radio-group"><legend>关闭主窗口时/);
-  assert.match(css, /summary h4 \{ font-size:14px; font-weight:500/);
-  assert.match(desktop, /summary h4 \{ font-size:13px; font-weight:500/);
+  assert.match(css, /\.settings-section h4 \{/);
+  assert.match(desktop, /\.settings-section h4 \{ font-size:13px; font-weight:600/);
   assert.doesNotMatch(settings, /profile && !profile\.system/);
 });
 
@@ -342,11 +342,13 @@ test("acceptance and deletion counts do not claim human-approved Artifacts and r
   assert.match(context.html, /criteria/);
 });
 
+// Timeline unit cases exercise generated rows; persistent DOM is verified by
+// scripts/test-collaboration-flow.mjs through the real Electron renderer.
 test("console rendering keeps chronological events separate from directory sorting", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const slice = source.slice(source.indexOf("function renderChatStream("), source.indexOf("function rememberDirectoryReading("));
   const stream = { innerHTML: "", scrollHeight: 120, scrollTop: 0 };
-  const context = { queueMicrotask: () => {}, $: () => stream, isTransportFrame: () => false, summarizeHistoricalAuditEntries: entries => entries, buildConsoleEntries: events => events.map(event => ({ type: "event", event })), renderChatEvent: event => event.id, state: { selectedRunId: "run", workspace: null } };
+  const context = { queueMicrotask: () => {}, updateConsoleRows: (stream, rows) => { stream.innerHTML = rows.map(row => row.html).join(""); stream.scrollTop = stream.scrollHeight; }, $: () => stream, isTransportFrame: () => false, summarizeHistoricalAuditEntries: entries => entries, buildConsoleEntries: events => events.map(event => ({ type: "event", event })), renderChatEvent: event => event.id, state: { selectedRunId: "run", workspace: null } };
   vm.runInNewContext(`${slice}; renderChatStream([{id:'later',timestamp:'2026-01-02',actor:{id:'a'}},{id:'earlier',timestamp:'2026-01-01',actor:{id:'a'}}],{id:'a'});`, context);
   assert.equal(stream.innerHTML, "earlierlater");
   assert.equal(stream.scrollTop, 120);
@@ -362,7 +364,7 @@ test("console does not echo collaboration messages as a second system result", a
       { id: 'duplicate-handoff', type: 'message.sent', actor: { id }, timestamp: '2026-01-02' },
       { id: 'failure', type: 'trace.failed', actor: { id }, timestamp: '2026-01-03' },
     ];
-    const context = { queueMicrotask: () => {}, $: () => stream, isTransportFrame: () => false, summarizeHistoricalAuditEntries: rows => rows, buildConsoleEntries: rows => rows.map(event => ({ type: 'event', event })), renderChatEvent: event => `[${event.id}]`, state: { selectedRunId: 'run', workspace: null }, events, agent: { id } };
+    const context = { queueMicrotask: () => {}, updateConsoleRows: (stream, rows) => { stream.innerHTML = rows.map(row => row.html).join(""); stream.scrollTop = stream.scrollHeight; }, $: () => stream, isTransportFrame: () => false, summarizeHistoricalAuditEntries: rows => rows, buildConsoleEntries: rows => rows.map(event => ({ type: 'event', event })), renderChatEvent: event => `[${event.id}]`, state: { selectedRunId: 'run', workspace: null }, events, agent: { id } };
     vm.runInNewContext(`${slice}; renderChatStream(events, agent);`, context);
     assert.equal(stream.innerHTML, '[provider-text][failure]');
     assert.equal(events.length, 3, 'stored collaboration facts are not mutated');
@@ -457,7 +459,7 @@ test('file downloads capture the selected path, avoid duplicate clicks and surfa
 
 test("console timeline binds a prompt entry to each invocation's own Trace", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const slice = source.slice(source.indexOf("function tracePromptMarkup("), source.indexOf("function consoleFailurePanel("))
+  const slice = source.slice(source.indexOf("function tracePromptMarkup("), source.indexOf("function renderConsolePage("))
     + source.slice(source.indexOf("function renderChatStream("), source.indexOf("function rememberDirectoryReading("));
   const stream = { innerHTML: "", scrollHeight: 0, scrollTop: 0 };
   const traces = [
@@ -465,7 +467,7 @@ test("console timeline binds a prompt entry to each invocation's own Trace", asy
     { id: "trace-new", workflowNodeId: "development", startedAt: "t1", promptRef: { storagePath: "runs/run-1/traces/trace-new/prompt-snapshot.json" } },
   ];
   const context = {
-    queueMicrotask: () => {}, $: () => stream, isTransportFrame: () => false,
+    queueMicrotask: () => {}, updateConsoleRows: (stream, rows) => { stream.innerHTML = rows.map(row => row.html).join(""); stream.scrollTop = stream.scrollHeight; }, $: () => stream, isTransportFrame: () => false,
     summarizeHistoricalAuditEntries: entries => entries,
     buildConsoleEntries, // the real projection, including Trace-aware tool grouping
     renderChatEvent: event => `<row>${event.id}</row>`,
@@ -494,10 +496,10 @@ test("console timeline binds a prompt entry to each invocation's own Trace", asy
 
 test("prompt entries follow invocation records and tool groups respect Trace boundaries", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const slice = source.slice(source.indexOf("function tracePromptMarkup("), source.indexOf("function consoleFailurePanel("))
+  const slice = source.slice(source.indexOf("function tracePromptMarkup("), source.indexOf("function renderConsolePage("))
     + source.slice(source.indexOf("function renderChatStream("), source.indexOf("function rememberDirectoryReading("));
   const mkContext = (stream, traces) => ({
-    queueMicrotask: () => {}, $: () => stream, isTransportFrame: () => false,
+    queueMicrotask: () => {}, updateConsoleRows: (stream, rows) => { stream.innerHTML = rows.map(row => row.html).join(""); stream.scrollTop = stream.scrollHeight; }, $: () => stream, isTransportFrame: () => false,
     summarizeHistoricalAuditEntries: entries => entries,
     buildConsoleEntries, // the real projection: same-name tools from different Traces must not merge
     renderChatEvent: event => `<row>${event.id}</row>`,
@@ -548,11 +550,11 @@ test("prompt entries follow invocation records and tool groups respect Trace bou
 
 test("prompt is a paginated chronological entry, including interleaved invocations", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const slice = source.slice(source.indexOf("function tracePromptMarkup("), source.indexOf("function consoleFailurePanel("))
+  const slice = source.slice(source.indexOf("function tracePromptMarkup("), source.indexOf("function renderConsolePage("))
     + source.slice(source.indexOf("function renderChatStream("), source.indexOf("function rememberDirectoryReading("));
   const stream = { innerHTML: "", scrollHeight: 0, scrollTop: 0 };
   const traces = [{ id: "long", agentId: "a", startedAt: "2026-01-01T00:00:00Z", status: "running", promptRef: {} }, { id: "short", agentId: "a", startedAt: "2026-01-01T00:03:00Z", promptRef: {} }];
-  const context = { queueMicrotask: () => {}, $: () => stream, isTransportFrame: e => e.type === "transport",
+  const context = { queueMicrotask: () => {}, updateConsoleRows: (stream, rows) => { stream.innerHTML = rows.map(row => row.html).join(""); stream.scrollTop = stream.scrollHeight; }, $: () => stream, isTransportFrame: e => e.type === "transport",
     summarizeHistoricalAuditEntries: entries => entries, buildConsoleEntries,
     renderChatEvent: e => `<row>${e.id}</row>`,
     state: { selectedRunId: "r", workspace: { run: { id: "r" }, traces } }, esc: String, exactTime: String };
@@ -687,7 +689,7 @@ test("task search combines name, exact status and stable team identity", async (
   assert.match(source, /name="runtimeProfileId"/);
   assert.doesNotMatch(source, /name="executable"/);
   const settings = await readFile(new URL('../web/settings.mjs', import.meta.url), 'utf8');
-  assert.match(settings, /name="executable"/);
+  assert.doesNotMatch(settings, /name="executable"/);
   assert.match(settings, /data-test-runtime/);
 });
 
@@ -743,7 +745,7 @@ test("hiding every optional entry leaves Settings reachable and empty groups hid
 });
 
 test("settings categories are refreshable routes and configuration leaves the employee shell", async () => {
-  assert.deepEqual(Object.keys(SETTINGS_PAGES), ["general", "appearance", "workspace", "cli", "repositories", "runtime", "plugins", "logs"]);
+  assert.deepEqual(Object.keys(SETTINGS_PAGES), ["general", "appearance", "workspace", "cli", "repositories", "runtime", "updates", "logs"]);
   const settings = await readFile(new URL("../web/settings.mjs", import.meta.url), "utf8");
   const panel = name => settings.split(`data-settings-panel="${name}"`)[1].split("</section>")[0];
   assert.match(panel("appearance"), /navigation-options/);
@@ -829,7 +831,8 @@ test("Runtime model picker and effort options follow the real catalog with hones
   const codexCatalog = { models: [{ id: "gpt-real", levels: [{ id: "low" }, { id: "high", default: true }] }, { id: "gpt-quiet", levels: [] }] };
   const known = runtimeEffortOptions("codex", "gpt-real", codexCatalog);
   assert.deepEqual(known.options.map(option => option.value), ["", "low", "high"], "catalog levels restrict options to the model's real support");
-  assert.ok(known.options.find(option => option.value === "high").label.includes("模型默认"));
+  assert.equal(known.options.find(option => option.value === "high").label, "High（模型默认）");
+  assert.equal(known.options.find(option => option.value === "low").label, "Low");
   assert.match(known.note, /codex debug models/);
   const quiet = runtimeEffortOptions("codex", "gpt-quiet", codexCatalog);
   assert.deepEqual(quiet.options.map(option => option.value), [""], "models without declared levels offer no invalid options");
@@ -858,7 +861,7 @@ test("Runtime model picker and effort options follow the real catalog with hones
   assert.match(source, /模型列表为空/, "empty catalog is shown honestly");
   assert.match(source, /当前值不在列表中（手工输入）/, "manual values are labelled as outside the loaded list");
   assert.match(source, /原思考等级不适用于当前模型，已清除/, "switching models clears an inapplicable saved effort instead of silently keeping it");
-  assert.match(source, /'name','provider','model','executable','profile','effort'/, "effort is submitted with the profile");
+  assert.match(source, /'model','effort'/, "effort is submitted with the profile");
   const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   assert.match(app, /思考 " \+ esc\(agent\.runtime\.effort\)/, "employee cards show the saved effort");
 });
@@ -881,22 +884,6 @@ test("Runtime catalog requests are sequenced so stale responses never overwrite 
   assert.match(section, /const catalog = \{ state: 'idle', data: null, error: '', request: 0 \}/, "per-card request counter");
   assert.match(section, /const request = \+\+catalog\.request;/, "every load is sequenced");
   assert.equal((section.match(/request !== catalog\.request\) return;/g) || []).length, 2, "stale success and failure responses are both ignored");
-  assert.match(section, /provider\.addEventListener\('change', .*catalog\.request\+\+/s, "provider switch invalidates an in-flight request even without a reload");
-  assert.match(section, /executable\.addEventListener\('change', .*catalog\.request\+\+/s, "executable switch invalidates an in-flight request");
-  assert.match(section, /const provider = form\.elements\.provider\.value, executable = form\.elements\.executable\.value\.trim\(\);\s*\n\s*try/, "query parameters are captured at request start, not at response time");
-});
-
-test("recovered console failures are collapsed without hiding active retries", async () => {
- const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
- const code = source.slice(source.indexOf('function consoleFailurePanel('), source.indexOf('function renderConsolePage('));
- const render = new Function('esc', code + ';return consoleFailurePanel;')(String);
- const failure = {actor:{id:'a'},timestamp:'2026-10-25T10:21:34Z',message:'Provider failed',data:{traceId:'old',auditVersion:2}};
- const workspace = {run:{status:'running'},failureEvents:[failure],dispatches:[{recipientAgentId:'a',traceIds:['old','retry'],status:'done'}]};
- assert.match(render(workspace,'a'), /<details class="console-failure console-failure-history">/);
- assert.doesNotMatch(render(workspace,'a'), /data-open-runtime-settings|<details[^>]+open/);
- workspace.dispatches[0].status='queued';workspace.dispatches[0].nextRetryAt='2026-10-25T10:22:34Z';workspace.dispatches[0].attempts=1;
- assert.match(render(workspace,'a'), /等待重试/);assert.doesNotMatch(render(workspace,'a'), /<details/);
- workspace.run.status='awaiting_acceptance';assert.match(render(workspace,'a'), /<details/);
 });
 
 test('Diff explorer nests changed files, preserves collapsed directories and escapes paths', async () => {
@@ -1049,4 +1036,20 @@ test('employee search limits large directories and excludes selected or inactive
   assert.equal(search(agents, '员工 4999', new Set())[0].id, '4999');
   assert.equal(search(agents, '字幕', new Set()).length, 20);
   assert.equal(search(agents, '不匹配', new Set()).length, 0);
+});
+
+
+test("thinking hydration displays recorded public text and explains empty historical records", async () => {
+  const source = await readFile(new URL('../web/app.js',import.meta.url),'utf8');
+  const fields = new Map([['body',{text:'公开思考 <script>unsafe()</script>',redacted:false}],['filtered',{text:'先检查输入\n[REDACTED]\n继续核对',redacted:true}],['empty',{text:'',redacted:true}],['whitespace',{text:' \n ',redacted:false}]]);
+  const hydrate = vm.runInNewContext(`${source.slice(source.indexOf('async function hydrateConsoleContent('),source.indexOf('const promptSnapshotCache'))};hydrateConsoleContent`,{
+    consoleContentVisible:()=>true,consoleContentCache:new Map(),isShellTool:()=>false,
+    esc:text=>String(text).replaceAll('<','&lt;').replaceAll('>','&gt;'),
+    api:async url=>({fields:{thinking:fields.get(url.split('/').at(-1))}})
+  });
+  const nodes=[...fields.keys()].map(id=>({isConnected:true,dataset:{consoleContent:id,contentRun:'run'},closest:()=>null}));
+  await hydrate([...nodes]);
+  assert.match(nodes[0].innerHTML,/公开思考 &lt;script&gt;/);assert.doesNotMatch(nodes[0].innerHTML,/已脱敏|未保存/);
+  assert.match(nodes[1].innerHTML,/先检查输入/);assert.match(nodes[1].innerHTML,/继续核对/);assert.match(nodes[1].innerHTML,/敏感片段已隐藏/);
+  for(const node of nodes.slice(2)){assert.match(node.innerHTML,/未保存可显示的思考正文/);assert.doesNotMatch(node.innerHTML,/已脱敏|敏感片段已隐藏/);}
 });

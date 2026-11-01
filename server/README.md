@@ -1,5 +1,7 @@
 # 控制面
 
+任务协作时间线合并同一 Run 的全部 Message、实际 Dispatch 与协调事件。接收人表示处理对象，不表示私密级别：经理派工指向接手员工，工作交接指向经理，咨询/答复保留双方，没有处理对象的发言只显示发送者。sourceMessageId 仅关联同 Run 来源消息，正文与首个实际投递合并；额外或无来源投递独立保留，不猜测历史来源。显示节点、尝试次数、重试/错误和真实投递状态；发言与接手执行提供独立控制台入口。任务确认、取消、暂停、恢复等事件按时间保留，不输出原始 Provider 帧或提示词。
+
 沟通输出 schema 的 required 含 reply 与可空 handoffToAgentId 两键（严格 Provider 校验要求）；null 或省略均不转交，实际目标继续由 Store 校验。提示词与 schema 同步，不修改 Task 协议或 CLI 能力。
 
 工作目录直接读取真实根，不再生成/读取展示清单，不预建 docs。目录查询按层/200项分页，普通根文件、业务自定义目录与大媒体可见；认证读取/下载仅保留工作根、敏感文件与链接检查。Git比较工作根初始化提交并保留绑定repos原始gitlink。Orchestrator记录各业务路径有限快照，Store工作流位置仅作建议、缺省空，不改写历史路径。
@@ -58,3 +60,11 @@ Store 拥有状态，Runtime 不直接写领域对象。平台执行员工和经
 插件市场接受 Claude/Codex 市场中的本地条目及 HTTPS github/url/git-subdir 远程条目，保留真实 revision；不支持来源整批失败。组件按 Runtime 分别解析，API 返回 providers/compatibility 及原因，员工绑定由同一解析拒绝不兼容选择。配置根允许祖先正常别名、受管目录本身拒绝链接。含 Codex 专用 cwd/env_vars 的 MCP 仅供 Codex，工作目录由启动器应用。
 
 手动重复导入由 HTTP 串行准备；Store 按同来源地址＋名称、MCP 按安装名称覆盖，Store.replaceImportedExtensions 事务更新当前员工（含停用）、合并重复引用并退役旧目录项。失败整批保留原状态，候选退役；冻结任务和排队调用的文件不变。回执包含 reference-only replacements/employees/historyRetained。
+
+控制台展示已保存的公开 thinking 正文；敏感片段仍过滤，首尾空白与换行规范化不标为脱敏。历史正文为空时明确说明“未保存可显示的思考正文”，不以“已脱敏”占位，不补造未公开或未保存内容。
+
+固定 Runtime 目录/部分更新与 Store 可用门禁见 docs/15；调用前校验 enabled，冻结模型事实不改。auth.mjs 签发父会话关联的独立 CLI 委托，退出/重置/重启失效，正式端点与私有文件发布契约见 docs/14、18。
+
+长任务的 Claude 后台等待使用原生生命周期，不以成功轮次后的安静误判执行失败。prompts 只投递必要上下文：成员消息来源与正文保留，内部路由元数据、空配置、员工选人说明及批量 Artifact 哈希不重复注入；交付证据按需查询，详见 docs/22。
+
+经理回复缺少协调决定与决定字段不完整采用同一真实纠错路径；不让已完成 Trace、空队列和 running 状态静默并存，也不以正文代替领域命令。

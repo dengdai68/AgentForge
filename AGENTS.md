@@ -7,6 +7,7 @@
 - 本机开发直接在 `main` 上修改和提交，不新建或切换功能分支；用户明确要求其他分支时除外。
 - 先检查 Git 状态和最近变更；保留用户及其他会话的修改，不覆盖、不回退、不混入提交。任务工作目录是默认上下文，不是员工权限边界。
 - 读取 `ai/module-registry.json`、`docs/00-ai-map.md`，再读目标模块的局部 README、源码、测试与相关契约；优先用 `rg` 定位。
+- 本仓库新功能与界面开发可使用 [agentforge-development](.codex/skills/agentforge-development/SKILL.md)；它提供共享样式与产品落地方法，贡献规则仍以本文件为准。
 - 按需查阅：产品 `docs/01`，架构 `docs/02`，领域 `docs/03`，设计 `docs/06`；完整文件名见 [文档索引](docs/README.md)。
 - 运行与安装看 [README](README.md)，工程流程与提交格式看 [CONTRIBUTING](CONTRIBUTING.md)；不要把功能说明、版本历史或验收台账堆入本文件。
 

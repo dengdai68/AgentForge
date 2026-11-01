@@ -4,6 +4,9 @@ export function isPreferencesSender(event, contents, origin) {
 export function isCliSender(event, contents, origin) {
   return isSettingsSender(event, contents, origin, "/settings/cli");
 }
+export function isUpdateSender(event, contents, origin) {
+  return isSettingsSender(event, contents, origin, "/settings/updates");
+}
 function isSettingsSender(event, contents, origin, path) {
   return Boolean(contents && event.sender === contents && event.senderFrame && event.senderFrame === contents.mainFrame
     && isConsoleURL(event.senderFrame.url, origin) && new URL(event.senderFrame.url).pathname === path);

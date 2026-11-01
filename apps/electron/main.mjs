@@ -1,21 +1,23 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, shell, session, screen, ipcMain, clipboard } from "electron";
-import { fork } from "node:child_process";
+import { app, BrowserWindow, Menu, Tray, nativeImage, shell, session, screen, ipcMain, clipboard, net } from "electron";
+import { fork, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
-import { userInfo } from "node:os";
-import { chmod, lstat, mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { join, dirname, isAbsolute } from "node:path";
+import { userInfo, homedir } from "node:os";
+import { chmod, lstat, mkdir, rename, unlink, writeFile, readFile } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { isConsoleURL, isExternalURL, isPreferencesSender, isCliSender, health, initialRoute } from "./policy.mjs";
+import { isConsoleURL, isExternalURL, isPreferencesSender, isCliSender, isUpdateSender, health, initialRoute } from "./policy.mjs";
 import { desktopBrowserPaths, desktopControlPlaneEnvironment, desktopStoragePaths, legacyDesktopDataRoot, resolveDesktopDataRoot } from "./runtime-paths.mjs";
 import { diagnostic, diagnostics, installProcessDiagnostics } from "../../server/diagnostics.mjs";
 import { legacyDataRequiresMigration, migrationGuidance } from "../../server/data-home.mjs";
 import { createInterface } from "node:readline";
 import { closeModes, readCloseMode, saveCloseMode } from "./preferences.mjs";
 import { loadLoginShellEnvironment } from "./login-shell-env.mjs";
-import { createCliInstallation } from "./cli-installation.mjs";
 import { confirmCliInstallation } from "./cli-confirmation.mjs";
+import { createCliInstallation } from "./cli-installation.mjs";
 import { showAppDialog } from "./app-dialog.mjs";
+import { createApplicationUpdates, fetchLatestRelease, downloadReleaseInstaller } from "./updates.mjs";
 
 // Shared dialog context: every app-styled dialog gets the screen work area so
 // it can size to its content without ever clipping (no parent-ratio cap).
@@ -29,6 +31,7 @@ const sourceRoot = fileURLToPath(new URL("../../", import.meta.url));
 let window, child, tray, childBootstrapToken = null, controlOrigin = null, childInstanceId = null, connecting = false, quitting = false, closeMode = null, savingCloseMode = false, closingPrompt = false;
 let shellEnvironment;
 let installingCli = false;
+let applicationUpdates = null, restartReservation = null;
 const shellEnvironmentAbort = new AbortController();
 app.setName("AgentForge");
 const storage = desktopStoragePaths(resolveDesktopDataRoot({ packaged: app.isPackaged, env: process.env }));
@@ -36,6 +39,8 @@ const previousUserData = app.getPath('userData');
 // Set before the single-instance lock and before any Electron session exists.
 for(const [name,path] of Object.entries(desktopBrowserPaths(storage.dataRoot))) { mkdirSync(path,{recursive:true,mode:0o700}); app.setPath(name,path); }
 const endpointFile = join(storage.dataRoot, "desktop-endpoint.json");
+const cliSessionFile = join(storage.dataRoot, "desktop-cli-session.json");
+let cliSessionSync = Promise.resolve(), publishedCliParent = null;
 const preferencesFile = join(storage.dataRoot, "desktop-preferences.json");
 installProcessDiagnostics("desktop", { instancePath: storage.AGENTFORGE_DB_PATH });
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -92,6 +97,40 @@ async function startControlPlane() {
   } catch (error) { owned.kill(); throw new Error(`无法安全保存桌面连接信息：${error.message}`); }
 }
 
+function syncCliSession() {
+  // Serial publication prevents a late login result surviving a later logout.
+  cliSessionSync = cliSessionSync.catch(() => {}).then(async () => {
+    if (!controlOrigin || quitting) return;
+    const origin = controlOrigin, instanceId = childInstanceId;
+    const cookies = await session.defaultSession.cookies.get({ url: origin, name: 'agentforge_session' });
+    const cookie = cookies.find(item => item.path === '/' && /^[a-f0-9]{64}$/.test(item.value));
+    if (!cookie) { publishedCliParent = null; await unlink(cliSessionFile).catch(error => { if (error.code !== 'ENOENT') throw error; }); return; }
+    const parentKey = `${instanceId}:${cookie.value}`;
+    if (publishedCliParent === parentKey) return;
+    const response = await fetch(`${origin}/api/auth/cli-session`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: `agentforge_session=${cookie.value}` }, body: '{}' });
+    if (!response.ok) { await unlink(cliSessionFile).catch(() => {}); return; }
+    const grant = await response.json();
+    if (!/^agentforge_session=[a-f0-9]{64}$/.test(grant.cookie) || origin !== controlOrigin || instanceId !== childInstanceId || quitting) return;
+    const temporary = `${cliSessionFile}.${randomBytes(8).toString('hex')}.tmp`;
+    try {
+      await writeFile(temporary, JSON.stringify({ origin, instanceId, cookie: grant.cookie, expiresAt: grant.expiresAt }), { flag: 'wx', mode: 0o600 });
+      await rename(temporary, cliSessionFile);
+      publishedCliParent = parentKey;
+    } finally { await unlink(temporary).catch(() => {}); }
+  }).catch(error => diagnostic('desktop.cli_session_sync_failed', { code: error.code || 'unknown' }));
+  return cliSessionSync;
+}
+async function installDefaultCli() {
+  const installer = cliInstallation();
+  if (!installer || installingCli) return;
+  installingCli = true;
+  try {
+    const status = await installer.status();
+    if (status.canInstall && !status.installed) await installer.install(status.profilePaths);
+  } catch (error) { diagnostic('desktop.cli_install_failed', { code: error.code || 'unknown' }); }
+  finally { installingCli = false; }
+}
+
 async function connect() {
   if (connecting || quitting) return;
   connecting = true;
@@ -103,6 +142,8 @@ async function connect() {
       if (route === "/setup") await window.loadURL(`${controlOrigin}/setup`, { extraHeaders: `X-AgentForge-Bootstrap: ${childBootstrapToken}\n` });
       else await window.loadURL(controlOrigin);
       window.setTitle("AgentForge");
+      publishedCliParent = null;
+      await syncCliSession();
     }
   } catch (error) {
     diagnostic("desktop.connection_failed", { error });
@@ -134,8 +175,7 @@ function showWindowFromTray() {
 
 function ensureTray() {
   if (tray) return;
-  // macOS templates use the supplied mark's alpha, adapting to light/dark bars.
-  const image = nativeImage.createFromPath(join(sourceRoot, 'web/icons/application.png')).resize({ width: 18, height: 18 });
+  const image = nativeImage.createFromPath(join(sourceRoot, 'web/icons/trayTemplate.png'));
   image.setTemplateImage(true);
   tray = new Tray(image);
   tray.setToolTip("AgentForge");
@@ -171,7 +211,7 @@ function cliInstallation() {
   if (!app.isPackaged || process.platform !== 'darwin') return null;
   const launcher = join(dirname(app.getAppPath()), 'cli/agentforge');
   if (launcher.startsWith('/Volumes/') || launcher.includes('/AppTranslocation/')) return null;
-  return createCliInstallation({ home: app.getPath('home'), launcher, shell: userInfo().shell || '/bin/zsh', zdotdir: process.env.ZDOTDIR });
+  return createCliInstallation({ home: homedir(), launcher, shell: userInfo().shell || '/bin/zsh', zdotdir: process.env.ZDOTDIR });
 }
 const cliUnavailable = () => ({ supported: false, canInstall: false, installed: false, message: '请先将 Mac 安装包移到持久位置（建议应用程序），从打包客户端打开；Web/源码模式不安装 Shell 命令。' });
 function openSettings() { showWindow(); if (controlOrigin) void window.loadURL(`${controlOrigin}/settings/general`); else void connect(); }
@@ -211,12 +251,81 @@ function showAboutDialog() {
   }).catch(error => diagnostic("desktop.about_failed", { error }));
 }
 
+async function prepareUpdateRestart() {
+  if (installingCli || savingCloseMode || closingPrompt || connecting) throw new Error('客户端仍在保存或连接，请稍后再重启安装');
+  const owned = child;
+  if (!owned?.connected) throw new Error('无法确认当前执行状态，请重新连接后再更新');
+  const id = randomBytes(18).toString('hex');
+  await new Promise((resolve, reject) => {
+    const finish = error => { clearTimeout(timer); owned.off('message', receive); error ? reject(error) : resolve(); };
+    const receive = message => {
+      if (message?.type !== 'agentforge-update-readiness' || message.id !== id || owned !== child) return;
+      if (message.ready === true) { restartReservation = { child: owned, id }; finish(); }
+      else finish(new Error('仍有任务、沟通或保存操作正在执行，请结束后再重启安装'));
+    };
+    const timer = setTimeout(() => { if (owned.connected) owned.send({type:'agentforge-update-release',id},()=>{}); finish(new Error('无法确认后台已空闲，未重启，请稍后重试')); }, 5000);
+    owned.on('message', receive);
+    owned.send({ type:'agentforge-update-prepare', id }, error => { if (error) finish(new Error('后台连接已断开，未重启')); });
+  });
+}
+function releaseUpdateRestart() {
+  if (restartReservation?.child.connected) restartReservation.child.send({type:'agentforge-update-release',id:restartReservation.id},()=>{});
+  restartReservation = null;
+}
+async function startApplicationUpdates() {
+  let nativeInstall = false;
+  if (app.isPackaged && process.platform === 'darwin') {
+    try {
+      const {stderr} = await promisify(execFile)('/usr/bin/codesign',['-dv','--verbose=4',app.getPath('exe')],{timeout:5000});
+      nativeInstall = /^Authority=Developer ID Application:/m.test(stderr) && /^TeamIdentifier=[A-Z0-9]{10}$/m.test(stderr);
+    } catch (error) { diagnostic('desktop.update_signature_check_failed',{error}); }
+  }
+  const currentVersion = app.isPackaged ? app.getVersion() : JSON.parse(await readFile(join(sourceRoot,'package.json'),'utf8')).version;
+  applicationUpdates = createApplicationUpdates({ currentVersion, packaged: app.isPackaged && process.platform === 'darwin',
+    nativeInstall, cacheRoot: join(storage.dataRoot,'updates'), prepareRestart: prepareUpdateRestart, releaseRestart: releaseUpdateRestart,
+    readLatest: () => fetchLatestRelease((url, options) => net.fetch(url, options)),
+    downloadInstaller: (release, cache, progress, options) => downloadReleaseInstaller(release, cache, progress, { ...options, fetcher: (url, init) => net.fetch(url, init) }),
+    openInstaller: path => shell.openPath(path), onDiagnostic: error => diagnostic('desktop.update_failed',{error}),
+    createNativeUpdater(release, onProgress, onFailure) {
+      let updater;
+      return {
+        async download(version) {
+          const {default: module} = await import('electron-updater');
+          updater = new module.MacUpdater({provider:'generic',url:release.feedUrl});
+          updater.channel = 'latest'; updater.allowPrerelease = false; updater.allowDowngrade = false;
+          updater.autoDownload = false; updater.autoInstallOnAppQuit = false;
+          updater.on('error', onFailure);
+          updater.on('download-progress', onProgress);
+          const result = await updater.checkForUpdates();
+          if (!result || result.updateInfo.version !== version) throw new Error('正式版更新元数据不一致，请前往 Release 核对');
+          await updater.downloadUpdate();
+        },
+        install() { if (!updater) throw new Error('原生更新器尚未就绪'); updater.quitAndInstall(false,true); }
+      };
+    }
+  });
+  applicationUpdates.subscribe(value => {
+    if (window && !window.isDestroyed() && isConsoleURL(window.webContents.getURL(),controlOrigin)) window.webContents.send('desktop:updates:changed',value);
+  });
+  window.webContents.on('did-finish-load', () => {
+    if (isConsoleURL(window.webContents.getURL(),controlOrigin)) window.webContents.send('desktop:updates:changed',applicationUpdates.snapshot());
+  });
+  if (isConsoleURL(window.webContents.getURL(),controlOrigin)) window.webContents.send('desktop:updates:changed',applicationUpdates.snapshot());
+  applicationUpdates.start();
+}
+async function checkApplicationUpdates() {
+  showWindow();
+  if (controlOrigin) await window.loadURL(controlOrigin + '/settings/updates');
+  await applicationUpdates?.check();
+}
+
 function installMenu() {
   const contents = window.webContents;
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ label: "AgentForge", submenu: [
       { id: "about-agentforge", label: "关于 AgentForge", click: showAboutDialog }, { type: "separator" },
       { label: "设置…", accelerator: "Command+,", click: openSettings },
+      { label: "检查更新…", click: () => { void checkApplicationUpdates().catch(error => diagnostic('desktop.update_check_failed',{error})); } },
       { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" },
       { type: "separator" }, { label: "退出 AgentForge", accelerator: "Command+Q", click: () => app.quit() }
     ] }] : []),
@@ -247,13 +356,27 @@ async function start() {
   }
   try { closeMode = await readCloseMode(preferencesFile); }
   catch (error) { diagnostic("desktop.preferences_read_failed", { error }); }
+  session.defaultSession.cookies.on('changed', (_event, cookie) => {
+    if (cookie.name === 'agentforge_session' && cookie.domain === '127.0.0.1') void syncCliSession();
+  });
+  void installDefaultCli();
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
-  app.dock?.setIcon(join(sourceRoot, 'web/icons/application.png'));
-  window = new BrowserWindow({ width: 1320, height: 860, minWidth: 760, minHeight: 560, title: "AgentForge", icon: join(sourceRoot, 'web/icons/application.png'), backgroundColor: "#faf9f5",
+  app.dock?.setIcon(join(sourceRoot, 'web/icons/application-dock.png'));
+  window = new BrowserWindow({ width: 1320, height: 860, minWidth: 760, minHeight: 560, title: "AgentForge", icon: join(sourceRoot, 'web/icons/application-dock.png'), backgroundColor: "#f7f9ff",
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false, preload: fileURLToPath(new URL("./preload.cjs", import.meta.url)) }
   });
   const contents = window.webContents;
+  ipcMain.handle('desktop:updates:status', (event, ...args) => {
+    if (args.length || event.sender !== contents || event.senderFrame !== contents.mainFrame || !isConsoleURL(event.senderFrame?.url,controlOrigin)) throw new Error('仅允许应用主窗口读取更新状态');
+    return applicationUpdates?.snapshot() || {phase:'idle',currentVersion:app.getVersion(),message:'更新器正在启动…'};
+  });
+  for (const [command, method] of [['check','check'],['download','download'],['install','install']]) {
+    ipcMain.handle('desktop:updates:' + command, (event, ...args) => {
+      if (args.length || !isUpdateSender(event,contents,controlOrigin) || !applicationUpdates) throw new Error('请在设置 → 更新中操作');
+      return applicationUpdates[method]();
+    });
+  }
   ipcMain.handle("desktop:preferences:get", event => {
     if (!isPreferencesSender(event, contents, controlOrigin)) throw new Error("仅允许客户端常规设置访问");
     return desktopPreferences();
@@ -261,6 +384,23 @@ async function start() {
   ipcMain.handle("desktop:preferences:set", (event, mode) => {
     if (!isPreferencesSender(event, contents, controlOrigin) || process.platform !== "darwin") throw new Error("仅允许 Mac 客户端常规设置修改");
     return changeCloseMode(mode);
+  });
+  ipcMain.handle("desktop:workspace:open-directory", async (event, ...args) => {
+    const pageURL = event.senderFrame?.url;
+    if (args.length || event.sender !== contents || event.senderFrame !== contents.mainFrame
+      || !isConsoleURL(pageURL, controlOrigin)) throw new Error("无法打开工作目录");
+    const match = new URL(pageURL).pathname.match(/^\/runs\/([^/]+)$/);
+    if (!match) throw new Error("仅允许打开当前任务工作目录");
+    const response = await contents.session.fetch(`${controlOrigin}/api/runs/${encodeURIComponent(match[1])}/workspace?view=summary`, {
+      credentials: "include", redirect: "error", signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error("无法读取当前任务工作目录，请确认已登录");
+    const workspace = await response.json(), directory = workspace.run?.task?.workspacePath;
+    if (workspace.run?.id !== match[1] || typeof directory !== "string" || !isAbsolute(directory)
+      || contents.mainFrame.url !== pageURL || !(await lstat(directory)).isDirectory()) throw new Error("当前任务工作目录不可用");
+    const error = await shell.openPath(directory);
+    if (error) throw new Error(`打开工作目录失败：${error}`);
+    return true;
   });
   ipcMain.handle("desktop:workspace:copy-path", (event, text) => {
     if (event.sender !== contents || event.senderFrame !== contents.mainFrame
@@ -319,8 +459,9 @@ async function start() {
   }
   installMenu();
   await connect();
+  await startApplicationUpdates();
 }
 
 app.on("window-all-closed", () => app.quit());
 app.on("activate", showWindow);
-app.on("before-quit", () => { quitting = true; shellEnvironmentAbort.abort(); tray?.destroy(); tray = null; child?.kill(); });
+app.on("before-quit", () => { quitting = true; applicationUpdates?.stop(); shellEnvironmentAbort.abort(); tray?.destroy(); tray = null; child?.kill(); });

@@ -272,19 +272,22 @@ test("shared client role status lets a terminal Run override a stale active Trac
   assert.equal(active.label, "● 执行中 · requirements");
 
   const cancelled = roleExecutionStatus({ status: "cancelled" }, [trace], "analyst");
-  assert.deepEqual(cancelled, { active: false, activeTrace: null, traceCount: 1, label: "○ 已终止 · 1 条 Trace" });
-  assert.equal(roleExecutionStatus({ status: "failed" }, [trace], "analyst").label, "○ 失败 · 1 条 Trace");
+  assert.deepEqual(cancelled, { active: false, activeTrace: null, failed: false, state: "idle", traceCount: 1, label: "○ 已终止 · 1 条 Trace" });
+  assert.equal(roleExecutionStatus({ status: "failed" }, [trace], "analyst").label, "○ 已停止 · 1 条 Trace");
   assert.equal(roleExecutionStatus({ status: "completed" }, [trace], "analyst").label, "○ 已完成 · 1 条 Trace");
 });
 
-test("collaboration shows messages without retry audit events", () => {
+test("collaboration includes human retry actions without dumping event data", () => {
   const records = collaborationRecords({ events: [{ id: "retry-now", type: "dispatch.retry_requested", timestamp: "2026-09-21T00:00:00.000Z", actor: { name: "本机用户" }, message: "人类请求立即重试 1 个等待退避的调用；失败 Trace 与原投递已保留。", data: { dispatchIds: ["dispatch-1"] } }] });
-  assert.deepEqual(records, []);
+  assert.equal(records[0].title, "人类重试");
+  assert.deepEqual(records[0].relatedDispatchIds, ["dispatch-1"]);
+  assert.equal("data" in records[0], false);
 });
 
-test("collaboration excludes Run termination audit events", () => {
+test("collaboration includes Run termination actions", () => {
   const records = collaborationRecords({ events: [{ id: "run-cancelled", type: "run.cancelled", timestamp: "2026-10-04T00:00:00.000Z", actor: { type: "human", name: "本机用户" }, message: "人类已终止 Run；未完成协作投递已取消，既有 Trace 与交付记录保留。", data: { reason: "用户终止", cancelledDispatchIds: ["dispatch-1"] } }] });
-  assert.deepEqual(records, []);
+  assert.equal(records[0].title, "人类终止");
+  assert.equal(records[0].human, true);
 });
 
 test("shared Console projections remain behind authenticated HTTP", async () => {
@@ -302,19 +305,22 @@ test("shared Console projections remain behind authenticated HTTP", async () => 
 
 });
 
-test("collaboration excludes platform escalation audit and system notes", () => {
+test("collaboration includes platform escalation audit and coordination notes", () => {
   const records = collaborationRecords({ events: [{ id: "escalated", type: "dispatch.escalated", timestamp: "2026-10-24T00:00:00.000Z", actor: { type: "system", name: "AgentForge" }, message: "相同协议/结果校验错误连续 2 次，自动重试停止并升级项目经理处置。", data: { dispatchId: "dispatch-1", failureKind: "protocol", attempts: 2, errorStreak: 2 } }] });
-  assert.deepEqual(records, []);
+  assert.equal(records[0].title, "升级协调");
   const note = collaborationRecords({ messages: [{ id: "message-1", kind: "escalation", createdAt: "2026-10-24T00:00:01.000Z", sender: { type: "system", id: "agentforge", name: "AgentForge" }, recipient: { type: "agent", id: "manager-1", name: "项目经理" }, content: "自动升级：投递 dispatch-1 连续失败" }] });
-  assert.deepEqual(note, []);
+  assert.equal(note[0].to, "项目经理");
+  assert.match(note[0].content, /连续失败/);
 });
 
-test("collaboration keeps manager messages shared with members but excludes human broadcasts", () => {
+test("collaboration keeps all team messages with no invented all-team recipient", () => {
   const records = collaborationRecords({ messages: [
     { id: "manager", kind: "manager_decision", createdAt: "2026-10-24T00:00:00Z", sender: { type: "agent", name: "经理" }, recipient: { type: "team", name: "团队" }, content: "请研发修复" },
     { id: "human", kind: "instruction", createdAt: "2026-10-24T00:00:01Z", sender: { type: "human", name: "你" }, recipient: { type: "team", name: "团队" }, content: "旧全员消息" },
   ] });
-  assert.deepEqual(records.map((item) => item.id), ["manager"]);
+  assert.deepEqual(records.map((item) => item.id), ["manager", "human"]);
+  assert.equal(records[0].to, null);
+  assert.equal(records[1].human, true);
   assert.equal(records[0].tone, "violet");
   assert.equal(records[0].statusCode, "recorded");
 });
@@ -327,4 +333,143 @@ test("collaboration colors reflect recorded pending/answered status, not busines
   const answer = { id: "a", kind: "clarification_answer", createdAt: "2026-01-02", replyToMessageId: "q", sender: { type: "human", name: "你" }, recipient: { type: "agent", name: "A" }, content: "已确认范围" };
   const records = collaborationRecords({ messages: [question, answer], dispatches });
   assert.equal(records[0].statusCode, "answered"); assert.equal(records[1].tone, "info");
+});
+
+test("collaboration joins only explicit dispatch provenance and preserves each real dispatch", () => {
+  const time = "2026-10-30T00:00:00Z";
+  const message = { id: "decision", kind: "manager_decision", createdAt: time, sender: { type: "agent", name: "经理" }, recipient: { type: "team", name: "全体团队" }, traceId: "manager-trace", content: "请分析需求" };
+  const dispatch = { id: "work", createdAt: time, sourceMessageId: message.id, recipientAgentId: "analyst", workflowNodeId: "requirements", purpose: "node", status: "claimed", attempts: 2, traceIds: ["failed-trace", "worker-trace"] };
+  const records = collaborationRecords({ run: { participants: [{ id: "analyst", name: "需求分析" }] }, messages: [message, { ...message, id: "same-body" }], dispatches: [dispatch, { ...dispatch, id: "extra-work", status: "cancelled" }, { ...dispatch, id: "old-work", sourceMessageId: null, messageIds: [message.id] }] });
+  const joined = records.find(item => item.id === message.id);
+  assert.equal(joined.to, "需求分析"); assert.equal(joined.dispatchId, "work");
+  assert.equal(joined.traceId, "manager-trace"); assert.equal(joined.executionTraceId, "worker-trace");
+  assert.equal(joined.status, ""); assert.equal(joined.deliveries[0].currentStatus, "执行中"); assert.equal(joined.deliveries[0].attempts, 2);
+  assert.equal(records.filter(item => item.content === message.content).length, 2, "identical text is not a duplicate identity");
+  assert.equal(records.find(item => item.id === "same-body").to, null);
+  assert.equal(records.find(item => item.id === "old-work").from, "AgentForge");
+  assert.equal(joined.deliveries[1].currentStatus, "已取消");
+  assert.deepEqual(records.flatMap(item => item.deliveries.map(delivery => delivery.dispatchId)), ["work", "extra-work", "old-work"]);
+});
+
+test("collaboration keeps replies and lifecycle facts but excludes raw Provider and prompt data", () => {
+  const decision = { id: "decision", createdAt: "2026-10-30", kind: "manager_decision", traceId: "manager-trace", sender: { type: "agent", name: "经理" }, recipient: { type: "team" }, content: "交付物已齐备" };
+  const events = [
+    { id: "acceptance", type: "run.awaiting_acceptance", timestamp: "2026-10-30", message: decision.content, data: { acceptanceRequest: { traceId: decision.traceId }, systemPrompt: "SECRET" } },
+    { id: "confirmed", type: "run.completed", timestamp: "2026-10-31", actor: { type: "human", name: "你" }, message: "已确认" },
+    { id: "raw", type: "runtime.event", timestamp: "2026-10-31", message: "SECRET" },
+    { id: "unknown", type: "constructor", timestamp: "2026-10-31", message: "SECRET" },
+  ];
+  const records = collaborationRecords({ messages: [decision], events });
+  assert.equal(records.length, 2);
+  assert.equal(records[0].relatedEvents[0].id, "acceptance");
+  assert.equal(records[1].acceptanceRecordId, "decision");
+  assert.equal(records.filter(item => item.content === decision.content).length, 1);
+  assert.equal(records.at(-1).title, "人类确认完成");
+  assert.doesNotMatch(JSON.stringify(records), /SECRET/);
+});
+
+test("collaboration separates historical timestamps from current state and preserves recovered failure evidence", () => {
+  const dispatch = { id: "manager", recipientAgentId: "pm", workflowNodeId: "preparation", purpose: "manager", status: "done", createdAt: "2026-10-29T22:12:49Z", updatedAt: "2026-10-29T22:13:25Z", attempts: 2, lastError: "会话丢失", traceIds: ["failed", "recovered"] };
+  const records = collaborationRecords({ dispatches: [dispatch], traces: [
+    { id: "failed", dispatchId: "manager", status: "failed", startedAt: "2026-10-29T22:12:49Z", endedAt: "2026-10-29T22:12:53Z", error: "会话丢失" },
+    { id: "recovered", dispatchId: "manager", status: "completed", startedAt: "2026-10-29T22:12:54Z", endedAt: "2026-10-29T22:13:25Z" },
+  ], events: [
+    { id: "reset", type: "session.reset", timestamp: "2026-10-29T22:12:53Z", message: "原会话不可用", data: { traceId: "failed" } },
+    { id: "retry", type: "dispatch.retry_scheduled", timestamp: "2026-10-29T22:12:53Z", message: "安排重试", data: { dispatchId: "manager", error: "会话丢失" } },
+  ] });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].timestamp, dispatch.createdAt); assert.equal(records[0].status, "");
+  const delivery = records[0].deliveries[0];
+  assert.equal(delivery.currentStatus, "执行已结束"); assert.equal(delivery.updatedAt, dispatch.updatedAt);
+  assert.equal(delivery.scope, "全流程协调"); assert.equal(delivery.workflowNodeId, "preparation");
+  assert.equal(delivery.error, null); assert.equal(delivery.previousError, null);
+  assert.deepEqual(delivery.history.map(item => item.id), ["attempt:failed", "reset", "retry", "attempt:recovered"]);
+  assert.equal(delivery.history[0].endedAt, "2026-10-29T22:12:53Z");
+  assert.equal(delivery.history.at(-1).statusLabel, "执行结束");
+});
+
+test("saved dispatch and Trace references connect historical handoffs without text or timing heuristics", () => {
+  const messages = [
+    { id: "decision", kind: "manager_decision", traceId: "pm-turn", createdAt: "2026-01-01", sender: { name: "经理" }, recipient: { type: "team" }, content: "安排下一步" },
+    { id: "handoff", kind: "handoff", traceId: "worker-turn", createdAt: "2026-01-02", sender: { name: "成员" }, recipient: { type: "team" }, content: "工作已交付" },
+  ];
+  const dispatches = [
+    { id: "initial", purpose: "manager", recipientAgentId: "pm", traceIds: ["pm-turn"] },
+    { id: "worker", purpose: "node", recipientAgentId: "a", traceIds: ["worker-turn"], dedupeKey: "handoff:initial" },
+    { id: "followup", purpose: "manager", recipientAgentId: "pm", traceIds: [], dedupeKey: "delivery:worker" },
+    { id: "unknown", purpose: "node", recipientAgentId: "a", traceIds: [], createdAt: "2026-01-01", messageIds: ["decision"] },
+  ];
+  const traces = [{ id: "pm-turn", agentId: "pm", status: "completed" }, { id: "worker-turn", agentId: "a", status: "completed" }];
+  const input = { run: { participants: [{ id: "pm", name: "经理" }, { id: "a", name: "成员" }] }, messages, dispatches, traces };
+  const before = JSON.stringify(input), records = collaborationRecords(input);
+  assert.equal(records.find(item => item.id === "decision").to, "成员");
+  assert.equal(records.find(item => item.id === "handoff").to, "经理");
+  assert.equal(records.find(item => item.id === "decision").deliveries[0].sourceLink, "dispatchTrace");
+  assert.match(records.find(item => item.id === "unknown").sourceNotice, /来源未关联/);
+  assert.equal(JSON.stringify(input), before, "frozen facts are never backfilled or rewritten");
+  const ambiguous = collaborationRecords({ ...input, messages: [...messages, { ...messages[0], id: "other-decision" }] });
+  assert.match(ambiguous.find(item => item.id === "worker").sourceNotice, /来源未关联/);
+});
+
+test("each human completion links its own acceptance and preserves original caveats without judging them", () => {
+  const events = [
+    { id: "accept-first", type: "run.awaiting_acceptance", timestamp: "2026-01-02", message: "听感未验证", data: {} },
+    { id: "confirm-first", type: "run.completed", timestamp: "2026-01-03", message: "人类确认" },
+    { id: "accept-second", type: "run.awaiting_acceptance", timestamp: "2026-01-05", message: "补充交付，风险由人类核对", data: {} },
+    { id: "confirm-second", type: "run.completed", timestamp: "2026-01-06", message: "人类再次确认" },
+  ];
+  const records = collaborationRecords({ events: [...events].reverse(), artifacts: [
+    { id: "a1", name: "report.md", storagePath: "internal", createdAt: "2026-01-01" },
+    { id: "future", name: "future.md", storagePath: "internal", createdAt: "2026-01-04" },
+    { id: "deleted", name: "report.md", deleted: true, createdAt: "2026-01-04" },
+  ] });
+  assert.equal(records.find(item => item.id === "confirm-first").acceptanceRecordId, "accept-first");
+  assert.equal(records.find(item => item.id === "confirm-second").acceptanceRecordId, "accept-second");
+  assert.deepEqual(records.find(item => item.id === "accept-first").files, [{ id: "a1", name: "report.md" }]);
+  assert.deepEqual(records.find(item => item.id === "accept-second").files, [{ id: "future", name: "future.md" }]);
+  assert.equal(records[0].content, "听感未验证");
+  assert.doesNotMatch(JSON.stringify(records), /internal/);
+});
+
+test("run start and explicitly rerouted instructions keep their real processing target", () => {
+  const run = { id: "run", startedAt: "2026-01-01", manager: { id: "pm", name: "经理" }, task: { objective: "完成本轮目标", acceptanceCriteria: ["由人类确认"] }, participants: [{ id: "pm", name: "经理" }] };
+  const message = { id: "instruction", createdAt: "2026-01-02", kind: "instruction", sender: { type: "human", name: "你" }, recipient: { type: "agent", id: "worker", name: "员工" }, content: "@员工 补充要求" };
+  const records = collaborationRecords({ run, messages: [message], dispatches: [
+    { id: "start", createdAt: "2026-01-01", purpose: "manager", recipientAgentId: "pm", status: "done", dedupeKey: "initial-manager" },
+    { id: "route", createdAt: "2026-01-02", purpose: "manager", recipientAgentId: "pm", status: "queued", dedupeKey: "message:instruction", messageIds: ["instruction"] },
+  ] });
+  assert.equal(records.length, 2);
+  assert.equal(records[0].title, "开始协作"); assert.equal(records[0].deliveries[0].sourceLink, "runStart");
+  assert.equal(records[1].to, "经理"); assert.deepEqual(records[1].addressedRecipient, { id: "worker", name: "员工" });
+  assert.equal(records[1].deliveries[0].sourceLink, "messageReference");
+  assert.match(records[1].routingNote, /实际交由 经理/);
+});
+
+
+test("employee state follows its latest invocation through failure, retry and recovery", () => {
+  const failed = {id:"old", agentId:"a", status:"failed", startedAt:"2026-10-31T01:00:00Z"};
+  const retry = {id:"retry", agentId:"a", status:"running", startedAt:"2026-10-31T01:01:00Z"};
+  const other = {id:"other", agentId:"b", status:"completed", startedAt:"2026-10-31T01:02:00Z"};
+  assert.equal(roleExecutionStatus({status:"running"}, [failed,other], "a").state, "error");
+  assert.match(roleExecutionStatus({status:"running"}, [failed], "a").label, /错误/);
+  assert.equal(roleExecutionStatus({status:"running"}, [retry,other,failed], "a").state, "running");
+  assert.equal(roleExecutionStatus({status:"running"}, [failed,other], "b").state, "idle");
+  assert.equal(roleExecutionStatus({status:"running"}, [{...retry,status:"completed"},failed], "a").state, "idle");
+  assert.equal(roleExecutionStatus({status:"completed"}, [retry,failed], "a").state, "idle");
+});
+
+test("worker result projection shows the recorded Markdown report without duplicating the result envelope", () => {
+  const result = {status:"completed",node:"preparation",handoff:"docs/handoff.json"};
+  const report = "# 已完成\n\n**真实交付**：154 条字幕。\n\n```json\n" + JSON.stringify(result) + "\n```";
+  const message = {id:"handoff",kind:"handoff",sender:{type:"agent",name:"员工"},content:JSON.stringify({...result,rawResponse:report})};
+  const original = structuredClone(message);
+  const project = value => collaborationRecords({messages:[value]})[0].content;
+  assert.equal(project(message), "# 已完成\n\n**真实交付**：154 条字幕。");
+  assert.deepEqual(message,original,"stored facts remain unchanged");
+  const example = "说明\n```json\n{\"example\":true}\n```";
+  assert.equal(project({...message,content:JSON.stringify({...result,rawResponse:example})}),example,"unrelated JSON examples remain intact");
+  for(const value of ['{bad json',JSON.stringify({hello:"world"}),JSON.stringify([result])]) assert.equal(project({...message,content:value}),value);
+  assert.equal(project({...message,sender:{type:"human"}}),message.content);
+  assert.equal(project({...message,kind:"instruction"}),message.content);
+  assert.equal(project({...message,content:JSON.stringify({...result,rawResponse:JSON.stringify(result)})}),"状态：completed\n\n交接文件：docs/handoff.json");
 });

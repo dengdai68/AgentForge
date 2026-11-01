@@ -11,7 +11,7 @@
 | 提示词 | [每次员工调用、澄清与新指令的组装逻辑](22-prompt-assembly.md) |
 | 登录 | [认证与会话](14-console-authentication.md) |
 | 沟通 | [私聊与群聊](17-communication.md)、[历史查询](19-agent-history.md) |
-| 客户端 | [Electron](18-electron-client.md)、[CLI](21-configuration-cli.md) |
+| 客户端 | [Electron](18-electron-client.md)、[CLI](21-configuration-cli.md)、[应用更新](24-desktop-updates.md) |
 | 独立项目 | [客户端抽取边界与来源](23-desktop-extraction.md) |
 | 关系图 | [本地图形渲染](12-local-diagram-rendering.md) |
 

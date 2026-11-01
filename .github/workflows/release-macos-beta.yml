@@ -122,7 +122,7 @@ jobs:
             --title "AgentForge $RELEASE_TAG · macOS Apple Silicon Beta" --verify-tag \
             --notes "macOS 13+ / Apple Silicon (M-series) only. Download the DMG and drag AgentForge into Applications, or extract the ZIP. Download SHA256SUMS.txt into the same folder and run: shasum -a 256 -c SHA256SUMS.txt
 
-          This Beta is ad-hoc signed for bundle integrity, NOT Developer ID signed or Apple notarized. Gatekeeper may block it; only allow it through macOS settings if you trust the source. Do not disable Gatekeeper. No automatic updater, Intel/Windows/Linux build, Agent sandbox or enterprise security guarantees.
+          This Beta is ad-hoc signed for bundle integrity, NOT Developer ID signed or Apple notarized. Gatekeeper may block it; only allow it through macOS settings if you trust the source. Do not disable Gatekeeper. This ad-hoc build can detect stable releases and download their installer; native restart-to-install requires a Developer ID signed installation. No Intel/Windows/Linux build, Agent sandbox or enterprise security guarantees.
 
           The local control plane is bundled; no global Node is required. Install and authorize Claude Code or Codex CLI separately. Create a local administrator on first launch, then configure GitHub/GitLab pull tokens under Settings → Repository access. No provider sessions or credentials are bundled.
 

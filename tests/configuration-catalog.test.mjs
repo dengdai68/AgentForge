@@ -38,11 +38,11 @@ test('fresh catalogs are minimal, all examples can be deleted and stay deleted a
     store.deleteAgent(item.id);
   }
   for (const item of store.listWorkflowTemplates()) store.deleteWorkflowTemplate(item.id);
-  for (const item of store.listRuntimeProfiles()) store.deleteRuntimeProfile(item.id);
+  const runtimeIds = store.listRuntimeProfiles().map(item => item.id);
   assert.equal(store.snapshot().events.filter(item => item.type === 'configuration.agent_deleted').length, 3);
   store.close(); store = createStore(options);
   assert.deepEqual(store.listAgents(), []); assert.deepEqual(store.listTeams(), []);
-  assert.deepEqual(store.listWorkflowTemplates(), []); assert.deepEqual(store.listRuntimeProfiles(), []);
+  assert.deepEqual(store.listWorkflowTemplates(), []); assert.deepEqual(store.listRuntimeProfiles().map(item => item.id), runtimeIds);
   const worker = store.createAgent({ name: 'New worker' });
   assert.throws(() => store.createTeam({ name: 'No manager', memberAgentIds: [worker.id] }), /请选择可用的项目经理/);
   const manager = store.createAgent({ name: 'New manager', kind: 'manager' });
@@ -90,7 +90,7 @@ test('failed persistence rolls back catalog removal and its audit atomically', (
   const team = store.createTeam({ name: 'Disposable', memberAgentIds: ['agent_analyst'] });
   const before = store.snapshot();
   database.exec("CREATE TRIGGER reject_catalog BEFORE UPDATE ON workspace_snapshots BEGIN SELECT RAISE(ABORT,'catalog save rejected'); END;");
-  for (const command of [() => store.deleteTeam(team.id), () => store.deleteAgent('agent_tester'), () => store.deleteWorkflowTemplate('content_delivery'), () => store.deleteRuntimeProfile(store.listRuntimeProfiles().find(item => item.provider === 'codex').id)]) {
+  for (const command of [() => store.deleteTeam(team.id), () => store.deleteAgent('agent_tester'), () => store.deleteWorkflowTemplate('content_delivery'), () => store.saveRuntimeProfile({enabled:false},store.listRuntimeProfiles().find(item => item.provider === 'codex').id)]) {
     assert.throws(command, /catalog save rejected/); assert.deepEqual(store.snapshot(), before);
   }
   database.exec('DROP TRIGGER reject_catalog'); store.deleteTeam(team.id);

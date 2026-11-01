@@ -68,7 +68,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   }
   function renderList() {
     const page = paginate(conversations, listPage); listPage = page.page;
-    query(".communication-list").innerHTML = page.items.map((item) => `<button class="communication-contact ${item.id === currentId ? "selected" : ""}" data-chat-id="${escapeHtml(item.id)}"><span class="communication-avatar">${item.kind === "team" ? "群" : escapeHtml(item.name.slice(0, 1))}</span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.preview || (item.kind === "team" ? "团队群聊" : "数字员工私聊"))}</small></span>${item.unreadCount ? `<span class="communication-unread" aria-label="${item.unreadCount} 条未读">${item.unreadCount}</span>` : ""}</button>`).join("") || `<p class="field-hint">${listError ? "会话列表读取失败，正在重连。" : listLoaded ? "还没有会话，点击 ＋ 选择员工或团队开始。" : "正在读取会话…"}</p>`;
+    query(".communication-list").innerHTML = page.items.map((item) => `<button class="communication-contact ${item.id === currentId ? "selected" : ""}" data-chat-id="${escapeHtml(item.id)}"><span class="communication-avatar">${item.kind === "team" ? "群" : escapeHtml(item.name.slice(0, 1))}</span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.preview || (item.kind === "team" ? "团队群聊" : "数字员工私聊"))}</small></span>${item.unreadCount ? `<span class="communication-unread" aria-label="${item.unreadCount} 条未读">${item.unreadCount}</span>` : ""}</button>`).join("") || `<div class="directory-empty" role="${listError ? "alert" : "status"}">${listError ? "会话列表读取失败，正在重连。" : listLoaded ? "<strong>还没有会话</strong>点击 ＋ 选择员工或团队开始。" : "正在读取会话…"}</div>`;
     query(".communication-pager").innerHTML = paginationMarkup(page, "communications");
     queryAll("[data-chat-id]").forEach((button) => button.onclick = () => navigate(button.dataset.chatId));
   }
@@ -360,7 +360,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       const term = input.value.trim().toLowerCase();
       const matches = contacts.filter((item) => [item.name, item.description, item.mission].some((value) => String(value || "").toLowerCase().includes(term)));
       const page = paginate(matches, pickerPage); pickerPage = page.page;
-      list.innerHTML = page.items.map((item) => `<button type="button" class="communication-contact" data-kind="${item.kind}" data-target="${escapeHtml(item.id)}"><span class="communication-avatar">${item.kind === "team" ? "群" : escapeHtml(item.name.slice(0, 1))}</span><span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "team" ? "团队群聊" : "数字员工"}</small></span></button>`).join("") || '<p class="communication-picker-empty">没有匹配的员工或团队</p>';
+      list.innerHTML = page.items.map((item) => `<button type="button" class="communication-contact" data-kind="${item.kind}" data-target="${escapeHtml(item.id)}"><span class="communication-avatar">${item.kind === "team" ? "群" : escapeHtml(item.name.slice(0, 1))}</span><span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "team" ? "团队群聊" : "数字员工"}</small></span></button>`).join("") || '<div class="directory-empty" role="status"><strong>没有匹配的员工或团队</strong>请调整搜索条件。</div>';
       pager.innerHTML = paginationMarkup(page, "contacts");
       list.querySelectorAll("button").forEach((button) => button.onclick = () => { dialog.close(); open(button.dataset.kind, button.dataset.target); });
     };

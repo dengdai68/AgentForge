@@ -22,7 +22,7 @@ AGENTFORGE_PROMPT_E2E_REAL=1 AGENTFORGE_NATIVE_SKILLS_REAL=1 node scripts/test-p
 
 AGENTFORGE_PROMPT_E2E_REAL=1 AGENTFORGE_PROMPT_E2E_PACKAGED=1 node scripts/test-prompt-e2e.mjs 使用当前安装包的隔离 Electron（不与 WEB 模式混用）。两个真实 Provider 在续接时实际调用平台历史 search_private_chat/read_context 取回未放入提示词的随机资料；再完成 Claude 团队代码开发、澄清、独立测试、人类确认、完成后历史答疑和归档拒绝。调用使用现有模型登录，不读取/复制凭据，不覆盖操作者实例；证据明确 packaged surface。package:mac:check 另用受控 Provider 消费实际 Codex 参数，连接真正的打包历史 MCP，断言 Node 标记仅在子进程且八工具及记录可读，不冒充模型。
 
-build-app-icon.cjs 使用 macOS sips/iconutil 从用户原始 web/icons/application.png 生成已提交 ICNS，只缩放原图，不覆盖 PNG、不重绘。临时 iconset 使用专用 mkdtemp，无浏览器、网络或操作者配置访问；修改标志后按 web/icons/README.md 重生成并验证。生成是可选开发工具，发布使用已提交资源，无新增依赖。
+build-app-icon.cjs 保留用户原始 application.png，使用 macOS Swift/CoreGraphics 生成干净圆角 UI 图、透明边距 100/1024 的 Dock 图及 18/36px 单色菜单栏模板，sips/iconutil 从 Dock 图生成同尺度 ICNS。临时文件使用专用 mkdtemp；无浏览器、网络、新包依赖或操作者配置访问。按 web/icons/README.md 重生成并验证，发布读取已生成资源。
 
 test-directory-headers.mjs 覆盖任务操作顺序、任务/归档顶栏名称、无占位的内部语义标题、归档往返搜索保留、团队/工作流跨页搜索/空态/清空与宽窄 客户端布局；test-electron.mjs 对真实 DOM 验证完整脱敏系统/本轮输入、会话 ID、无工具审计详情、人类气泡外元信息与 @成员。使用隔离数据与明确标记的展示夹具。
 
@@ -65,3 +65,31 @@ CHANGE 回归确认目录根下无重复「没有更改」，整体空态及错�
 记录可读性回归使用超过 50 条的 Provider 夹具输出检查普通提示词分页；有界延迟观察真实运行中的夹具 Trace 与终态成员颜色，私聊/群聊检查姓名色和窄窗口，不冒充真实模型。源码检查同样显式选员工、加载旧页及滚动触发正文。
 
 test-marketplace-edit.mjs 同时验收角色宽窄空态与 MCP 一致、重复插件/MCP UI/CLI/API 导入覆盖、插件拆分 MCP 和停用员工绑定、并发创建与不兼容整批回滚；AGENTFORGE_MCP_EDIT_APP 可验证打包应用。
+
+`node scripts/test-collaboration-flow.mjs` 用隔离 HOME/数据库/认证启动真实 Electron，验证经理派工、员工交接、成员咨询/答复、人类消息、平台协调与重试事实、分页、涉及人类筛选、Markdown 安全和宽窄布局，并经真实 HTTP/CLI 核对同一投影。执行数据为终态的 Store 场景，不调用 Provider；证据写入忽略的 `.data/collaboration-flow-*`。
+
+`AGENTFORGE_COLLABORATION_APP=/absolute/path/AgentForge.app node scripts/test-collaboration-flow.mjs` 对指定构建/安装包运行同一套隔离协作验收，不访问原实例数据。
+
+协作验收补充覆盖：无 sourceMessageId 时以源投递/Trace 唯一关联的旧交接；失败后恢复的当前状态与实际事件时间；经理全流程协调；验收说明与人类确认时序。隔离 fixture 走 Store 完成态，不调用 Provider；source/packaged 均操作实际760px内容窗口。当前安装实例的真实任务审阅通过原有客户端进行，不读取认证数据库、浏览器 cookie 或直接读领域数据库。
+
+协作降噪验收还验证无当前投递区块、无平台失败通知、控制台 Tab 固定名称、发言 Trace 与无来源 Trace 的执行入口、控制台红色失败日志和切回全部执行；CLI 仍完整保留重试事实。
+
+协作脚本同时验证：5行 Markdown 区域在折叠时已完整渲染、展开保留 DOM、交接信封正文提取、短消息无展开入口、验收无自动附件、无控制台顶部错误摘要、最新失败员工标错及成功重试清错。
+
+控制台展示已保存的公开 thinking 正文；敏感片段仍过滤，首尾空白与换行规范化不标为脱敏。历史正文为空时明确说明“未保存可显示的思考正文”，不以“已脱敏”占位，不补造未公开或未保存内容。
+
+`node scripts/test-brand-presentation.mjs` 在隔离 Electron 中验证两主题、1320/760px：员工可用与 Runtime 支持同色、支持/不支持及头像/按钮/空态文字对比、键盘焦点、三目录空态 computed style 完全一致、详情入口与真实 HTTP 失败。仅展示夹具，不执行 Provider/MCP。`AGENTFORGE_BRAND_APP=/absolute/path/AgentForge.app` 可检查指定构建包；证据在忽略的 `.data/brand-presentation-*`。
+
+`node scripts/test-runtime-settings.mjs`：隔离 Electron/HTTP/真实 CLI 子进程检查固定 Runtime、可用门禁、两字段页内折叠编辑、两主题宽窄布局/标题层级/六行候选与鼠标连续选择、旧字段拒绝、共享授权及退出撤销；`AGENTFORGE_SETTINGS_APP=/absolute/path/AgentForge.app` 检查安装包并验证启动自动安装 CLI。`AGENTFORGE_SETTINGS_REAL=1` 显式运行 Claude Code 经理→Codex 成员→人类确认的最小完整任务，使用私有 Shell PATH 包装器只读复用本机 Provider 登录，不改全局凭据。证据在忽略的 `.data/runtime-settings-*`。
+
+`test-runtime-settings.mjs` 还在两主题/宽窄窗口验证紧凑 Runtime/仓库二级配置、任务操作直接可见、删除确认及归档恢复往返；生命周期数据仅为展示夹具，不是模型执行证据。
+
+`node scripts/test-task-creation.mjs`：隔离 Electron 两主题/1320×1000、760×760、800×560 检查六至十二行输入上限、折叠验收、固定同排选择器与提交、真实 HTTP 创建及启动被拒后的保留。`AGENTFORGE_TASK_CREATION_APP=/path/AgentForge.app` 运行打包版。启动请求故意拒绝，不运行 Provider。
+
+`test-runtime-settings.mjs` 同时检查常规两项同行、Token 与保存同行、Runtime 双字段同行及两类下拉4px间距，并通过真实宿主打开当前隔离 Run 文件夹；不对操作者任务发命令。
+
+`test-runtime-settings.mjs` 还测量任务搜索区与列表的左右对齐、8px间距和窄屏无溢出，覆盖当前任务、空搜索与归档页。
+
+`test-collaboration-flow.mjs` 另验证控制台 SSE 追加与工作区摘要刷新保留日志 DOM、正文选择和阅读位置；其事件是隔离呈现夹具，不代替真实 Provider 长任务验证。
+
+test-application-updates.mjs 用隔离 HOME/数据启动真实 Electron（AGENTFORGE_UPDATES_APP 可指定安装包），通过注入控制器适配器覆盖正式版/Beta/无正式版/离线、下载进度与真实文件校验、后台发现更新及下载完成均不创建通知卡、返回更新区域仍可操作、原生安装繁忙/空闲和两主题宽窄布局。假DMG不执行、原生安装适配器不退出测试客户端，不冒充真实签名升级。

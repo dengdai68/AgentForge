@@ -45,3 +45,21 @@ UI 使用隔离 Electron 实例检查宽窄布局、搜索、展开和滚动。�
 提示词回归覆盖未完整加载的长调用、交错调用去重与隐藏帧分页边界。协作/沟通配色只投影真实消息事实；CLI 回归确保视觉元数据不泄漏到 JSON。
 
 重复导入验证：marketplace.test.mjs 覆盖插件＋MCP同事务替换、停用员工、过期绑定回滚及历史文件可读；configuration-cli.test.mjs 覆盖渐进帮助/schema与覆盖回执。test-marketplace-edit.mjs 使用隔离 Electron/CLI/API 验证并发导入、不同来源、整批失败与角色宽窄空态。
+
+完整协作记录：client-projections 覆盖全部消息/实际投递/协调事件、同文不同消息、无来源历史投递、发言与执行 Trace 分离和原始 Provider 数据排除；dispatch-routing 验证同 Run 来源校验及消息输入/排队语义不变；configuration-cli 验证文本/JSON 投影。真实桌面与 HTTP/CLI 验收见 scripts/test-collaboration-flow.mjs。
+
+协作可读性回归：历史时间与当前状态隔离、失败/恢复的逐次执行明细、已存投递/Trace 唯一关联及歧义回退、不同轮人类确认对应不同验收、验收时文件有界引用与删除/未来记录排除；不根据自然语言判断质量。
+
+员工状态回归覆盖最新调用失败→重试→成功和其他成员隔离；交接 JSON 投影覆盖正文提取、重复结果移除、无关 JSON 保留与原始事实不变。隔离 Electron 验证无顶部错误摘要、日志错误红色、5行 Markdown 原位展开和验收无自动附件。
+
+控制台展示已保存的公开 thinking 正文；敏感片段仍过滤，首尾空白与换行规范化不标为脱敏。历史正文为空时明确说明“未保存可显示的思考正文”，不以“已脱敏”占位，不补造未公开或未保存内容。
+
+`node scripts/test-brand-presentation.mjs` 在隔离 Electron 中验证两主题、1320/760px：员工可用与 Runtime 支持同色、支持/不支持及头像/按钮/空态文字对比、键盘焦点、三目录空态 computed style 完全一致、详情入口与真实 HTTP 失败。仅展示夹具，不执行 Provider/MCP。`AGENTFORGE_BRAND_APP=/absolute/path/AgentForge.app` 可检查指定构建包；证据在忽略的 `.data/brand-presentation-*`。
+
+固定 Runtime 回归在 runtime-profiles/configuration-catalog/configuration-cli：两项稳定、字段拒绝、开关门禁、冻结快照与事务回滚。auth 测试真实 HTTP 的委托签发、父退出/重置/重启失效；CLI 测试实例校验与显式会话隔离。scripts/test-runtime-settings.mjs 补实际页内折叠/开关/共享授权及打包默认安装验收。
+
+任务中心操作直接可见的展示回归覆盖删除确认保留、归档/恢复往返和两主题宽窄布局，入口 scripts/test-runtime-settings.mjs；不以其生命周期夹具作为真实 Provider 执行证据。
+
+任务创建展示在 smoke 静态契约与 scripts/test-task-creation.mjs 隔离界面验收同步；显式验收内容仍按原协议冻结，隐藏说明不改变 Runtime 权限或 CLI 能力。
+
+application-updates.test.mjs 覆盖严格正式版与SemVer、GitHub 404/错误、下载并发与显式触发、真实流式校验/失败清理、后台周期停止、IPC来源限制及真实子服务空闲锁（忙写入拒绝、锁中HTTP写入拒绝、正确ID释放）。签名安装真实闭环仍需正式签名Release。

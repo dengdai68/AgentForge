@@ -340,17 +340,20 @@ export function workspaceAgents(workspace = {}, agents = []) {
 // authority for the whole workspace. A late read model must not make a
 // cancelled, failed, or completed Run look as though a member is still active.
 export function roleExecutionStatus(run = {}, traces = [], agentId) {
-  const agentTraces = asArray(traces).filter((trace) => trace.agentId === agentId);
-  const terminal = terminalRunStatuses.has(run.status);
-  const activeTrace = terminal ? null : agentTraces.find((trace) => trace.status === "running") || null;
-  const terminalLabel = terminal ? (STATUS_TEXT[run.status] || run.status) : null;
+  const agentTraces = asArray(traces).filter(trace => trace.agentId === agentId)
+    .map((trace, index) => ({ trace, index }))
+    .sort((a, b) => (Date.parse(a.trace.startedAt || a.trace.createdAt) || 0) - (Date.parse(b.trace.startedAt || b.trace.createdAt) || 0) || a.index - b.index)
+    .map(item => item.trace);
+  const latest = agentTraces.at(-1), terminal = terminalRunStatuses.has(run.status);
+  const activeTrace = !terminal && latest?.status === "running" ? latest : null;
+  const failed = !activeTrace && latest?.status === "failed";
+  const terminalLabel = terminal ? run.status === "failed" ? "已停止" : STATUS_TEXT[run.status] || run.status : null;
   return {
-    active: Boolean(activeTrace),
-    activeTrace,
+    active: Boolean(activeTrace), activeTrace, failed,
+    state: activeTrace ? "running" : failed ? "error" : "idle",
     traceCount: agentTraces.length,
-    label: activeTrace
-      ? `● 执行中 · ${activeTrace.workflowNodeId}`
-      : `○ ${terminalLabel || "空闲"} · ${agentTraces.length} 条 Trace`,
+    label: activeTrace ? `● 执行中 · ${activeTrace.workflowNodeId}`
+      : `${failed ? "● 错误" : `○ ${terminalLabel || "空闲"}`} · ${agentTraces.length} 条 Trace`,
   };
 }
 
@@ -430,18 +433,181 @@ export function mentionables(agents = []) {
   return [...new Map(asArray(agents).filter(Boolean).map((agent) => [agent.id, { id: agent.id, name: agent.name, color: agent.color }])).values()];
 }
 
+// The original Message remains an immutable execution fact. Only known worker
+// result envelopes are projected into their recorded natural-language report.
+function collaborationContent(message) {
+  const content = message.content || "";
+  if (message.kind !== "handoff" || message.sender?.type !== "agent") return content;
+  let envelope;
+  try { envelope = JSON.parse(content); } catch { return content; }
+  if (!envelope || Array.isArray(envelope) || typeof envelope.rawResponse !== "string" ||
+      !(typeof envelope.status === "string" || typeof envelope.node === "string" || envelope.kind === "node_result")) return content;
+  const raw = envelope.rawResponse.trim();
+  const report = raw.replace(/```(?:json)?\s*([\s\S]*?)```/gi, (block, body) => {
+    try {
+      const value = JSON.parse(body);
+      return value && !Array.isArray(value) && Object.keys(value).length && Object.entries(value).every(([key, item]) =>
+        Object.hasOwn(envelope, key) && JSON.stringify(envelope[key]) === JSON.stringify(item)) ? "" : block;
+    } catch { return block; }
+  }).trim();
+  if (report) {
+    try { JSON.parse(report); } catch { return report; }
+  }
+  const facts = [["status", "状态"], ["verdict", "结论"], ["handoff", "交接文件"]]
+    .filter(([key]) => typeof envelope[key] === "string")
+    .map(([key, label]) => `${label}：${envelope[key]}`);
+  return facts.length ? facts.join("\n\n") : "员工已提交结构化交接结果，详情见本轮控制台。";
+}
+
 export function collaborationRecords(workspace = {}) {
   const messages = asArray(workspace.messages), dispatches = asArray(workspace.dispatches);
-  const statuses = { queued: "排队中", claimed: "执行中", waiting: "等待答复", done: "已处理", cancelled: "已取消" };
-  const kinds = { inquiry: "人类咨询", inquiry_answer: "答疑回复", agent_consultation: "角色咨询", clarification_question: "询问人类", consultation_answer: "咨询答复", clarification_answer: "人类答复", human_instruction: "追加指令", instruction: "追加指令", handoff: "交接", manager_decision: "经理决策", escalation: "自动升级" };
-  const records = messages.filter((item) => item.kind !== "automatic_retry" && (item.sender?.type === "agent" ? ["agent", "human", "team"].includes(item.recipient?.type) : item.sender?.type === "human" && item.recipient?.type === "agent")).map((item) => {
-    const delivery = dispatches.find((entry) => asArray(entry.messageIds).includes(item.id));
-    const waiting = dispatches.find((entry) => entry.waitingMessageId === item.id);
-    const answer = messages.find((entry) => entry.replyToMessageId === item.id);
-    const question = messages.find((entry) => entry.id === item.replyToMessageId);
-    const statusCode = answer ? "answered" : waiting?.status === "waiting" ? "waiting" : delivery?.status || "recorded";
-    const tone = statusCode === "waiting" || item.kind === "escalation" ? "warning" : item.sender?.type === "human" ? "info" : ["manager_decision", "agent_consultation"].includes(item.kind) ? "violet" : "teal";
-    return { id: item.id, timestamp: item.createdAt, category: "message", tone, statusCode, human: item.sender?.type === "human" || item.recipient?.type === "human", from: item.sender?.name || "团队", to: item.recipient?.name || "团队", title: kinds[item.kind] || (item.replyToMessageId ? "答复" : "协作消息"), content: item.content || "", status: answer ? "已回答" : waiting?.status === "waiting" ? "等待答复" : delivery ? statuses[delivery.status] || delivery.status : "已记录", questionType: item.questionType, routingReason: item.routingReason, reply: question ? `${question.sender?.name || "团队"}：${question.content || ""}` : null, replyId: item.id, canReply: Boolean(waiting?.status === "waiting" && item.recipient?.type === "human"), traceId: item.traceId };
+  const traces = asArray(workspace.traces), events = asArray(workspace.events), run = workspace.run || {};
+  const byMessage = new Map(messages.map(item => [item.id, item]));
+  const byDispatch = new Map(dispatches.map(item => [item.id, item]));
+  const byTrace = new Map(traces.map(item => [item.id, item]));
+  const participants = asArray(run.participants), nodes = asArray(run.task?.workflowSnapshot?.nodes);
+  const memberName = id => participants.find(item => item.id === id)?.name || (run.manager?.id === id ? run.manager.name : id);
+  const time = value => Date.parse(value) || 0;
+  const chronological = (a, b) => time(a.timestamp) - time(b.timestamp);
+  const kinds = { inquiry: "人类咨询", inquiry_answer: "答疑回复", agent_consultation: "成员咨询", clarification_question: "询问人类", consultation_answer: "咨询答复", clarification_answer: "人类答复", human_instruction: "追加指令", instruction: "追加指令", handoff: "交接", manager_decision: "经理决策", escalation: "升级协调", coordination_notice: "协调说明", automatic_retry: "重试说明" };
+  const purposes = { manager: "经理协调", node: "节点派工", consultation: "咨询投递", instruction: "指令投递", inquiry: "答疑投递", delivery_review: "交付复核" };
+  const eventTitles = { "dispatch.retry_scheduled": "安排重试", "dispatch.retry_requested": "人类重试", "dispatch.retry_stopped": "因失败停止", "dispatch.escalated": "升级协调", "dispatch.coordination_followups_settled": "协调投递结算", "session.reset": "会话重建", "run.completed": "人类确认完成", "run.awaiting_acceptance": "提交人类验收", "run.acceptance_reopened": "重新协作", "run.recovered": "中断恢复", "run.cancelled": "人类终止", "run.paused": "任务暂停", "run.resumed": "任务继续", "run.inquiries_cancelled": "停止答疑", "run.failed": "执行失败", "run.retry_requested": "人类恢复", "run.orchestration_retry_requested": "重新协调", "run.reassessment_requested": "重新评估" };
+  const publicEvent = event => ({
+    id: event.id, timestamp: event.timestamp, category: "event", eventType: event.type,
+    title: eventTitles[event.type], content: event.message || "", from: event.actor?.name || "AgentForge",
+    senderType: event.actor?.type || "system", traceId: event.data?.traceId || event.data?.acceptanceRequest?.traceId || null,
+    error: event.data?.error || null, reason: event.data?.reason || null, nextRetryAt: event.data?.nextRetryAt || null,
+    relatedDispatchIds: event.data?.dispatchIds || event.data?.cancelledDispatchIds || event.data?.recoveredDispatchIds || [],
   });
-  return records.sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+  const records = messages.map(item => {
+    const waiting = dispatches.find(entry => entry.status === "waiting" && entry.waitingMessageId === item.id);
+    const answer = messages.find(entry => entry.replyToMessageId === item.id), question = byMessage.get(item.replyToMessageId);
+    const statusCode = answer ? "answered" : waiting ? "waiting" : "recorded";
+    return {
+      id: item.id, timestamp: item.createdAt, category: "message", senderType: item.sender?.type,
+      from: item.sender?.name || "AgentForge", to: item.recipient?.type === "team" ? null : item.recipient?.name || (item.recipient?.type === "human" ? "你" : item.recipient?.id || null),
+      title: kinds[item.kind] || (item.replyToMessageId ? "答复" : "协作消息"), content: collaborationContent(item),
+      status: answer ? "当前：已回答" : waiting ? "当前：等待答复" : "", statusCode,
+      tone: waiting || item.kind === "escalation" ? "warning" : item.sender?.type === "human" ? "info" : ["manager_decision", "agent_consultation"].includes(item.kind) ? "violet" : "teal",
+      human: item.sender?.type === "human" || item.recipient?.type === "human",
+      questionType: item.questionType, routingReason: item.routingReason,
+      reply: question ? `${question.sender?.name || "团队"}：${question.content || ""}` : null,
+      replyId: item.id, canReply: Boolean(!answer && waiting && item.recipient?.type === "human"), traceId: item.traceId,
+      deliveries: [], relatedEvents: [],
+    };
+  });
+  const recordById = new Map(records.map(item => [item.id, item]));
+  const start = run.startedAt && run.task?.objective ? {
+    id: `${run.id}:start`, timestamp: run.startedAt, category: "event", eventType: "run.started", title: "开始协作",
+    from: "AgentForge", to: run.manager?.name || null, senderType: "system", content: run.task.objective,
+    acceptanceCriteria: asArray(run.task.acceptanceCriteria), tone: "info", statusCode: "recorded", status: "", human: true, deliveries: [], relatedEvents: [],
+  } : null;
+  if (start) { records.push(start); recordById.set(start.id, start); }
+  const eventRecords = new Map();
+  for (const event of events.filter(item => Object.hasOwn(eventTitles, item.type))) {
+    const record = { ...publicEvent(event), to: null, status: "", statusCode: "recorded",
+      tone: /failed|cancelled/.test(event.type) ? "warning" : "info",
+      human: event.actor?.type === "human" || ["run.completed", "run.awaiting_acceptance", "run.acceptance_reopened", "run.cancelled", "run.paused", "run.resumed", "run.inquiries_cancelled"].includes(event.type),
+      deliveries: [], relatedEvents: [],
+    };
+    eventRecords.set(event.id, record);
+  }
+  // Resolve existing structured references only. Never match prose, names,
+  // timestamps, or mere inbox membership to invent a historical handoff.
+  const sourceFor = delivery => {
+    if (delivery.sourceMessageId) return byMessage.has(delivery.sourceMessageId) ? { id: delivery.sourceMessageId, via: "sourceMessageId" } : null;
+    const messageKey = /^message:(.+)$/.exec(delivery.dedupeKey || "");
+    if (messageKey && asArray(delivery.messageIds).includes(messageKey[1]) && byMessage.has(messageKey[1])) return { id: messageKey[1], via: "messageReference" };
+    if (["consultation", "instruction", "inquiry"].includes(delivery.purpose)) {
+      const candidates = asArray(delivery.messageIds).map(id => byMessage.get(id)).filter(item => item?.recipient?.id === delivery.recipientAgentId && ["agent_consultation", "instruction", "human_instruction", "inquiry"].includes(item.kind));
+      if (candidates.length === 1) return { id: candidates[0].id, via: "addressedMessage" };
+    }
+    const match = /^(handoff|delivery|followup|routing|redispatch):(.+)$/.exec(delivery.dedupeKey || "");
+    const sourceDelivery = match && byDispatch.get(match[2]);
+    if (!sourceDelivery) return null;
+    const expected = match[1] === "handoff" ? ["manager_decision"] : match[1] === "delivery" ? ["handoff"] : ["routing", "redispatch"].includes(match[1]) ? ["coordination_notice"] : ["manager_decision", "handoff"];
+    const sourceTraces = asArray(sourceDelivery.traceIds).filter(id => {
+      const trace = byTrace.get(id);
+      return trace?.status === "completed" && trace.agentId === sourceDelivery.recipientAgentId;
+    });
+    const candidates = messages.filter(item => sourceTraces.includes(item.traceId) && expected.includes(item.kind));
+    return candidates.length === 1 ? { id: candidates[0].id, via: "dispatchTrace" } : null;
+  };
+  const deliveryHistory = new Map(dispatches.map(item => [item.id, []]));
+  const absorbedEvents = new Set();
+  for (const event of events) {
+    if (!["dispatch.retry_scheduled", "dispatch.retry_stopped", "dispatch.escalated", "session.reset"].includes(event.type)) continue;
+    const id = event.data?.dispatchId || byTrace.get(event.data?.traceId)?.dispatchId;
+    if (!deliveryHistory.has(id)) continue;
+    deliveryHistory.get(id).push(publicEvent(event)); absorbedEvents.add(event.id);
+  }
+  for (const delivery of dispatches.filter(item => item.id)) {
+    const source = sourceFor(delivery);
+    const recovery = !source && events.find(event => ["run.retry_requested", "run.orchestration_retry_requested"].includes(event.type) && event.data?.dispatchId === delivery.id);
+    let record = source ? recordById.get(source.id) : recovery ? eventRecords.get(recovery.id) : delivery.dedupeKey === "initial-manager" ? start : null;
+    if (!record) {
+      record = { id: delivery.id, timestamp: delivery.createdAt, category: "dispatch", title: "建立投递", from: "AgentForge", to: memberName(delivery.recipientAgentId), senderType: "system", content: "", status: "", statusCode: "recorded", tone: "violet", human: false, sourceNotice: "来源未关联；仅展示已建立的实际投递。", deliveries: [], relatedEvents: [] };
+      records.push(record); recordById.set(record.id, record);
+    }
+    const history = asArray(delivery.traceIds).map((id, index) => {
+      const trace = byTrace.get(id);
+      return trace ? { id: `attempt:${id}`, category: "attempt", timestamp: trace.startedAt, endedAt: trace.endedAt || null, title: `第 ${index + 1} 次执行`, status: trace.status, statusLabel: ({ running: "执行中", completed: "执行结束", failed: "失败", cancelled: "已停止" })[trace.status] || trace.status, traceId: id, error: trace.error || null } : null;
+    }).filter(Boolean).concat(deliveryHistory.get(delivery.id) || []).sort(chronological);
+    const scope = ["manager", "delivery_review"].includes(delivery.purpose) ? "全流程协调" : nodes.find(node => node.id === delivery.workflowNodeId)?.title || delivery.workflowNodeId;
+    const currentStatus = ({ queued: delivery.nextRetryAt ? "等待重试" : "排队中", claimed: "执行中", waiting: "等待答复", done: "执行已结束", cancelled: delivery.lastError ? "因失败停止" : "已取消" })[delivery.status] || delivery.status;
+    const details = {
+      dispatchId: delivery.id, sourceMessageId: source?.id || null, sourceLink: source?.via || (recovery ? "recoveryEvent" : delivery.dedupeKey === "initial-manager" && start ? "runStart" : null),
+      recipientAgentId: delivery.recipientAgentId, recipientName: memberName(delivery.recipientAgentId), workflowNodeId: delivery.workflowNodeId,
+      scope, purposeCode: delivery.purpose, purpose: purposes[delivery.purpose] || delivery.purpose, createdAt: delivery.createdAt, updatedAt: delivery.updatedAt,
+      currentStatusCode: delivery.status, currentStatus, attempts: delivery.attempts || 0,
+      nextRetryAt: delivery.nextRetryAt || null, error: delivery.status === "done" ? null : delivery.lastError || null,
+      previousError: delivery.status === "done" && delivery.lastError && !history.some(item => item.error === delivery.lastError) ? delivery.lastError : null,
+      executionTraceId: asArray(delivery.traceIds).at(-1) || null, history,
+    };
+    record.deliveries.push(details);
+    if (source && byMessage.get(source.id)?.kind === "manager_decision" && delivery.purpose === "node") record.title = "派工";
+    record.human ||= history.some(item => item.senderType === "human");
+    if (!record.dispatchId) {
+      // Keep scalar references for existing clients; all mutable state is scoped
+      // under deliveries, never stamped onto the message's historical time.
+      Object.assign(record, { dispatchId: details.dispatchId, sourceMessageId: details.sourceMessageId, recipientAgentId: details.recipientAgentId, workflowNodeId: details.workflowNodeId, executionTraceId: details.executionTraceId });
+      const originalRecipient = source && byMessage.get(source.id)?.recipient;
+      if (originalRecipient?.type === "team") record.to = details.recipientName;
+      else if (originalRecipient?.type === "agent" && originalRecipient.id !== delivery.recipientAgentId) {
+        record.addressedRecipient = { id: originalRecipient.id, name: originalRecipient.name };
+        record.routingNote = `原消息指向 ${originalRecipient.name || originalRecipient.id}；实际交由 ${details.recipientName} 处理。`;
+        record.to = details.recipientName;
+      }
+      if (recovery) record.to = details.recipientName;
+    }
+  }
+  const acceptances = [];
+  for (const event of events.filter(item => Object.hasOwn(eventTitles, item.type) && !absorbedEvents.has(item.id)).sort((a, b) => time(a.timestamp) - time(b.timestamp))) {
+    const record = eventRecords.get(event.id);
+    if (event.type === "run.awaiting_acceptance") {
+      const matches = messages.filter(item => item.kind === "manager_decision" && item.traceId && item.traceId === event.data?.acceptanceRequest?.traceId);
+      const anchor = matches.length === 1 ? recordById.get(matches[0].id) : record;
+      anchor.title = "提交人类验收"; anchor.human = true;
+      if (anchor !== record) {
+        anchor.relatedEvents.push({ ...publicEvent(event), content: event.message === anchor.content ? "经理已提交人类验收。" : event.message || "" });
+      } else records.push(record);
+      const latestFiles = new Map();
+      for (const file of asArray(workspace.artifacts).filter(item => !item.createdAt || time(item.createdAt) <= time(event.timestamp))) {
+        const previous = latestFiles.get(file.name);
+        if (!previous || time(file.createdAt) >= time(previous.createdAt)) latestFiles.set(file.name, file);
+      }
+      const files = [...latestFiles.values()].filter(item => !item.deleted && item.storagePath);
+      anchor.fileCount = files.length;
+      anchor.files = files.slice(-8).map(({ id, name }) => ({ id, name }));
+      acceptances.push({ timestamp: event.timestamp, recordId: anchor.id });
+    } else {
+      if (event.type === "run.completed") {
+        const acceptance = acceptances.filter(item => time(item.timestamp) <= time(event.timestamp)).sort(chronological).at(-1);
+        if (acceptance) record.acceptanceRecordId = acceptance.recordId;
+        record.confirmationNote = "确认前的交付说明与未验证事项保留在对应验收记录中；平台不替代人类判断交付质量。";
+      }
+      records.push(record);
+    }
+  }
+  return records.sort(chronological);
 }

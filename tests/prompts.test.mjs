@@ -26,7 +26,7 @@ test('workflow is manager-only system context; environment and persona never ent
   assert.match(worker.prompt, /CURRENT_DELIVERY|TASK_OBJECTIVE/);
   const manager = taskPrompt({ ...input, agent: { ...input.agent, kind: 'manager' }, mode: 'manager' });
   assert.match(manager.systemPrompt, /OTHER_NODE_SECRET/);
-  assert.doesNotMatch(manager.prompt, /OTHER_NODE_SECRET|CURRENT_DELIVERY/);
+  assert.doesNotMatch(manager.prompt, /OTHER_NODE_SECRET|CURRENT_DELIVERY|workflowNodeId/);
   const continued = taskPrompt({ ...input, session: { resume: true, inputContext: worker.inputContext } });
   assert.doesNotMatch(continued.prompt, /TASK_OBJECTIVE/);
   assert.doesNotMatch(continued.prompt, /CURRENT_DELIVERY/);
@@ -43,7 +43,7 @@ test('resumed task delivers only changed context and new handoffs, while retries
   assert.doesNotMatch(second.prompt,/TASK_OBJECTIVE|CURRENT_DELIVERY|首次派工|audio.wav/);
   input.workspace.artifacts[0].sha256='bbb';
   const changed=taskPrompt({...input,session:{resume:true,inputContext:second.inputContext},messages:[]});
-  assert.match(changed.prompt,/audio.wav/);
+  assert.doesNotMatch(changed.prompt,/audio.wav|Artifact 引用更新/);
   assert.doesNotMatch(changed.prompt,/TASK_OBJECTIVE|CURRENT_DELIVERY/);
 });
 
@@ -160,4 +160,22 @@ test('native adapters receive application instructions separately and update the
   assert.ok(args.includes('developer_instructions="SYSTEM_RULE_ONE"'));
   const snapshot = promptSnapshot(base);
   assert.match(snapshot.prompt.text, /\[应用系统指令\][\s\S]*SYSTEM_RULE_ONE[\s\S]*\[本轮输入\][\s\S]*USER_ONLY/);
+});
+
+
+test('task input keeps actionable message provenance and omits routing/storage noise', () => {
+  const input = taskInput();
+  input.node.staffingGuidance = 'MANAGER_STAFFING_ONLY';
+  input.agent.systemPrompt = ''; input.agent.description = 'ONCE_PERSONA';
+  input.messages = [{id:'m1',runId:'STORAGE_RUN',conversationId:'STORAGE_CHAT',traceId:'STORAGE_TRACE',sender:{id:'manager',name:'经理'},recipient:{id:'worker'},replyToMessageId:'question-one',kind:'consultation_reply',questionType:'澄清',content:'ACTUAL_ANSWER /work/deliverable.txt',routingReason:'ROUTING_AUDIT',consideredMemberIds:['AUDIT_MEMBER']}];
+  input.workspace.artifacts = [{id:'a1',name:'UNRELATED_LOG',sha256:'INTERNAL_HASH'}];
+  const result = taskPrompt(input);
+  assert.equal(result.systemPrompt.split('ONCE_PERSONA').length - 1, 1);
+  assert.doesNotMatch(result.systemPrompt, /团队共享仓库：\[\]/);
+  assert.doesNotMatch(result.prompt, /MANAGER_STAFFING_ONLY|STORAGE_|ROUTING_AUDIT|AUDIT_MEMBER|UNRELATED_LOG|INTERNAL_HASH|lastErrorKind|messageIds/);
+  assert.match(result.prompt, /ACTUAL_ANSWER \/work\/deliverable.txt/);
+  assert.match(result.prompt, /question-one|consultation_reply|manager/);
+  // Staffing guidance is preserved in the manager's full workflow definition.
+  input.task.workflowSnapshot.nodes[0].staffingGuidance = 'MANAGER_STAFFING_ONLY';
+  assert.match(taskPrompt({...input,agent:{...input.agent,kind:'manager'},mode:'manager'}).systemPrompt,/MANAGER_STAFFING_ONLY/);
 });

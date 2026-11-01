@@ -148,6 +148,37 @@ test('task CLI queries scoped progress, filters and collaboration and rejects st
   await invoke(['start', task.id]); assert.equal(writes[2].path, '/api/tasks/task_one/run');
   for (const operation of ['confirm', 'complete', 'delete']) await assert.rejects(invoke([operation, task.id]), error => error.code === 'USAGE');
 });
+
+test('task collaboration CLI exposes complete dispatch flow in text and JSON without nested snapshots', async () => {
+  const f = await fixture();
+  const task = { id: 'task_flow', title: '协作流', status: 'running' };
+  const workspace = {
+    run: { id: 'run_flow', task, participants: [{ id: 'analyst', name: '需求分析' }] }, pendingQuestions: [], traces: [], artifacts: [], defects: [],
+    messages: [
+      { id: 'assignment', kind: 'manager_decision', createdAt: '2026-10-30T00:00:00Z', sender: { type: 'agent', name: '经理' }, recipient: { type: 'team', name: '全体团队' }, content: '分析验收标准', traceId: 'source-trace' },
+      { id: 'handoff', kind: 'handoff', createdAt: '2026-10-30T00:00:01Z', sender: {type:'agent',name:'需求分析'}, content: JSON.stringify({status:'completed', rawResponse:'# HUMAN_REPORT\n\n已交付验收标准。'}) },
+      { id: 'notice', kind: 'coordination_notice', createdAt: '2026-10-30T00:00:02Z', sender: { type: 'system', name: 'AgentForge' }, content: '协调说明' },
+      { id: 'human', kind: 'instruction', createdAt: '2026-10-30T00:00:03Z', sender: { type: 'human', name: '你' }, recipient: { type: 'team' }, content: '补充说明' },
+    ],
+    dispatches: [{ id: 'work', sourceMessageId: 'assignment', createdAt: '2026-10-30T00:00:01Z', recipientAgentId: 'analyst', workflowNodeId: 'requirements', purpose: 'node', status: 'claimed', attempts: 1, traceIds: ['execution-trace'] }],
+    events: [{ id: 'pause', type: 'run.paused', timestamp: '2026-10-30T00:00:04Z', message: '任务暂停', data: { systemPrompt: 'INTERNAL_SNAPSHOT' } }],
+  };
+  const fetcher = async url => new Response(JSON.stringify(url.endsWith('/api/bootstrap') ? { tasks: [task], runs: [{ id: 'run_flow', taskId: task.id }] } : workspace));
+  const args = ['tasks', 'collaboration', task.id, '--all', '--session-file', f.sessionFile];
+  const result = await execute(args, { fetcher });
+  assert.deepEqual(result.items.map(item => item.id), ['pause', 'human', 'notice', 'handoff', 'assignment']);
+  const assignment = result.items.at(-1);
+  assert.equal(assignment.to, '需求分析'); assert.equal(assignment.dispatchId, 'work');
+  assert.equal(assignment.traceId, 'source-trace'); assert.equal(assignment.executionTraceId, 'execution-trace');
+  const rendered = await captured(args, { fetcher });
+  assert.match(rendered.stdout, /HUMAN_REPORT/); assert.doesNotMatch(rendered.stdout,/rawResponse/);
+  assert.match(rendered.stdout, /接手执行 Trace ID/); assert.match(rendered.stdout, /需求分析/);
+  const json = await captured([...args, '--json'], { fetcher });
+  assert.deepEqual(JSON.parse(json.stdout).data, JSON.parse(JSON.stringify(result)));
+  assert.doesNotMatch(JSON.stringify(result), /INTERNAL_SNAPSHOT|tone|statusCode|全体团队/);
+  const schema = await execute(['schema', 'tasks', 'collaboration']);
+  assert.match(JSON.stringify(schema), /实际派工/);
+});
 test('desktop CLI verifies its private live endpoint and never falls back to Web', async () => {
   const root = await mkdtemp(join(tmpdir(), 'af-desktop-cli-'));
   const directory = join(root, 'private'); await mkdir(directory, { mode: 0o700 });
@@ -406,8 +437,8 @@ test('CLI paginates/searches config lists and resolves exact IDs and plugin Skil
 test('CLI writes all five configuration areas, confirms trust/deletion/test and keeps employee runtime selections', async () => {
   const f = await fixture();
   for (const group of ['agents', 'teams', 'workflows', 'runtimes', 'mcps', 'plugins']) {
-    const operation = group === 'plugins' ? 'import' : 'create';
-    await f.invoke([group, operation, '--file', '-'], resources[group].example);
+    const operation = group === 'plugins' ? 'import' : group === 'runtimes' ? 'update' : 'create';
+    await f.invoke([group, operation, ...(group === 'runtimes' ? ['runtime_one'] : []), '--file', '-'], resources[group].example);
   }
   await f.invoke(['agents', 'update', 'agent_one', '--file', '-'], { runtime: { profileId: 'runtime_two' } });
   const payload = f.calls.at(-1).body;
@@ -415,7 +446,7 @@ test('CLI writes all five configuration areas, confirms trust/deletion/test and 
   await f.invoke(['agents', 'update', 'agent_one', '--file', '-'], { runtime: { extensionSelection: { mcpIds: [], pluginIds: [] } } });
   assert.deepEqual(f.calls.at(-1).body.runtime.extensionSelection.mcpIds, []);
   assert.equal(f.calls.at(-1).body.runtime.profileId, 'runtime_one');
-  await f.invoke(['runtimes', 'delete', 'runtime_one', '--yes']); assert.equal(f.calls.at(-1).method, 'DELETE');
+  await assert.rejects(f.invoke(['runtimes', 'delete', 'runtime_one', '--yes']), error => error.code === 'USAGE');
   for (const args of [['runtimes', 'delete', 'runtime_one'], ['runtimes', 'test', 'runtime_one']]) await assert.rejects(f.invoke(args, {}), error => error.code === 'USAGE');
   await f.invoke(['agents','create','--file','-'],{name:'Disabled at creation',status:'inactive'});
   assert.equal(f.calls.at(-1).body.status,'inactive');
@@ -548,18 +579,18 @@ test('runtimes models queries the real provider catalog endpoint with provider v
   const result = await invoke(['runtimes', 'models', 'codex']);
   assert.equal(result.models[0].id, 'gpt-real');
   assert.equal(result.models[0].levels[0].id, 'high');
-  await invoke(['runtimes', 'models', 'claude-code', '--executable', '/custom/claude']);
+  await assert.rejects(invoke(['runtimes', 'models', 'claude-code', '--executable', '/custom/claude']), error => error.code === 'USAGE');
   let seenUrl;
   const spy = async (url, options) => { seenUrl = url; return fetcher(url, options); };
-  await execute(['runtimes', 'models', 'codex', '--executable', '/custom/codex', '--session-file', f.sessionFile], { fetcher: spy });
+  await execute(['runtimes', 'models', 'codex', '--session-file', f.sessionFile], { fetcher: spy });
   const requested = new URL(seenUrl);
   assert.equal(requested.pathname, '/api/settings/runtime-profiles/models');
   assert.equal(requested.searchParams.get('provider'), 'codex');
-  assert.equal(requested.searchParams.get('executable'), '/custom/codex');
+  assert.equal(requested.searchParams.get('executable'), null);
   for (const args of [['runtimes', 'models'], ['runtimes', 'models', 'gpt-5'], ['runtimes', 'models', 'codex', '--yes'], ['runtimes', 'models', 'codex', 'extra']]) await assert.rejects(invoke(args), error => error.code === 'USAGE');
   const help = await captured(['runtimes', 'models', '--help'], { fetcher: () => { throw new Error('help must be offline'); } });
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /models PROVIDER \[--executable PATH\]/);
+  assert.match(help.stdout, /models PROVIDER/);
   assert.match(help.stdout, /codex debug models/);
   assert.match(help.stdout, /不编造/);
   const text = await captured(['runtimes', 'models', 'codex', '--session-file', f.sessionFile], { fetcher });
@@ -570,13 +601,13 @@ test('runtimes models queries the real provider catalog endpoint with provider v
 
 test('runtime connection schema validates effort vocabulary and model stays free text', async () => {
   const f = await fixture();
-  const base = { name: 'x', provider: 'claude-code', model: 'any-model-name', executable: '', profile: '', effort: '' };
-  await f.invoke(['runtimes', 'create', '--file', '-'], base);
+  const base = { model: 'any-model-name', effort: '', enabled: true };
+  await f.invoke(['runtimes', 'update', 'runtime_one', '--file', '-'], base);
   assert.equal(f.calls.at(-1).body.model, 'any-model-name', 'manual model values are accepted');
-  await f.invoke(['runtimes', 'create', '--file', '-'], { ...base, name: 'y', effort: 'max' });
+  await f.invoke(['runtimes', 'update', 'runtime_one', '--file', '-'], { ...base, effort: 'max' });
   assert.equal(f.calls.at(-1).body.effort, 'max');
-  await assert.rejects(f.invoke(['runtimes', 'create', '--file', '-'], { ...base, name: 'z', effort: 'extreme' }), error => error.code === 'USAGE');
-  await assert.rejects(f.invoke(['runtimes', 'create', '--file', '-'], { ...base, name: 'z', effort: undefined, unknown: 1 }), error => error.code === 'USAGE');
+  await assert.rejects(f.invoke(['runtimes', 'update', 'runtime_one', '--file', '-'], { ...base, name: 'z', effort: 'extreme' }), error => error.code === 'USAGE');
+  await assert.rejects(f.invoke(['runtimes', 'update', 'runtime_one', '--file', '-'], { ...base, name: 'z', effort: undefined, unknown: 1 }), error => error.code === 'USAGE');
   const schema = await execute(['schema', 'runtimes']);
   assert.deepEqual(schema.schema.properties.effort.enum, ['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
   assert.match(schema.schema.properties.model.description, /runtimes models/);
@@ -588,4 +619,31 @@ test('repeat-import help and receipts expose overwrite behavior without changing
     const receipt={replacements:[{kind:group==='plugins'?'plugin':'mcp',id:'new-version',previousId:'old-version',name:'同名项'}],employees:[{id:'employee-id',name:'员工'}],historyRetained:true};
     const output=formatOutput([group,operation],receipt);assert.match(output,/覆盖 1 个已有版本/);assert.match(output,/更新 1 位员工/);assert.match(output,/old-version/);
   }
+});
+
+test('default CLI uses the formal desktop delegation, validates instance and respects explicit isolation', async () => {
+  const root = await mkdtemp(join(tmpdir(),'af-shared-cli-'));
+  try {
+    const endpoint = join(root,'desktop-endpoint.json'), shared = join(root,'desktop-cli-session.json');
+    await writeFile(endpoint,JSON.stringify({origin,instanceId}),{mode:0o600});
+    await writeFile(shared,JSON.stringify({origin,instanceId,cookie,expiresAt:null}),{mode:0o600});
+    const calls = [];
+    const fetcher = async (url,init) => {
+      calls.push({url,init});
+      if (url.endsWith('/api/health')) return new Response(JSON.stringify({service:'agentforge-control-plane',instanceId}));
+      assert.equal(init.headers.Cookie,cookie);
+      if (url.endsWith('/api/auth/session')) return new Response(JSON.stringify({username:'operator',expiresAt:null}));
+      return new Response(JSON.stringify({profiles:[{id:'codex',provider:'codex',model:'',effort:'',enabled:true}]}));
+    };
+    const result = await executeCommand(['runtimes','list','--endpoint-file',endpoint],{fetcher,home:root});
+    assert.equal(result.total,1); assert.equal(calls[0].init.headers,undefined);
+    assert.equal(calls.filter(call=>call.url.endsWith('/api/auth/session')).length,1);
+    const explicit = join(root,'missing-private-session.json');
+    await assert.rejects(executeCommand(['runtimes','list','--endpoint-file',endpoint,'--session-file',explicit],{fetcher,home:root}),error=>error.code==='AUTH_REQUIRED');
+    await writeFile(shared,JSON.stringify({origin,instanceId:'11111111-2222-4333-8444-666666666666',cookie,expiresAt:null}),{mode:0o600});
+    // A stale instance must never receive the saved desktop token.
+    const before = calls.length;
+    await assert.rejects(executeCommand(['runtimes','list','--endpoint-file',endpoint],{fetcher,home:root}),error=>error.code==='AUTH_REQUIRED');
+    assert.equal(calls.length,before+1);
+  } finally { await rm(root,{recursive:true,force:true}); }
 });

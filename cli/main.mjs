@@ -10,7 +10,7 @@ import { collaborationRecords } from '../client/console-projections.mjs';
 function parse(argv) {
   const args = [], flags = {};
   const switches = new Set(['help', 'yes', 'all', 'password-stdin', 'json', 'archived']);
-  const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'team', 'run', 'executable']);
+  const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'team', 'run']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { args.push(arg); continue; }
@@ -25,7 +25,7 @@ const keyFields = (input, keys) => Object.fromEntries(keys.filter(key => Object.
 const asksForHelp = ({ args: [group, operation], flags }) => !group || ['help', 'schema'].includes(group) || flags.help || !operation && (group === 'auth' || Object.hasOwn(resources, group));
 
 export async function execute(argv, options = {}) { return executeParsed(parse(argv), options); }
-async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = process.stderr, fetcher } = {}) {
+async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = process.stderr, fetcher, home } = {}) {
   const [group, operation, id] = args;
   if (asksForHelp({ args, flags })) {
     if (args.length > 3) throw usage('帮助参数过多');
@@ -42,7 +42,6 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     else if (operation === 'models') { if (args.length !== 3 || !['claude-code', 'codex'].includes(id)) throw usage('models 需要 Provider 参数：claude-code 或 codex'); }
     else if (args.length !== 2) throw usage('此命令不接受额外参数');
     if (['create', 'update', 'import', 'auto-update'].includes(operation)) allowed.push('file');
-    if (operation === 'models') allowed.push('executable');
     if (operation === 'list') allowed.push('page', 'all', 'search');
     if (['delete', 'terminate', 'test'].includes(operation)) allowed.push('yes');
     if (group === 'tasks') {
@@ -57,7 +56,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
   const page = flags.page === undefined ? 1 : Number(flags.page);
   if (!Number.isSafeInteger(page) || page < 1) throw usage('--page 必须是正整数');
   if (flags.run && !/^[A-Za-z0-9_-]{1,128}$/.test(flags.run)) throw usage('--run 需要精确执行ID');
-  const client = createClient({ endpointFile: flags['endpoint-file'], sessionFile: flags['session-file'], fetcher });
+  const client = createClient({ endpointFile: flags['endpoint-file'], sessionFile: flags['session-file'], fetcher, home });
   if (group === 'auth') {
     if (operation === 'status') return client.request('/api/auth/session');
     if (operation === 'logout') return client.logout();
@@ -76,7 +75,8 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     const input=await readInput(flags.file,stdin);validateInput(input,resource.operationInputs[operation].schema);
     return client.request(`${path}/updates/settings`,{method:'PUT',body:input});
   }
-  if (group === 'runtimes' && operation === 'models') return client.request(`${path}/models?provider=${id}${flags.executable ? `&executable=${encodeURIComponent(flags.executable)}` : ''}`);
+  if (group === 'runtimes' && operation === 'models') return client.request(`${path}/models?provider=${id}`);
+  let resourceId = id;
   const readList = async () => {
     const result = await client.request(path);
     if (!Array.isArray(result[resource.key])) throw new CliError('RESPONSE_UNCERTAIN', '服务返回的配置列表结构无法确认', '检查CLI与服务版本是否一致，不继续写入。', 5);
@@ -84,13 +84,13 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     return result;
   };
   const get = async () => {
-    const result = await readList(), item = result[resource.key].find(item => item.id === id);
+    const result = await readList(), item = result[resource.key].find(item => item.id === id || group === 'runtimes' && (item.provider === id || (item.provider === 'codex' ? 'Codex' : 'Claude Code') === id));
     if (!item) throw new CliError('NOT_FOUND', '配置ID不存在', '运行对应list，使用返回的精确ID，不猜名称。', 4);
-    return { item, result };
+    resourceId = item.id; return { item, result };
   };
   if (operation === 'list') {
     const result = await readList();
-    const items = result[resource.key].filter(item => !flags.search || `${item.name || ''} ${item.description || ''} ${item.mission || ''} ${item.prompt || ''}`.toLocaleLowerCase().includes(flags.search.toLocaleLowerCase()));
+    const items = result[resource.key].filter(item => !flags.search || `${item.name || item.provider || ''} ${item.description || ''} ${item.mission || ''} ${item.prompt || ''}`.toLocaleLowerCase().includes(flags.search.toLocaleLowerCase()));
     const selected = flags.all ? items : items.slice((page - 1) * 20, page * 20);
     return { items: selected, total: items.length, page: flags.all ? null : page, pageSize: flags.all ? null : 20, hasMore: !flags.all && page * 20 < items.length };
   }
@@ -100,7 +100,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
   }
   if (operation === 'delete') { await get(); return client.request(`${path}/${id}`, { method: 'DELETE', body: {} }); }
   if (operation === 'test') {
-    await get(); const result = await client.request(`${path}/${id}/test`, { method: 'POST', body: {} });
+    await get(); const result = await client.request(`${path}/${resourceId}/test`, { method: 'POST', body: {} });
     if (!result.ok) throw new CliError('RUNTIME_TEST_FAILED', `Runtime连接测试${result.timedOut ? '超时' : '失败'}`, `查看本机日志：${result.logPath}；testId=${result.testId}。配置保存不代表可运行。`, 4);
     return result;
   }
@@ -113,7 +113,8 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     const { item } = await get();
     input = { ...input, runtime: { ...keyFields(item.runtime, ['profileId', 'extensionSelection']), ...input.runtime } };
   }
-  return client.request(`${path}${operation === 'update' ? '/' + id : ''}`, { method: operation === 'update' ? 'PUT' : 'POST', body: input });
+  if (group === 'runtimes' && operation === 'update') await get();
+  return client.request(`${path}${operation === 'update' ? '/' + resourceId : ''}`, { method: operation === 'update' ? 'PUT' : 'POST', body: input });
 }
 
 const reference = (id, name) => id ? { id, name: name || null } : null;

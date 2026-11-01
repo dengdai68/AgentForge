@@ -95,6 +95,7 @@ export function executionContent(fields, prompt = "") {
   const result = { version: 1, fields: {} };
   for (const [kind, value] of Object.entries(fields)) {
     if (!["text", "thinking", "input", "output"].includes(kind) || value == null) continue;
+    const original = typeof value === "string" ? value : JSON.stringify(value, null, 2);
     let raw = typeof value === "string" ? value : JSON.stringify(value, (key, item) =>
       /password|secret|token|credential|private.?key|authorization|cookie|api.?key|session.?id|signature|encrypted|prompt/i.test(key) ? "[REDACTED]" : item, 2);
     if (!raw) continue;
@@ -105,7 +106,7 @@ export function executionContent(fields, prompt = "") {
     raw = redactCredentialPatterns(raw);
     const safeLines = redactSensitiveLines(raw);
     const cleaned = bounded(safeLines, Infinity).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
-    result.fields[kind] = { text: cleaned.slice(0, 12000), truncated: cleaned.length > 12000, redacted: cleaned !== raw || raw !== (typeof value === "string" ? value : JSON.stringify(value, null, 2)) };
+    result.fields[kind] = { text: cleaned.slice(0, 12000), truncated: cleaned.length > 12000, redacted: cleaned !== original.replace(/\r\n/g, "\n").trim() };
   }
   return Object.keys(result.fields).length ? result : null;
 }
@@ -136,7 +137,7 @@ export function runtimeFailureSummary(value) {
   const text = String(value || "").trim();
   for (const [pattern, summary] of [
     [/市场扩展|所选 MCP|未选择的 MCP|Codex 市场|不支持市场技能加载隔离/, "市场扩展不可用：检查所选版本完整性、MCP 连接及 CLI 兼容性，修复后重试。"],
-    [/CLI 不可启动|ENOENT|command not found/i, "CLI 不可启动：在设置 → 本机运行时检查 CLI 路径，并按运行日志中的启动诊断排查。"],
+    [/CLI 不可启动|ENOENT|command not found/i, "CLI 不可启动：按运行日志检查本机 CLI 安装与登录 Shell PATH，修复后重新打开客户端并测试 Runtime。"],
     [/CLI 无执行权限|EACCES|EPERM/i, "CLI 无执行权限：检查可执行文件及任务目录权限。"],
     [/登录已失效|not logged in|login required|invalid api key|401|403/i, "CLI 登录已失效或请求未授权：请在本机终端检查登录与模型访问权限。"],
     [/网络连接失败|ENOTFOUND|ECONNREFUSED|ECONNRESET|fetch failed|network error/i, "网络连接失败：检查本机网络、代理和 Provider 服务地址。"],
@@ -240,7 +241,7 @@ async function verifyPaths(paths, label) {
   }
 }
 
-async function executeJsonl({ runId, executionKey = runId, command, args, cwd, env, onEvent, normalizeEvent, getFinal, getTerminalFailure = () => null, provider, session, canStart = () => true, apiRetryTimeoutMs = 300000, idleTimeoutMs = 600000 }) {
+async function executeJsonl({ runId, executionKey = runId, command, args, cwd, env, onEvent, normalizeEvent, getFinal, getTerminalFailure = () => null, isBackgroundWaiting = () => false, provider, session, canStart = () => true, apiRetryTimeoutMs = 300000, idleTimeoutMs = 600000 }) {
   let cancelled = false;
   let cancellationReason = null;
   let stderr = "";
@@ -267,6 +268,9 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
   };
   const resetIdleWatchdog = () => {
     clearTimeout(idleTimer);
+    // A completed Claude turn may wait for native background work. The native
+    // CLI owns that wait and its ceiling; silence here is not a stalled turn.
+    if (isBackgroundWaiting()) return;
     idleTimer = setTimeout(() => stopForWatchdog(`Provider 超过 ${Math.round(idleTimeoutMs / 1000)} 秒未产生可审计进展事件`), idleTimeoutMs);
     idleTimer.unref();
   };
@@ -405,10 +409,21 @@ async function invokeClaudeCodeCli(input) {
   // --mcp-config/--plugin-dir are variadic; separate the positional prompt.
   args.push("--", prompt);
   let finalText = "", terminalFailure = null;
+  let turnComplete = false;
+  const backgroundTasks = new Set();
   return executeJsonl({
     runId, command: runtime.executable || "claude", args, cwd: workspacePath, env: cliEnvironment(runtime.executable || "claude", { ...connectionEnv, ...(input.historyMcp ? { MCP_TIMEOUT: process.env.MCP_TIMEOUT || "120000", MCP_CONNECT_TIMEOUT_MS: process.env.MCP_CONNECT_TIMEOUT_MS || "120000", MCP_CONNECTION_NONBLOCKING: "0", ENABLE_TOOL_SEARCH: process.env.ENABLE_TOOL_SEARCH || "false" } : {}), AGENTFORGE_TRACE_OUTPUT_DIR: `${traceDirectory}/output` }), provider: "Claude Code", apiRetryTimeoutMs, idleTimeoutMs,
     onEvent, executionKey: input.executionKey, canStart: input.canStart, session: input.session,
+    isBackgroundWaiting: () => turnComplete || backgroundTasks.size > 0,
     normalizeEvent: (event) => {
+      if (event.type === "system" && event.subtype === "background_tasks_changed" && Array.isArray(event.tasks)) {
+        backgroundTasks.clear();
+        for (const task of event.tasks) if (task.task_id) backgroundTasks.add(task.task_id);
+      }
+      if (event.type === "system" && event.subtype === "task_started" && event.task_id) backgroundTasks.add(event.task_id);
+      if (event.type === "system" && event.subtype === "task_notification" && event.task_id && ["completed", "failed", "stopped"].includes(event.status)) backgroundTasks.delete(event.task_id);
+      if (event.type === "assistant" || (event.type === "system" && event.subtype === "task_notification")) turnComplete = false;
+      if (event.type === "result") turnComplete = event.subtype === "success" && !event.is_error;
       if (event.type === "result" && event.structured_output) finalText = JSON.stringify(event.structured_output);
       else if (event.type === "result" && typeof event.result === "string") finalText = event.result;
       // Claude can emit thousands of character deltas and token counter ticks

@@ -35,8 +35,10 @@ for (const [provider, command] of [['claude-code', 'claude'], ['codex', 'codex']
   // real CLI authentication read-only without touching global configuration.
   const wrapper = join(root, command);
   await writeFile(wrapper, '#!/bin/sh\nHOME=' + q(homedir()) + ' exec ' + q(actual) + ' "$@"\n', { mode: 0o700 });
-  profiles[provider] = store.saveRuntimeProfile({ name: 'Real ' + provider, provider, executable: wrapper }).id;
+  profiles[provider] = store.listRuntimeProfiles().find(item => item.provider === provider).id;
 }
+await writeFile(join(home,'.zprofile'), 'export PATH=' + JSON.stringify(root) + ':"$PATH"\n');
+await writeFile(join(home,'.zshrc'), 'export PATH=' + JSON.stringify(root) + ':"$PATH"\n');
 const probeV1 = 'ROLE-PROBE-' + randomBytes(6).toString('hex');
 const probeV2 = 'ROLE-PROBE-' + randomBytes(6).toString('hex');
 const rolePromptV1 = `你是角色探针。无论本轮输入是什么，回复正文第一行必须恰好是 ${probeV1}，此后正常回答。`;

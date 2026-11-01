@@ -139,7 +139,7 @@ async function codexCatalog(executable, { run }) {
     result = await run(command, ["debug", "models"], { env: cliEnvironment(command), timeout: 30000, maxBuffer: 8 * 1024 * 1024 });
   } catch (error) {
     diagnostic("provider.model_catalog_failed", { provider: "codex", error });
-    throw new Error("Codex 模型目录查询失败：需要支持 debug models 的 codex CLI（0.160.0 起），请检查 CLI 路径与版本");
+    throw new Error("Codex 模型目录查询失败：需要支持 debug models 的 codex CLI（0.160.0 起），请检查本机 CLI 安装、登录 Shell PATH 与版本");
   }
   let entries;
   try { entries = codexCatalogModels(JSON.parse(result.stdout)); }

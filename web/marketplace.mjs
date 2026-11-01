@@ -20,7 +20,7 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
     const list=root.querySelector('[data-market-list]'),empty=root.querySelector('[data-market-empty]');
     if(!loaded){list.hidden=true;list.innerHTML='';empty.hidden=false;empty.setAttribute('role',readError?'alert':'status');empty.textContent=readError || '正在读取已安装项…';root.querySelector('[data-market-pager]').innerHTML='';return;}
     list.hidden=!page.items.length;empty.hidden=Boolean(page.items.length);empty.setAttribute('role','status');
-    empty.textContent=query?'没有匹配项':`尚未安装${label}，可手动安装后在员工中选择。`;
+    empty.innerHTML=query?`<strong>没有匹配的${label}</strong>请调整搜索条件。`:`<strong>尚未安装${label}</strong>可手动安装后在员工中选择。`;
     list.innerHTML=page.items.map(item=>`<article class="agent-card installed-extension-card"><div class="extension-card-heading"><span class="agent-card-avatar extension-avatar color-${extensionAvatarColor(item.id)}" aria-hidden="true">${esc([...item.name].slice(0,2).join('').toUpperCase())}</span><button type="button" class="text-action extension-name" data-extension-detail="${esc(item.id)}">${esc(item.name)}</button></div><p class="extension-card-description">${esc(item.description || '未填写说明')}</p><div class="extension-card-meta"><span>${esc(item.version || item.id.slice(0,8))}</span>${runtimeBadges(item,esc)}</div><div class="directory-card-actions"><button type="button" class="small-button" data-extension-detail="${esc(item.id)}">详情</button></div></article>`).join('');
     root.querySelector('[data-market-pager]').innerHTML=paginationMarkup(page,plugin?'marketplace':'mcp');
   }
@@ -79,7 +79,7 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
   }
   return {
     mount(target){if(root===target)return;root=target;
-      root.innerHTML=`<div class="page-heading"><div><h2>${label}市场</h2><p>已安装${label} · 按员工独立选择使用</p></div></div><div class="directory-toolbar"><input type="search" aria-label="搜索${label}" placeholder="搜索"><button class="primary-button" ${plugin?'data-install-plugin':'data-add-mcp'}>手动安装${label}</button></div><p class="field-hint">在线市场浏览暂未开放，可通过手动安装添加。</p><div data-market-list hidden aria-live="polite"></div><div class="market-directory-empty" data-market-empty role="status">正在读取已安装项…</div><div data-market-pager></div>`;
+      root.innerHTML=`<div class="page-heading"><div><h2>${label}市场</h2><p>已安装${label} · 按员工独立选择使用</p></div></div><div class="directory-toolbar"><input type="search" aria-label="搜索${label}" placeholder="搜索"><button class="primary-button" ${plugin?'data-install-plugin':'data-add-mcp'}>手动安装${label}</button></div><p class="field-hint">在线市场浏览暂未开放，可通过手动安装添加。</p><div data-market-list hidden aria-live="polite"></div><div class="directory-empty market-directory-empty" data-market-empty role="status">正在读取已安装项…</div><div data-market-pager></div>`;
       root.querySelector('input').value=query;root.querySelector('input').oninput=event=>{query=event.target.value;pageNumber=1;rows();};
       root.querySelector('[data-market-pager]').onclick=event=>{const button=event.target.closest('[data-page]');if(button){pageNumber=Number(button.dataset.page);rows();}};
       root.querySelector(plugin?'[data-install-plugin]':'[data-add-mcp]').onclick=plugin?installPlugin:installMcp;

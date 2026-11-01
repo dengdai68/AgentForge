@@ -12,7 +12,7 @@ HTTP 页面、API、静态脚本、SSE 与文件预览经过统一认证。公�
 
 密码使用 scrypt 加盐摘要，随机会话 token 仅保存 SHA-256 摘要。新会话默认不因时间过期，API 的 `expiresAt=null`。浏览器使用 HttpOnly、SameSite=Strict 持久 Cookie，400 天并随认证请求续存。退出、重置账户或清除数据撤销会话。
 
-CLI 保存独立私有会话，不读取浏览器 Cookie 或 SQLite，不保存密码。CLI 和浏览器目前不共享同一个登录态。
+CLI 默认使用客户端宿主发布的正式委托授权；客户端未登录时可保存独立私有会话，不读取浏览器存储或 SQLite，不保存密码。共享授权随客户端退出而撤销，具体机制见下文。
 
 ## HTTP 边界
 
@@ -27,3 +27,9 @@ Electron 自有子服务尚无管理员时，主进程以一次性私有 bootstr
 数据清除要求当前密码和准确确认文字；仅清理当前实例，保留外部项目及本机 CLI 凭据。此操作与普通退出不同。
 
 主要接口：`GET /api/auth/session`、`POST /api/auth/login`、`POST /api/auth/logout`。配置路径见 [Electron](18-electron-client.md) 和 [CLI](21-configuration-cli.md)。
+
+## 客户端授权供 CLI 使用
+
+客户端宿主经 Electron 正式 Cookie API 获取自身登录会话，向认证的 `POST /api/auth/cli-session` 申请独立、关联父会话的委托 token；不把浏览器 Cookie 直接交给 CLI。服务仅在父会话仍有效时接受委托 token，父会话退出、账户重置或服务重启即失效。宿主在当前实例目录发布 0600 的 `desktop-cli-session.json`（目录0700），绑定 origin 与 instanceId；不进入 renderer、日志或 Provider。续存同一父会话复用委托，避免刷新使正在使用的 CLI 失效。
+
+CLI 先验证私有 endpoint 和实例身份，再读取同目录的专用共享凭证；有有效客户端授权时优先使用，没有时使用自己的私有登录会话。显式 `--session-file` 隔离使用独立 CLI 会话。CLI 不读取 Chromium 存储或 SQLite。CLI logout 只撤销自己的独立会话，不能注销共享客户端会话；客户端授权由客户端退出登录管理。此能力不扩大权限，仍为本机同用户、单管理员。

@@ -1,12 +1,22 @@
 # 代码导航
 
+任务创建：app.js 的 newTaskModal 只保留标题、内容、可选折叠验收标准和底部团队/流程，移除人员说明生成器；task-create-modal 复用弹框分组与样式。test-task-creation 使用隔离 Electron 验证两主题三种窗口尺寸及真实 HTTP 创建；明确拒绝启动，不将展示测试当 Provider 证据。
+
+设置二级分组密度由 compact.css 统一收紧 Runtime/仓库访问；app.js 的 renderTasks 直接展示允许的操作，移除菜单与全局菜单监听。test-runtime-settings 覆盖两主题宽窄展示、删除确认及归档/恢复往返；API/CLI/Store 不变。
+
+设置层级与选择器：settings.mjs 的固定 Runtime 以原生 details 默认收起，页内展开保留表单；styles.css/compact.css 统一 h3/h4 递减字号。模型与思考等级同排，两类下拉距输入4px并可展示六行，鼠标跨边界不关闭；模型/思考只变显示标签首字母，不改 Provider ID 或 HTTP/CLI 输入值。隔离 Electron 两主题及宽窄验收见 test-runtime-settings。
+
+公开思考展示：Runtime executionContent 保留凭据过滤，空白规范化不再误标脱敏；web/app.js 展示已保存 thinking 正文，空历史正文明确提示未保存，不补造 Provider 未公开内容。验证见 runtime-configuration/settings 与 test-collaboration-flow。
+
+完整协作记录：Store 校验 Dispatch.sourceMessageId 属于同一 Run，Orchestrator 记录派工/交接来源；client/console-projections.mjs 合并消息、实际投递与协调事件，Web/Electron 和 CLI 共用。已有唯一结构化引用恢复展示关联，deliveries 为当前状态、history 为历史事实；已知交接 JSON 信封提取 rawResponse 报告，原始消息不变。客户端主线只保留总结、沟通及关键人类状态，不附加投递块、平台失败或验收文件清单。长消息始终渲染 Markdown，超过10行只展开区域；控制台无顶部错误摘要，日志错误标红，员工状态跟随最新 Trace 的失败/重试/恢复。CLI 保留完整投递/执行/验收文件引用；不改变调度或领域协议。scripts/test-collaboration-flow.mjs 用隔离 Electron/HTTP/CLI 验证。
+
 独立客户端入口：npm start/dev → apps/electron/main.mjs → 自有 server/index.mjs → web/ 与 client/。全部相对依赖、CLI、Runtime、测试在本仓库；抽取来源、保留边界与发布身份见 docs/23-desktop-extraction.md。服务只由客户端 IPC 启动，直接运行拒绝；无独立 Web 部署。renderer 始终用客户端样式，所有 UI 验收只操作 Electron。
 
 普通沟通：communication.mjs 的回复 schema 把可空的 handoffToAgentId 与 reply 同列 required（严格 Provider 要求 required 覆盖全部键），null/省略均表示不转交；Store 仍校验真实候选及单次转交，测试覆盖省略/null/非法字段和目标，任务协议独立不变。经理决定被在途投递顺延时，orchestrator 记录说明并向经理入队复核投递，不再静默丢弃；Run 进入验收或确认完成时，Store 取消未执行的平台协调跟进投递并记录审计，归档不再被残留复核投递阻塞。
 
 工作目录：run-files 不再读写 .agentforge-workspace.json 或限定 docs；目录按 path/offset 分页读取，界面按需展开、继续加载和同层重试。CHANGE 将所有业务路径按真实层级合并，工作根与绑定子仓库比较任务初始提交。Workflow artifactPaths 仅为规范相对交付位置，可为空；Store/CLI/提示词同步，不再改写到 docs。执行快照覆盖全部业务路径但保留大小/敏感文件限制，历史冻结文件不迁移。
 
-插件更新：plugin-updates.mjs 以两分钟单飞检查 Git 来源及外部依赖提交；configuration 提供 ls-remote 和可清理的临时检出，marketplace 只安装已装名称的新快照且不拆装 MCP，Store 事务更新当前员工。状态/开关/分钟周期经认证 HTTP、设置 → 插件更新和 CLI plugins updates/check-updates/auto-update 共用。沟通无选择时打开最后更新会话，任务控制台首次无选择时打开最近执行者；显式选择不被刷新切走。
+插件更新：plugin-updates.mjs 以两分钟单飞检查 Git 来源及外部依赖提交；configuration 提供 ls-remote 和可清理的临时检出，marketplace 只安装已装名称的新快照且不拆装 MCP，Store 事务更新当前员工。状态/开关/分钟周期经认证 HTTP、设置 → 更新 → 插件更新和 CLI plugins updates/check-updates/auto-update 共用。沟通无选择时打开最后更新会话，任务控制台首次无选择时打开最近执行者；显式选择不被刷新切走。
 
 MCP 编辑：marketplace.mjs 复用安装校验并保留未改动脱敏值；HTTP 准备新版本与员工绑定，Store 事务更新当前员工、退役旧版本，冻结任务/排队投递不改。界面详情编辑与 CLI mcps update 同协议；团队空态仅保留创建团队引导。
 
@@ -42,9 +52,9 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 
 - 真实模型验收的窄窗口截图等待 renderer 尺寸到位再保存，避免原生窗口异步调整让证据仍是宽屏；不改变产品代码或业务协议。
 
-- 历史与后续答疑：local-cli.mjs 为 Codex 的平台历史 MCP 完整传递 Bridge 自有环境（打包版 Electron Node 标记）并设为 required，不改变 Provider 自身环境。app.js 协作流只渲染真实消息，移除固定验收副本和停止答疑按钮；styles.css 缩小人类气泡。安装包协议测试与 test-prompt-e2e 的 PACKAGED 模式覆盖真实历史调用和完成后答疑；CLI/状态机/历史可见性不变。
+- 历史与后续答疑：local-cli.mjs 为 Codex 的平台历史 MCP 完整传递 Bridge 自有环境（打包版 Electron Node 标记）并设为 required，不改变 Provider 自身环境。app.js 协作流渲染全部消息及关联派工、协调事实，移除固定验收副本和停止答疑按钮；styles.css 缩小人类气泡。安装包协议测试与 test-prompt-e2e 的 PACKAGED 模式覆盖真实历史调用和完成后答疑；CLI/状态机/历史可见性不变。
 
-- 应用标志：web/icons/application.png 保留用户提供的蓝紫 A 原图字节；scripts/build-app-icon.cjs 只用 sips/iconutil 生成 ICNS 尺寸。侧栏/Dock/安装包同源，托盘用原图 alpha 轮廓；无浏览器、新依赖或业务权限，移除过时三柱 SVG。
+- 应用标志：web/icons/application.png 保留用户提供的蓝紫 A 原图字节；scripts/build-app-icon.cjs 只用 sips/iconutil 生成 ICNS 尺寸。侧栏/Dock/安装包同源，菜单栏用原图彩色缩略图；无浏览器、新依赖或业务权限，移除过时三柱 SVG。
 
 - 紧凑工作台：团队/工作流在 app.js 搜索后分页，任务归档/新建在搜索行；共享/compact 样式上移目录操作。tracePromptMarkup 展示完整脱敏提示词及已确认原生会话 ID；工具仅按 Trace/原生调用 ID 归并重复阶段，单次调用内重复输入只显示一次，不同调用即使参数相同也保留各自输入输出，无 ID 不猜测。人类协作元信息与正文气泡分离；侧栏/安装包同源图标。CLI 字段不变，扩展隔离帮助同步。
 
@@ -83,4 +93,24 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 
 重复导入：server/index.mjs 串行准备，Store 按来源＋名称（插件）或安装名称（MCP）匹配；Store.replaceImportedExtensions 原子切换当前员工及退役旧版本；冻结历史保留。CLI 同步覆盖回执与渐进帮助。角色空态复用 MCP 整行提示。
 
-角色、MCP 和插件目录空态共用 market-directory-empty，使用主题 surface-soft 浅色背景及 6px 圆角，宽窄布局一致。
+全部目录空态共用 directory-empty，整行对齐、14px 16px 内边距、主题浅色背景、虚线边框和6px圆角。
+
+品牌与目录视觉：web/styles.css 维护蓝/青/紫 tokens、状态标签与 directory-empty；apps/electron/compact.css 复用品牌，仅覆盖宿主密度和主题表面。用户新 PNG 生成同源 ICNS，菜单栏用彩色缩略图而非 alpha 模板。开发方法入口 `.codex/skills/agentforge-development/SKILL.md` 引用 AGENTS 与 docs/06；隔离验收 `scripts/test-brand-presentation.mjs`。
+
+Runtime 设置入口：固定两项与 Store enabled 门禁见 docs/15，宿主默认 CLI 安装及委托凭证发布见 docs/18，认证生命周期见 docs/14，CLI 部分更新协议见 docs/21；验收脚本 scripts/test-runtime-settings.mjs 支持隔离源码/安装包及显式真实 Provider 模式。
+
+任务目录打开：web/app.js 在复制后提供打开按钮 → preload 零参数 openWorkspaceDirectory → main 核对当前 Run 与认证 summary 中的目录 → shell.openPath。无新 HTTP/CLI 协议；宿主边界见 docs/18。
+
+任务中心搜索区与任务列表左右外缘对齐，搜索区到列表保留8px间距，当前任务/空搜索/归档列表一致；桌面compact.css去除full-panel的重复内边距。仅展示调整，无HTTP/CLI协议变化；test-runtime-settings覆盖两主题宽窄窗口。
+
+目录空态统一由 `web/styles.css` 的 `.directory-empty` 维护，跨满列表/卡片行并对齐左右边缘，内边距14px 16px；沟通选择器跟随其列表宽度。实时同步移至登录信息旁，窄侧栏保留可访问的状态圆点，顶栏不重复。仅呈现变化，无 CLI/API 协议影响。
+
+应用标志更新为用户最新提供的铺满画布版本，PNG 原样保留（SHA-256 `46bb3c5165723bba5f63f070de19647fa6c6385366579d0d9a9a9bb1277e937e`），侧栏、Dock 与菜单栏共用；macOS 包图标从同源 PNG 生成 ICNS，不改变主题配色或 CLI/API。
+
+长任务排查：`server/runtime/local-cli.mjs` 区分 Claude 原生后台等待与活动轮次空闲；`server/prompts.mjs` 维护必要业务上下文及增量投递；`web/app.js` 的控制台按事件更新并在摘要刷新时保留阅读 DOM。
+
+经理正文已返回但 Run 空队列仍 running：查 orchestrator.acceptDelivery 的 managerDecision 完整性及 routing: 纠错投递，不以正文“已验收”自动改状态。
+
+- 应用图标按用途派生：build-app-icon.cjs 保留用户原始 PNG，生成干净 UI 图、824/1024 比例 Dock 图及同尺度 ICNS、18pt/2x 菜单栏模板；主进程启用原生模板适配明暗，不将彩色底板作为模板。资源与复现见 web/icons/README.md，无 CLI/API/任务协议影响。
+
+应用更新：apps/electron/updates.mjs 拥有正式版发现/下载状态，主进程封闭 IPC 与原生 MacUpdater；更新状态和按钮仅在设置/updates 区域展示，复用 renderer 样式，不创建通知卡。server/index.mjs 仅通过父子私有 IPC 原子预留空闲重启，锁期间拒绝新写入并暂停调度。发布/签名边界见 docs/24-desktop-updates.md；不改变 CLI 配置命令或任务决定。

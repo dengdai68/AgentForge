@@ -26,9 +26,20 @@ if (process.isMainFrame && /^http:\/\/127\.0\.0\.1:\d+$/.test(location.origin)) 
   }, true);
   contextBridge.exposeInMainWorld("agentforgeDesktop", Object.freeze({
     copyWorkspacePath: (text) => ipcRenderer.invoke("desktop:workspace:copy-path", text),
+    openWorkspaceDirectory: () => ipcRenderer.invoke("desktop:workspace:open-directory"),
     getPreferences: () => ipcRenderer.invoke("desktop:preferences:get"),
     setCloseMode: (mode) => ipcRenderer.invoke("desktop:preferences:set", mode),
     getCliInstallation: () => ipcRenderer.invoke("desktop:cli:status"),
-    installCli: () => ipcRenderer.invoke("desktop:cli:install")
+    installCli: () => ipcRenderer.invoke("desktop:cli:install"),
+    getAppUpdateState: () => ipcRenderer.invoke("desktop:updates:status"),
+    checkAppUpdate: () => ipcRenderer.invoke("desktop:updates:check"),
+    downloadAppUpdate: () => ipcRenderer.invoke("desktop:updates:download"),
+    installAppUpdate: () => ipcRenderer.invoke("desktop:updates:install"),
+    onAppUpdate: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const handler = (_event, value) => listener(value);
+      ipcRenderer.on('desktop:updates:changed', handler);
+      return () => ipcRenderer.removeListener('desktop:updates:changed', handler);
+    }
   }));
 }

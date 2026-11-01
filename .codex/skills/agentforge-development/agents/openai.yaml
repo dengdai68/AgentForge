@@ -1,0 +1,3 @@
+interface:
+  display_name: "AgentForge 开发约定"
+  short_description: "为 AgentForge 新功能与界面修改选择共享组件、品牌样式及对应验收路径"

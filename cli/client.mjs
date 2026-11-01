@@ -68,7 +68,7 @@ function privateStat(info) {
   return (!process.getuid || info.uid === process.getuid()) && (info.mode & 0o077) === 0;
 }
 export function defaultEndpointFile(home = homedir()) { return join(home, '.agentforge', 'desktop', 'desktop-endpoint.json'); }
-export async function resolveEndpoint(endpointFile = defaultEndpointFile(), fetcher = fetch) {
+export async function resolveEndpoint(endpointFile = defaultEndpointFile(), fetcher = fetch, onInstance) {
   if (!isAbsolute(endpointFile)) throw usage('--endpoint-file 必须是绝对路径');
   let file;
   try {
@@ -82,17 +82,20 @@ export async function resolveEndpoint(endpointFile = defaultEndpointFile(), fetc
     const response = await fetcher(`${origin}/api/health`, { redirect: 'error', signal: AbortSignal.timeout(1500) });
     const health = await response.json();
     if (!response.ok || health.service !== 'agentforge-control-plane' || health.instanceId !== instanceId) throw new Error('stale endpoint');
+    onInstance?.(instanceId);
     return origin;
   } catch {
     throw new CliError('CLIENT_UNAVAILABLE', '客户端未运行，或连接文件已过期/不安全', '先打开 AgentForge 客户端；CLI 只连接客户端，不会改连其他服务。', 5);
   } finally { await file?.close(); }
 }
-export function createClient({ endpointFile, sessionFile = join(homedir(), '.agentforge', 'cli-session.json'), fetcher = fetch } = {}) {
+export function createClient({ endpointFile, sessionFile, fetcher = fetch, home = homedir() } = {}) {
+  const useDesktop = sessionFile === undefined;
+  sessionFile ||= join(home, '.agentforge', 'cli-session.json');
   if (!isAbsolute(sessionFile)) throw usage('--session-file 必须是绝对路径');
   sessionFile = resolve(sessionFile);
-  let origin, connection;
+  let origin, connection, instanceId;
   // Resolve once, after command validation, before reading or sending a session.
-  const connect = () => connection ||= resolveEndpoint(endpointFile, fetcher).then(value => { origin = value; });
+  const connect = () => connection ||= resolveEndpoint(endpointFile, fetcher, value => { instanceId = value; }).then(value => { origin = value; });
   async function checkParent(create = false) {
     if (create) await mkdir(dirname(sessionFile), { recursive: true, mode: 0o700 });
     const parent = await lstat(dirname(sessionFile));
@@ -112,12 +115,33 @@ export function createClient({ endpointFile, sessionFile = join(homedir(), '.age
     } catch (error) {
       if (optional && error.code === 'ENOENT') return null;
       if (error instanceof CliError && error.code === 'SESSION_FILE') throw error;
-      throw new CliError('AUTH_REQUIRED', 'CLI会话不存在、已过期或文件不可安全读取', '运行 agentforge auth login --username 你的用户名，按提示隐藏输入密码；脚本显式 --password-stdin，不读取浏览器cookie或认证数据库。', 3);
+      throw new CliError('AUTH_REQUIRED', '客户端未登录，且独立 CLI 会话不存在、已过期或文件不可安全读取', '先在客户端登录，CLI 将自动使用授权；也可运行 agentforge auth login --username 你的用户名，隐藏输入密码。', 3);
+    } finally { await file?.close(); }
+  }
+  async function desktopSession() {
+    if (!useDesktop) return null;
+    await connect();
+    let file;
+    try {
+      const path = join(dirname(endpointFile || defaultEndpointFile()), 'desktop-cli-session.json');
+      // Endpoint resolution already checked the directory ownership and mode.
+      file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const info = await file.stat();
+      if (!info.isFile() || !privateStat(info) || info.size > 4096) throw new Error('unsafe');
+      const saved = JSON.parse(await readBounded(file.createReadStream({ autoClose: false }), 4096));
+      if (saved.origin !== origin || saved.instanceId !== instanceId || !/^agentforge_session=[a-f0-9]{64}$/.test(saved.cookie) || saved.expiresAt !== null && (!Number.isFinite(saved.expiresAt) || saved.expiresAt <= Date.now())) return null;
+      const response = await fetcher(origin + '/api/auth/session', { redirect: 'error', signal: AbortSignal.timeout(5000), headers: { Origin: origin, Cookie: saved.cookie } });
+      if (response.status === 401) return null;
+      if (!response.ok) throw new Error('validation failed');
+      return { ...saved, source: 'desktop' };
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw new CliError('SESSION_FILE', '客户端 CLI 授权无法安全读取或验证', '请在客户端重新连接或登录；不会读取浏览器 Cookie/数据库。显式 --session-file 可使用独立会话。', 3);
     } finally { await file?.close(); }
   }
   async function request(path, { method = 'GET', body, cookie, authenticated = true, timeoutMs = 120000 } = {}) {
     await connect();
-    const session = cookie === undefined && authenticated ? await readSession() : null;
+    const session = cookie === undefined && authenticated ? (await desktopSession() || await readSession()) : null;
     let response, value;
     try {
       response = await fetcher(origin + path, { method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { Origin: origin, 'Content-Type': 'application/json', ...(cookie || session ? { Cookie: cookie || session.cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -127,7 +151,7 @@ export function createClient({ endpointFile, sessionFile = join(homedir(), '.age
     }
     if (!response.ok) {
       const authFailure = response.status === 401 || response.status === 403;
-      throw new CliError(authFailure ? 'AUTH_REQUIRED' : 'SERVER_REJECTED', String(value?.error || `HTTP ${response.status}`).slice(0, 800), authFailure ? '重新登录CLI；会话独立于客户端，重置后旧会话失效。' : '检查字段、引用ID、Provider兼容性或被引用限制；先get/list核验，不重复创建。', authFailure ? 3 : 4, response.status);
+      throw new CliError(authFailure ? 'AUTH_REQUIRED' : 'SERVER_REJECTED', String(value?.error || `HTTP ${response.status}`).slice(0, 800), authFailure ? '先在客户端登录；也可独立运行 auth login。退出或重置后旧授权失效。' : '检查字段、引用ID、Provider兼容性或被引用限制；先get/list核验，不重复创建。', authFailure ? 3 : 4, response.status);
     }
     return { value, response };
   }
@@ -155,7 +179,9 @@ export function createClient({ endpointFile, sessionFile = join(homedir(), '.age
       return { username: value.username, expiresAt: value.expiresAt, sessionFile };
     },
     async logout() {
-      const session = await readSession();
+      let session;
+      try { session = await readSession(true); } catch (error) { if (error.code !== 'AUTH_REQUIRED') throw error; }
+      if (!session) return { loggedOut: false, message: '没有独立 CLI 会话；共享授权请在客户端退出登录。' };
       await request('/api/auth/logout', { method: 'POST', body: {}, cookie: session.cookie });
       await unlink(sessionFile);
       return { loggedOut: true };

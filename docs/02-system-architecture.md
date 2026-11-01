@@ -1,5 +1,7 @@
 # 系统架构
 
+任务协作由共享纯投影合并 Message、Dispatch 和白名单内协调事件，Web/Electron 与 CLI 使用同一完整记录。Store 校验 sourceMessageId 属于当前 Run，Orchestrator 在经理派工和员工交接的后续投递上记录来源；该关联只供追溯，不改变执行或输入选择。消息无团队内私密分类，处理对象与公开可查范围分开；旧投递可按已存 Dispatch/Trace 引用唯一解析来源；无法关联者按独立事实显示，不按正文/时间猜测，不重写历史。当前状态与实际执行历史分别投影，重试等事件归入所关联投递。 已知员工交接信封只投影已记录的 rawResponse 报告，原始消息不改写。renderer 全文渲染 Markdown 并按5行裁剪、原位展开；不附加验收文件清单或控制台错误摘要，员工状态取最新 Trace。CLI 保留完整读模型。
+
 本仓库为 AgentForge App 独立客户端，完整抽取边界见 [ADR：客户端抽取](23-desktop-extraction.md)。默认 start/dev 启动 Electron，自带本机控制面与全部界面；服务要求父进程 IPC 与 bootstrap 信息，不能直接启动；父进程断开时退出。
 
 工作目录展示由 Run Files 直接读取真实任务根，取代 manifest 白名单；HTTP 按 path/offset 每页200项，界面按需展开。工作流只提供交付位置建议，Store 校验规范相对路径，CLI同步，未提供时不填 docs。Orchestrator 采集各业务路径的有限不可变快照，CHANGE 通过只读 Git 观察已提交/未提交/未跟踪文件；大媒体不因快照上限从目录/CHANGE消失。不新增索引库、文件监控服务或自动提交。
@@ -62,3 +64,13 @@ Dispatch 持久化投递与尝试状态；Trace 记录一次实际调用。失�
 ## 展示性能
 
 任务摘要排除 Runtime 日志，控制台使用成员分页接口。执行正文、提示词、文件、Diff 和图形资源按需读取。协作数据目前随任务摘要返回，UI 分批渲染，尚未实现服务端协作游标分页。
+
+### 仓库开发 Skill 的边界
+
+`.codex/skills/agentforge-development/` 是本仓库 Codex 开发辅助入口，按用户要求随源码维护，不进入运行时插件目录、员工提示词、模型上下文协议或安装包。它只将开发任务路由到既有 AGENTS、设计契约与验收脚本，不建立第二套贡献规则，也不授予发布或操作真实任务的权限。
+
+Runtime 固定目录和当前可用门禁归 Store，HTTP/CLI 只接受模型、档位、enabled 部分更新；Orchestrator 与沟通服务调用前核对开关，不终止已执行 Provider。CLI 登录共享由 Electron 宿主经认证端点获取父会话关联委托并发布私有实例文件，认证层逐次验证父会话；CLI 不直接读取 Chromium 或数据库。此设计复用现有目录、HTTP 和宿主能力，不新增依赖或通用桥。
+
+经理协调调用缺少 managerDecision 或缺少 nextNodeId 时，保留原报告并复用真实 routing: 协调纠错投递，要求经理明确派工/咨询/提交验收；不静默耗尽队列、不从自然语言推断验收。普通员工文字交接及 inquiry 答复规则不变。
+
+桌面应用更新采用现有 electron-builder 配套的 electron-updater 与显式 semver 依赖，不自建应用替换服务。更新生命周期只属于宿主，Store/CLI不拥有更新状态；正式发现、临时签名手动安装及签名原生安装、原子空闲锁与CI交付契约见 [架构决策：应用更新](24-desktop-updates.md)。

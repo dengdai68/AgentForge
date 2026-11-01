@@ -1,0 +1,103 @@
+name: Publish AgentForge App macOS Stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing approved stable tag matching package.json (for example v0.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    outputs:
+      artifact-id: ${{ steps.transfer.outputs.artifact-id }}
+    env:
+      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      CSC_NAME: ${{ secrets.MAC_CSC_NAME }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Validate stable tag and signing configuration
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const tag=process.env.RELEASE_TAG, pkg=JSON.parse(readFileSync('package.json'));
+          assert.match(tag,/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+          assert.equal(tag,'v'+pkg.version);
+          assert.equal(execFileSync('git',['rev-list','-n','1',tag],{encoding:'utf8'}).trim(),execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim());
+          for(const key of ['CSC_LINK','CSC_KEY_PASSWORD','CSC_NAME','APPLE_ID','APPLE_APP_SPECIFIC_PASSWORD','APPLE_TEAM_ID']) assert.ok(process.env[key],key+' is required for signed stable releases');
+          assert.match(process.env.CSC_NAME,/^Developer ID Application:/);
+          JS
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:ai
+      - run: npm run check:impact
+      - name: Build Developer ID signed and notarized application
+        run: npm run package:mac -- -c.mac.identity="$CSC_NAME" -c.mac.notarize=true -c.forceCodeSigning=true
+      - run: npm run package:mac:check
+      - name: Verify native signing, notarization and update manifest
+        run: |
+          codesign --verify --deep --strict release/mac-arm64/AgentForge.app
+          codesign -dv --verbose=4 release/mac-arm64/AgentForge.app 2>&1 | grep '^Authority=Developer ID Application:'
+          xcrun stapler validate release/mac-arm64/AgentForge.app
+          test -s release/latest-mac.yml
+          (cd release && shasum -a 256 AgentForge-*-arm64.dmg AgentForge-*-arm64.zip > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        id: transfer
+        with:
+          name: agentforge-stable-macos-arm64
+          path: |
+            release/AgentForge-*-arm64.dmg
+            release/AgentForge-*-arm64.zip
+            release/latest-mac.yml
+            release/*.blockmap
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 1
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: agentforge-stable-macos-arm64
+          path: release
+      - run: (cd release && sha256sum --check SHA256SUMS.txt)
+      - name: Publish stable release and update metadata together
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* --verify-tag --latest --title "AgentForge $RELEASE_TAG" --generate-notes
+      - name: Remove only the successful transfer artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+        run: |
+          [[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID"

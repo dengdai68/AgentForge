@@ -388,3 +388,54 @@ console.log(JSON.stringify({ type: "item.completed", item: { id: "m1", type: "ag
     await assert.rejects(runCodexCli({ runtime: { executable: codex, effort: "Ultra", skillPaths: [], pluginPaths: [], mcpConfigPaths: [] }, workspacePath: root, traceDirectory: root, prompt: "test", runId: "codex-bad-effort", onEvent: async () => {} }), /思考等级配置无效/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test("execution content does not mistake whitespace normalization for sensitive-data filtering", () => {
+  const content = executionContent({thinking:" \r\n 公开思考正文 \r\n ",text:"\n回复\n"});
+  assert.equal(content.fields.thinking.text,"公开思考正文");
+  assert.equal(content.fields.thinking.redacted,false);
+  assert.equal(content.fields.text.redacted,false);
+  assert.deepEqual(executionContent({thinking:" \n\t "}).fields.thinking,{text:"",truncated:false,redacted:false});
+  const filtered = executionContent({thinking:"检查输入\nAPI_KEY=SECRET_SENTINEL\n继续处理"});
+  assert.equal(filtered.fields.thinking.redacted,true);
+  assert.match(filtered.fields.thinking.text,/检查输入/);
+  assert.match(filtered.fields.thinking.text,/继续处理/);
+  assert.doesNotMatch(filtered.fields.thinking.text,/SECRET_SENTINEL/);
+});
+
+// A stream-json result closes a turn, not the CLI invocation. Background task
+// snapshots and follow-up turns are real native protocol events.
+for (const mode of ['background', 'completed-wait', 'failure', 'silent-turn', 'cancel']) {
+  test(`Claude native background lifecycle: ${mode}`, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'af-claude-background-'));
+    t.after(() => rm(root, {recursive:true,force:true}));
+    const executable = join(root,'claude.mjs');
+    await writeFile(executable, `#!${process.execPath}
+const send = value => console.log(JSON.stringify(value));
+const mode = ${JSON.stringify(mode)};
+if (mode === 'background' || mode === 'cancel') {
+ send({type:'system',subtype:'background_tasks_changed',tasks:[{task_id:'tts',task_type:'local_bash'}]});
+ send({type:'result',subtype:'success',is_error:false,result:'interim',queued_turn_count:0});
+ setTimeout(() => {
+  send({type:'system',subtype:'task_notification',task_id:'tts',status:'completed'});
+  send({type:'system',subtype:'background_tasks_changed',tasks:[]});
+  send({type:'assistant',message:{content:[{type:'text',text:'finished audio'}]}});
+  send({type:'result',subtype:'success',is_error:false,result:'FINAL',queued_turn_count:0});
+  process.exit(0);
+ }, 2300);
+} else {
+ send({type:'system',subtype:'background_tasks_changed',tasks:[]});
+ if (mode !== 'silent-turn') send({type:'result',subtype:'success',is_error:false,result:'FINAL',queued_turn_count:0});
+ setTimeout(() => process.exit(mode === 'failure' ? 1 : 0),2300);
+}
+`, {mode:0o700});
+    const runId = `background-${mode}-${randomUUID()}`, events=[];
+    const invocation = runClaudeCodeCli({runtime:{executable},workspacePath:root,traceDirectory:root,finalPath:join(root,'final.json'),runId,prompt:'work',idleTimeoutMs:2000,onEvent:async e=>{events.push(e);if(mode==='cancel' && events.length === 1){const {terminateExecution}=await import('../server/runtime/registry.mjs');setTimeout(()=>terminateExecution(runId,'human pause'),30);}}});
+    if (mode === 'failure') await assert.rejects(invocation,/exit=1/);
+    else if (mode === 'silent-turn') await assert.rejects(invocation,/未产生可审计进展/);
+    else if (mode === 'cancel') await assert.rejects(invocation,/human pause/);
+    else assert.equal((await invocation).finalText,'FINAL');
+    const {hasActiveExecution}=await import('../server/runtime/registry.mjs');
+    assert.equal(hasActiveExecution(runId),false);
+  });
+}

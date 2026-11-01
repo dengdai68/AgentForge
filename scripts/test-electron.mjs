@@ -557,7 +557,7 @@ try {
     assert.ok(!["auto", "scroll"].includes(modalState.overflowY), `modal never scrolls itself (${modalState.overflowY})`);
     assert.ok(modalState.scrollH <= modalState.clientH + 1 && modalState.scrollW <= modalState.clientW + 1, `modal neither scrolls nor clips: ${JSON.stringify(modalState)}`);
     const scrollGroup = await page.locator(".modal-scroll").evaluate((element) => getComputedStyle(element).overflowY);
-    const responsive = await page.locator(".modal").evaluate(modal => modal.matches(".workflow-detail-modal,.workflow-editor-modal,.team-config-modal"));
+    const responsive = await page.locator(".modal").evaluate(modal => modal.matches(".workflow-detail-modal,.workflow-editor-modal,.team-config-modal,.task-create-modal"));
     if (responsive) assert.ok(["auto", "scroll"].includes(scrollGroup), "long configuration bodies scroll inside the viewport");
     else assert.ok(!["auto", "scroll"].includes(scrollGroup), "short dialogs keep their plain flow layout");
     await page.locator(".modal-backdrop").evaluate((backdrop) => { backdrop.scrollTop = backdrop.scrollHeight; });
@@ -580,12 +580,11 @@ try {
     if (view === "tasks") {
       await verifyTaskSearch(page, "electron");
       await page.getByRole("button", { name: "＋ 新建任务", exact: true }).click();
-      assert.equal(await page.getByRole("region", { name: "本机执行与资料边界" }).isVisible(), true);
-      assert.match(await page.locator("[data-task-execution-boundary]").innerText(), /工作目录不是沙箱/);
-      assert.equal(await page.locator(".modal-scroll [data-task-execution-boundary]").count(), 1, "disclosure scrolls with the form instead of squeezing short-window inputs");
+      assert.equal(await page.locator('[data-task-execution-boundary]').count(), 0);
       const criteria = page.locator('textarea[name="acceptanceCriteria"]');
+      assert.equal(await criteria.isVisible(), false);
+      await page.locator('.task-acceptance summary').click();
       await criteria.waitFor();
-      assert.equal(await criteria.isVisible(), true);
       await criteria.fill(Array.from({ length: 21 }, (_, index) => `验收标准 ${index + 1}`).join("\n"));
       await page.getByRole("button", { name: "创建并开始", exact: true }).click();
       await page.getByText("验收标准最多 20 条。", { exact: true }).waitFor();
@@ -861,36 +860,14 @@ try {
       if (category === 'runtime') {
         assert.equal((await fetch(`${desktopOrigin}/api/settings/runtime-profiles`)).status, 401);
         assert.equal(await page.getByText('本机执行说明与版本', { exact: true }).count(), 0);
-        await page.locator('[data-runtime-profile] summary h4').first().waitFor();
-        const hierarchy = await page.locator('[data-runtime-profile] summary h4').evaluateAll(headings => headings.map(heading => ({ size: parseFloat(getComputedStyle(heading).fontSize), weight: Number(getComputedStyle(heading).fontWeight), parentSize: parseFloat(getComputedStyle(document.querySelector('#runtime-title')).fontSize), parentWeight: Number(getComputedStyle(document.querySelector('#runtime-title')).fontWeight) })));
-        assert.ok(hierarchy.length > 0 && hierarchy.every(item => item.size <= item.parentSize && item.weight <= item.parentWeight), `connection headings stay subordinate to Runtime: ${JSON.stringify(hierarchy)}`);
-        const form = page.locator('[data-runtime-profile="new"]');
-        await form.locator('summary').click();
-        await page.waitForFunction(() => document.querySelector('[data-runtime-profile="new"] [data-model-status]')?.textContent.includes('个可选'));
-        const modelInput = form.locator('[name="model"]');
-        await modelInput.fill('son');
-        await modelInput.press('ArrowDown');
-        await modelInput.press('Enter');
-        assert.equal(await modelInput.inputValue(), 'sonnet');
-        assert.equal(await form.locator('.model-options').isVisible(), false);
-        await modelInput.fill('manual-model');
-        await modelInput.press('Escape');
-        assert.equal(await modelInput.inputValue(), 'manual-model');
-        await modelInput.fill(''); await modelInput.press('Escape');
-        assert.equal(await form.locator('[data-refresh-models] svg').count(), 1);
-        await form.locator('[name="name"]').fill('桌面 Runtime 失败验收');
-        await form.locator('[name="executable"]').fill('/agentforge-desktop-missing-cli');
-        await form.locator('[name="executable"]').press('Tab');
-        await page.waitForFunction(() => { const text = document.querySelector('[data-runtime-profile="new"] [data-model-status]')?.textContent || ''; return text && !/正在加载|尚未加载/.test(text); });
-        const creation = page.waitForResponse(response => response.url().endsWith('/api/settings/runtime-profiles') && response.request().method() === 'POST');
-        await form.getByRole('button', { name: '添加配置', exact: true }).click();
-        const creationResponse = await creation;
-        assert.equal(creationResponse.status(), 201, await creationResponse.text());
-        const card = page.locator('[data-runtime-profile]').filter({ has: page.getByRole('heading', { name: '桌面 Runtime 失败验收', exact: true }) });
-        await card.locator('summary').click();
-        await card.getByRole('button', { name: '测试连接', exact: true }).click();
-        await card.locator('[data-runtime-result]').filter({ hasText: '连接测试失败' }).waitFor();
-        assert.match(await card.locator('[data-runtime-result]').textContent(), /\.jsonl/);
+        const rows = page.locator('.runtime-provider-row'); await rows.first().waitFor();
+        assert.equal(await rows.count(),2);
+        await rows.first().locator('summary').click();
+        const form = page.locator('.runtime-inline-editor');
+        assert.equal(await form.locator('input,select').count(),2);
+        const modelInput = form.locator('[name=model]'); await modelInput.fill('manual-model'); await modelInput.press('Escape');
+        assert.equal(await modelInput.inputValue(),'manual-model');
+        await form.locator('..').locator('summary').click();
       }
       if (category === "workspace") {
         const input = page.locator("#default-workspace-root");

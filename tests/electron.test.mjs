@@ -102,7 +102,7 @@ test("tray restore suppresses only navigation focus until the next interaction",
     return document;
   };
   const document = fixture();
-  assert.deepEqual(Object.keys(exposed).sort(), ["copyWorkspacePath", "getCliInstallation", "getPreferences", "installCli", "setCloseMode"]);
+  assert.deepEqual(Object.keys(exposed).sort(), ["checkAppUpdate", "copyWorkspacePath", "downloadAppUpdate", "getAppUpdateState", "getCliInstallation", "getPreferences", "installAppUpdate", "installCli", "onAppUpdate", "openWorkspaceDirectory", "setCloseMode"]);
   const attributes = new Map(), navigation = { matches: selector => selector === ".nav-item", setAttribute: (key, value) => attributes.set(key, value), removeAttribute: key => attributes.delete(key), blur: () => assert.fail("must not move focus") };
   const restore = handlers.get("desktop:tray-restore"), marked = () => attributes.has("data-desktop-restored-focus");
   document.activeElement = navigation;
@@ -153,7 +153,7 @@ test("first-close controller cancels, deduplicates, saves before action and keep
   assert.deepEqual(failed.calls, ['save:tray', 'visible']); assert.equal(failed.context.closeMode, null);
 });
 
-test("packaged acceptance follows dynamic staffing and the task action menu", async () => {
+test("packaged acceptance follows dynamic staffing and direct task actions", async () => {
   const source = await readFile(new URL("../scripts/test-packaged-electron.mjs", import.meta.url), "utf8");
   assert.match(source, /nextAgentId:[^\n]*roster\.find/);
   assert.match(source, /assert\.deepEqual\(workspace\.run\.task\.nodeAssignments, \{\}\)/);
@@ -161,7 +161,8 @@ test("packaged acceptance follows dynamic staffing and the task action menu", as
   assert.doesNotMatch(source, /nodeAssignment_packaged_verify/);
   assert.match(source, /manager conclusion is a normal collaboration message/);
   const archive = source.slice(source.indexOf('data-task-center-page="archive"'));
-  assert.ok(archive.indexOf('的更多操作') < archive.indexOf('data-unarchive-task='));
+  assert.ok(archive.includes('data-unarchive-task='));
+  assert.doesNotMatch(archive, /的更多操作/);
 });
 
 test("Electron accepts only its owned credential-free Console origin", () => {
@@ -189,18 +190,18 @@ test("Electron preferences IPC rejects other windows, subframes and non-General 
     assert.equal(isPreferencesSender({ sender: contents, senderFrame: mainFrame }, contents, owned), false, url);
   }
 });
-test("Electron renderer has no Node and only closed preference/CLI installation/workspace-copy methods", async () => {
+test("Electron renderer has no Node and only closed preference/CLI/workspace/update methods", async () => {
   const source = await readFile(new URL("../apps/electron/main.mjs", import.meta.url), "utf8");
   assert.match(source, /nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true/);
   assert.doesNotMatch(source, /createStore/);
-  assert.equal((source.match(/ipcMain\.handle\(/g) || []).length, 5);
+  assert.equal((source.match(/ipcMain\.handle\(/g) || []).length, 8);
   assert.equal((source.match(/isPreferencesSender\(event, contents, controlOrigin\)/g) || []).length, 2);
   assert.equal((source.match(/isCliSender\(event, contents, controlOrigin\)/g) || []).length, 3);
   const preload = await readFile(new URL("../apps/electron/preload.cjs", import.meta.url), "utf8");
   assert.match(preload, /process.isMainFrame && \/\^http:/);
   assert.match(preload, /getPreferences: \(\) => ipcRenderer.invoke\("desktop:preferences:get"\)/);
   assert.match(preload, /setCloseMode: \(mode\) => ipcRenderer.invoke\("desktop:preferences:set", mode\)/);
-  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 5);
+  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 10);
   assert.match(preload, /getCliInstallation: \(\) => ipcRenderer.invoke\("desktop:cli:status"\)/);
   assert.match(preload, /installCli: \(\) => ipcRenderer.invoke\("desktop:cli:install"\)/);
   assert.match(source, /args.length \|\| !isCliSender/);
@@ -211,7 +212,7 @@ test("Electron renderer has no Node and only closed preference/CLI installation/
   assert.match(source, /child\?\.kill\(\)/);
   assert.match(source, /requestSingleInstanceLock/);
   assert.match(source, /setUserAgent\(.*AgentForgeDesktop\/1/);
-  assert.doesNotMatch(source, /insertCSS|did-finish-load/);
+  assert.doesNotMatch(source, /insertCSS/, 'shared styles are served with HTML, never injected after load');
   const server = await readFile(new URL("../server/index.mjs", import.meta.url), "utf8");
   assert.match(server, /agentforge-desktop-style/);
   assert.match(server, /if \(extension !== "\.html"\) return content/);
@@ -432,7 +433,7 @@ test("Electron reduces chrome spacing without shrinking reading text or scaling 
   assert.match(shared, /@media \(max-width:780px\), \(max-height:620px\)[\s\S]*#run-workspace \.workspace-grid \{ display:flex; flex-direction:column/);
 });
 
-test('application branding preserves the supplied PNG for sidebar, Dock, tray and packaged icon', async () => {
+test('application branding preserves the master and separates UI, inset Dock and native menu-bar assets', async () => {
   const root = new URL('../', import.meta.url);
   const manifest = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
   assert.equal(manifest.build.mac.icon, 'apps/electron/application.icns');
@@ -441,16 +442,21 @@ test('application branding preserves the supplied PNG for sidebar, Dock, tray an
   assert.equal(png.subarray(1, 4).toString(), 'PNG');
   assert.equal(png.readUInt32BE(16), 1254);
   assert.equal(png.readUInt32BE(20), 1254);
-  assert.equal(createHash('sha256').update(png).digest('hex'), '35d0d4489508658eb2ba854fdecdb4d5c2f60240c5ce7b5569e20044add0eaf3', 'do not redraw or overwrite the operator-supplied mark');
+  assert.equal(createHash('sha256').update(png).digest('hex'), '46bb3c5165723bba5f63f070de19647fa6c6385366579d0d9a9a9bb1277e937e', 'do not redraw or overwrite the operator-supplied mark');
   assert.equal(icns.subarray(0, 4).toString(), 'icns');
   assert.equal(icns.readUInt32BE(4), icns.length);
   const html = await readFile(new URL('web/index.html', root), 'utf8');
-  assert.match(html, /class="application-icon" src="\/icons\/application.png"/);
+  assert.match(html, /class="application-icon" src="\/icons\/application-ui.png"/);
   assert.doesNotMatch(html, /class="brand-mark"/);
   const host = await readFile(new URL('apps/electron/main.mjs', root), 'utf8');
-  assert.match(host, /app\.dock\?\.setIcon\(join\(sourceRoot, 'web\/icons\/application.png'\)\)/);
-  assert.match(host, /nativeImage\.createFromPath\(join\(sourceRoot, 'web\/icons\/application.png'\)\)\.resize/);
+  assert.match(host, /app\.dock\?\.setIcon\(join\(sourceRoot, 'web\/icons\/application-dock.png'\)\)/);
+  assert.match(host, /nativeImage\.createFromPath\(join\(sourceRoot, 'web\/icons\/trayTemplate.png'\)\)/);
   assert.match(host, /image\.setTemplateImage\(true\)/);
+  for (const [file, size] of [['application-ui.png',1024],['application-dock.png',1024],['trayTemplate.png',18],['trayTemplate@2x.png',36]]) {
+    const asset = await readFile(new URL('web/icons/' + file, root));
+    assert.equal(asset.readUInt32BE(16), size);
+    assert.equal(asset.readUInt32BE(20), size);
+  }
 });
 
 test('team and workflow actions share directory toolbar spacing without a desktop list divider', async () => {
@@ -479,7 +485,7 @@ test("Electron applies one component language to forms, reference and short wind
   assert.match(css, /#run-workspace \.console-tool-call \{ display:block/);
   const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   assert.match(app, /body\.className = "modal-scroll"/);
-  assert.match(app, /data-task-more/);
+  assert.doesNotMatch(app, /data-task-more/);
   assert.match(app, /本机人类/);
   const shared = await readFile(new URL("../web/styles.css", import.meta.url), "utf8");
   assert.match(shared, /\.modal-scroll \{ display:contents/);
@@ -649,6 +655,36 @@ test("workspace copy writes the exact path and rejects unrelated frames", async 
     assert.throws(() => handler(event, path));
   }
   assert.equal(copied, path);
+});
+
+test("workspace opening resolves only the authenticated current Run directory", async () => {
+  const source = await readFile(new URL("../apps/electron/main.mjs", import.meta.url), "utf8");
+  const code = source.slice(source.indexOf('  ipcMain.handle("desktop:workspace:open-directory"'), source.indexOf('  ipcMain.handle("desktop:workspace:copy-path"'));
+  const controlOrigin = "http://127.0.0.1:51983", mainFrame = { url: `${controlOrigin}/runs/run_one` };
+  const path = "/fixture/workspaces/任务/run_one";
+  let handler, opened, ok = true, directory = true, failure = "", workspace = { run: { id: "run_one", task: { workspacePath: path } } };
+  const contents = { mainFrame, session: { fetch: async (url, options) => {
+    assert.equal(url, `${controlOrigin}/api/runs/run_one/workspace?view=summary`);
+    assert.equal(options.credentials, "include"); assert.equal(options.redirect, "error");
+    return { ok, json: async () => workspace };
+  } } };
+  vm.runInNewContext(code, { ipcMain: { handle: (_name, fn) => { handler = fn; } }, contents, controlOrigin, isConsoleURL, URL, AbortSignal,
+    isAbsolute: value => value.startsWith("/"), lstat: async () => ({ isDirectory: () => directory }), shell: { openPath: async value => { opened = value; return failure; } } });
+  const event = { sender: contents, senderFrame: mainFrame };
+  assert.equal(await handler(event), true); assert.equal(opened, path); opened = null;
+  await assert.rejects(handler(event, "/arbitrary/path"));
+  await assert.rejects(handler({ ...event, sender: {} }));
+  await assert.rejects(handler({ ...event, senderFrame: { ...mainFrame } }));
+  for (const url of [`${controlOrigin}/settings/general`, `${controlOrigin}/runs/run_one/extra`, "https://example.com/runs/run_one"]) {
+    mainFrame.url = url; await assert.rejects(handler(event));
+  }
+  mainFrame.url = `${controlOrigin}/runs/run_one`;
+  ok = false; await assert.rejects(handler(event), /已登录/); ok = true;
+  directory = false; await assert.rejects(handler(event), /不可用/); directory = true;
+  workspace = { run: { id: "run_other", task: { workspacePath: path } } }; await assert.rejects(handler(event), /不可用/);
+  assert.equal(opened, null);
+  workspace = { run: { id: "run_one", task: { workspacePath: path } } }; failure = "系统拒绝";
+  await assert.rejects(handler(event), /系统拒绝/);
 });
 
 test("all Chromium persistent and diagnostic paths stay in the instance data root",async()=>{

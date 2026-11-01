@@ -29,8 +29,10 @@ for (const [provider, command] of [['claude-code', 'claude'], ['codex', 'codex']
   const q = text => "'" + text.replaceAll("'", "'\\''") + "'";
   const ambient = 'mcp_servers.agentforge_unselected_probe=' + tomlValue({ command: process.execPath, args: [resolve('scripts/marketplace-probe-mcp.mjs'), join(root, 'codex-unselected.log'), 'must-not-start'] });
   await writeFile(wrapper, '#!/bin/sh\nHOME=' + q(homedir()) + ' exec ' + q(actual) + (provider === 'codex' ? ' -c ' + q(ambient) : '') + ' "$@"\n', { mode: 0o700 });
-  profiles[provider] = store.listRuntimeProfiles().find(item => item.name === 'Real ' + provider)?.id || store.saveRuntimeProfile({ name: 'Real ' + provider, provider, executable: wrapper }).id;
+  profiles[provider] = store.listRuntimeProfiles().find(item => item.provider === provider).id;
 }
+await writeFile(join(home,'.zprofile'), 'export PATH=' + JSON.stringify(root) + ':"$PATH"\n');
+await writeFile(join(home,'.zshrc'), 'export PATH=' + JSON.stringify(root) + ':"$PATH"\n');
 const employee = input => store.listAgents().find(item => item.name === input.name) || store.createAgent(input);
 const cc = employee({ name: '原生会话验证', systemPrompt: '请遵循当前入口。回答前在正文前加【系统指令生效】。只调用用户本轮明确请求的工具，记住本会话用户给出的校验码，不猜测。', runtime: { profileId: profiles['claude-code'] } });
 const codex = employee({ name: 'Codex 原生会话验证', systemPrompt: cc.systemPrompt, runtime: { profileId: profiles.codex } });
@@ -39,7 +41,7 @@ const tester = employee({ name: '独立测试者', capabilities: ['独立测试'
 const manager = employee({ name: '调度者', kind: 'manager', systemPrompt: '协调本次真实验收。首次调用先向 human consultation 提问“是否按简体中文标题整理器的范围执行？”；得到精确回答后安排 develop，再根据真实交接安排 verify，最后提交人类验收。必须返回有效 managerDecision 并明确 nextAgentId；不自行开发、审校或测试，不凭口头派工声称员工已运行。', runtime: { profileId: profiles['claude-code'] } });
 const team = store.listTeams().find(item => item.name === '提示词真实验收') || store.createTeam({ name: '提示词真实验收', managerAgentId: manager.id, memberAgentIds: [developer.id, tester.id] });
 const absentCli = join(root, 'not-installed-claude');
-const failureProfile = store.listRuntimeProfiles().find(item => item.name === 'Missing CLI verification') || store.saveRuntimeProfile({ name:'Missing CLI verification', provider:'claude-code', executable:absentCli });
+const failureProfile = {id:profiles['claude-code']};
 const failureManager = employee({ name:'启动失败验证经理', kind:'manager', runtime:{profileId:failureProfile.id} });
 const failureTeam = store.listTeams().find(item => item.name === '启动失败验证') || store.createTeam({ name:'启动失败验证', managerAgentId:failureManager.id, memberAgentIds:[developer.id] });
 const flow = store.listWorkflowTemplates().find(item => item.name === '实现与独立验证') || store.createWorkflowTemplate({ name: '实现与独立验证', nodes: [
@@ -174,12 +176,15 @@ try {
   await page.locator('#instruction-text:disabled').waitFor();
   await assert.rejects(api('/api/runs/' + runId + '/messages', { recipientAgentId: developer.id, content: '此请求应因归档被拒绝' }), /归档/);
   evidence.task.completedInquiry = true; evidence.task.archivedReadOnly = true;
+  // Controlled failure of the fixed CLI command in this isolated PATH.
+  const savedWrapper = await readFile(join(root,'claude'));
+  await writeFile(join(root,'claude'), '#!/bin/sh\nexec ' + JSON.stringify(absentCli) + ' "$@"\n', {mode:0o700});
   const failureTaskResult=await api('/api/tasks',{title:'CLI 缺失原始错误验证',objective:'仅验证缺失可执行文件，不执行任何业务。',teamId:failureTeam.id,workflowTemplateId:flow.id});
   const failureTask=failureTaskResult.task || failureTaskResult;
   const failureStarted=await api('/api/tasks/'+failureTask.id+'/run',{});
   const failureRunId=failureStarted.run?.id || failureStarted.id;
   const failed=await wait('original startup error',async()=>{const w=await api('/api/runs/'+failureRunId+'/workspace?view=summary');return w.run.status==='failed'?w:null;},60000);
-  assert.equal(failed.traces.length,1);assert.match(failed.traces[0].error,/ENOENT/);assert.ok(failed.traces[0].error.includes(absentCli));
+  assert.equal(failed.traces.length,1);assert.match(failed.traces[0].error,/not found|No such file|not-installed/);assert.ok(failed.traces[0].error.includes(absentCli));
   assert.equal(failed.dispatches[0].status,'cancelled');assert.equal(failed.dispatches[0].nextRetryAt,null);
   await assert.rejects(api('/api/runs/'+failureRunId+'/retry-now',{}),/没有等待退避/);
   await page.goto(origin+'/runs/'+failureRunId);await page.locator('#console-mode').click();
@@ -188,6 +193,7 @@ try {
   if(app)await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1400,950));else await page.setViewportSize({width:1400,height:950});
   await page.waitForFunction(()=>innerWidth===1400 && innerHeight===950);
   await page.screenshot({path:join(root,'original-runtime-error.png')});
+  await writeFile(join(root,'claude'),savedWrapper,{mode:0o700});
   evidence.startupFailure={runId:failureRunId,traceId:failed.traces[0].id,originalError:failed.traces[0].error,automaticRetryStopped:true,visibleInConsole:true};
   evidence.result = 'PASS'; consoleLog('PASS real prompt acceptance: ' + root);
 } catch (error) { evidence.result = 'FAIL'; evidence.error = error.stack; throw error; }

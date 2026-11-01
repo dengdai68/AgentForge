@@ -61,6 +61,7 @@ const taskDeletionLocks = new Set();
 const eventStreams = new Set();
 let runtimeTestActive = false;
 let resettingData = false, resetCommitted = false, writeRequests = 0;
+let updateRestartLease = null;
 try {
   const recovery = await runFiles.recoverStagedTaskDeletions((runId) => store.listRuns().some((run) => run.id === runId));
   if (recovery.failed) console.error(`Task deletion recovery retained ${recovery.failed} invalid or inaccessible staging record(s).`);
@@ -92,10 +93,10 @@ function importExtensions(prepare) {
   extensionImportTail=operation.catch(()=>{});
   return operation;
 }
-const pluginUpdates=createPluginUpdates({getStore:()=>store,marketplace,canRun:()=>!resettingData});
+const pluginUpdates=createPluginUpdates({getStore:()=>store,marketplace,canRun:()=>!resettingData && !updateRestartLease});
 const runExecutionOptions = { runFilesRoot, resolveGitCredential: (url) => runtimeConfiguration.resolveGitCredential(url) };
 let communications = createCommunicationService(store, { root: join(runFilesRoot, "communications"), files: runFiles });
-const wakeCommunication = (id) => setImmediate(() => { if (!resettingData) communications.kick(id).catch(error => diagnostic("communication.dispatch_error", { conversationId: id, error })); });
+const wakeCommunication = (id) => setImmediate(() => { if (!resettingData && !updateRestartLease) communications.kick(id).catch(error => diagnostic("communication.dispatch_error", { conversationId: id, error })); });
 async function employeeInput(request, agentId = null) {
   const input = await readJson(request);
   const allowed = ['name', 'kind', 'description', 'systemPrompt', 'capabilities', 'status', 'repository', 'runtime', 'roleId'];
@@ -106,7 +107,8 @@ async function employeeInput(request, agentId = null) {
   if (agentId && input.runtime === undefined) return input;
   const profileId = Object.hasOwn(input.runtime || {}, 'profileId') ? input.runtime.profileId : previous?.profileId ?? store.listRuntimeProfiles().find(item => item.provider === 'claude-code')?.id;
   const profile = store.listRuntimeProfiles().find(item => item.id === profileId);
-  if (!profile) throw new Error('请先在设置 → Runtime 配置连接并选择有效profileId');
+  if (!profile) throw new Error('请选择固定 Runtime 的有效 profileId');
+  if (!profile.enabled && profileId !== previous?.profileId) throw new Error('Runtime 已停用，请先在设置中启用');
   const selection = Object.hasOwn(input.runtime || {}, 'extensionSelection') ? input.runtime.extensionSelection : previous?.extensionSelection ?? {pluginIds:[], mcpIds:[]};
   const resolved = await marketplace.resolve(selection, profile.provider);
   const {provider, model, executable, profile: cliProfile, effort} = profile;
@@ -341,13 +343,12 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   }
   // CLI paths are executed via execFile without a shell, so spaces and
   // non-ASCII are legitimate; only control characters/newlines are rejected.
-  const validCliPath = (value) => typeof value === "string" && value.length <= 1024 && !/[\0\r\n]/.test(value);
+
   if (pathname === "/api/settings/runtime-profiles/models" && request.method === "GET") {
     const provider = searchParams.get("provider") || "";
     if (!["claude-code", "codex"].includes(provider)) throw new Error("provider 必须是 claude-code 或 codex");
-    const executable = searchParams.get("executable") || "";
-    if (!validCliPath(executable)) throw new Error("CLI 路径格式无效");
-    sendJson(response, 200, await runtimeModelCatalog({ provider, executable: executable || null }));
+    if (searchParams.has("executable")) throw new Error("固定 Runtime 不接受自定义 executable");
+    sendJson(response, 200, await runtimeModelCatalog({ provider }));
     return true;
   }
   if (pathname === "/api/settings/runtime-profiles" && request.method === "GET") {
@@ -360,27 +361,28 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     const effort = typeof input?.effort === "string" ? input.effort.trim() : "";
     const model = typeof input?.model === "string" ? input.model.trim() : "";
     const provider = input?.provider || "claude-code";
-    if (!effort || !model || !["claude-code", "codex"].includes(provider) || !validCliPath(typeof input?.executable === "string" ? input.executable : "")) return;
-    const catalog = await runtimeModelCatalog({ provider, executable: typeof input.executable === "string" && input.executable.trim() ? input.executable.trim() : null }).catch(error => { diagnostic("settings.model_catalog_validation_skipped", { error }); return null; });
+    if (!effort || !model || !["claude-code", "codex"].includes(provider)) return;
+    const catalog = await runtimeModelCatalog({ provider }).catch(error => { diagnostic("settings.model_catalog_validation_skipped", { error }); return null; });
     assertModelEffort(catalog, model, effort);
   }
   if (pathname === "/api/settings/runtime-profiles" && request.method === "POST") {
     const input = await readJson(request);
-    await assertRuntimeEffortSupport(input);
-    sendJson(response, 201, store.saveRuntimeProfile(input)); return true;
+    throw new Error("Runtime 固定为 Claude Code 和 Codex，不支持新增");
   }
   const runtimeProfileMatch = pathname.match(/^\/api\/settings\/runtime-profiles\/([^/]+)(\/test)?$/);
   if (runtimeProfileMatch && request.method === "PUT" && !runtimeProfileMatch[2]) {
     const input = await readJson(request);
-    await assertRuntimeEffortSupport(input);
+    const previous = store.listRuntimeProfiles().find(item => item.id === runtimeProfileMatch[1]);
+    if (previous && (Object.hasOwn(input, "model") || Object.hasOwn(input, "effort")) && Object.keys(input).every(key => ["model", "effort", "enabled"].includes(key))) await assertRuntimeEffortSupport({ ...previous, ...input, provider: previous.provider });
     sendJson(response, 200, store.saveRuntimeProfile(input, runtimeProfileMatch[1])); return true;
   }
   if (runtimeProfileMatch && request.method === "DELETE" && !runtimeProfileMatch[2]) {
-    sendJson(response, 200, store.deleteRuntimeProfile(runtimeProfileMatch[1])); return true;
+    throw new Error("固定 Runtime 不能删除，请使用 enabled 开关");
   }
   if (runtimeProfileMatch?.[2] && request.method === "POST") {
     const profile = store.listRuntimeProfiles().find(item => item.id === runtimeProfileMatch[1]);
     if (!profile) throw new Error("Runtime 配置不存在");
+    store.assertRuntimeEnabled(profile);
     if (runtimeTestActive) { sendJson(response, 409, { error: "已有连接测试正在执行，请等待完成" }); return true; }
     runtimeTestActive = true;
     try { sendJson(response, 200, await probeRuntime(profile)); }
@@ -756,6 +758,7 @@ async function serveStatic(response, pathname) {
 const server = createServer(async (request, response) => {
   if (!auth) { sendJson(response, 503, { error: "服务正在启动" }); return; }
   const write = !["GET", "HEAD"].includes(request.method);
+  if (write && updateRestartLease) { sendJson(response, 503, { error: "应用正在准备重启更新，请稍后重试" }); return; }
   if (resettingData) { sendJson(response, 503, { error: "正在清除数据，请稍后重试" }); return; }
   if (write) ++writeRequests;
   try {
@@ -801,9 +804,27 @@ for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{
   setTimeout(finish,3000).unref();
   void pluginUpdates.stop().finally(finish);
 });
-setInterval(() => { if (!resettingData) communications.poll().catch(error => diagnostic("communication.poll_error", { error })); }, 15000).unref();
+// Only the owning parent can reserve an idle restart. Reserve synchronously,
+// before acknowledging it, so no new HTTP write or scheduler can slip through.
+process.on('message', message => {
+  if (!message || !/^[a-f0-9-]{36}$/.test(message.id || '')) return;
+  if (message.type === 'agentforge-update-release' && updateRestartLease?.id === message.id) {
+    clearTimeout(updateRestartLease.timer); updateRestartLease = null;
+    process.send?.({type:'agentforge-update-released',id:message.id}); return;
+  }
+  if (message.type !== 'agentforge-update-prepare') return;
+  const busy = Boolean(updateRestartLease || resettingData || writeRequests || runtimeTestActive || taskDeletionLocks.size || pluginUpdates.status().running || communications.isActive()
+    || store.listRuns().some(run => ['planning','running','review'].includes(run.status) || hasActiveExecution(run.id)
+      || store.listDispatches(run.id).some(delivery => delivery.status === 'claimed' || (delivery.interactionOnly && delivery.status === 'queued'))));
+  if (!busy) {
+    const timer = setTimeout(() => { updateRestartLease = null; }, 30000); timer.unref();
+    updateRestartLease = { id: message.id, timer };
+  }
+  process.send?.({ type: 'agentforge-update-readiness', id: message.id, ready: !busy });
+});
+setInterval(() => { if (!resettingData && !updateRestartLease) communications.poll().catch(error => diagnostic("communication.poll_error", { error })); }, 15000).unref();
 setInterval(() => {
-  if (resettingData) return;
+  if (resettingData || updateRestartLease) return;
   for (const run of store.listRuns().filter((item) => !item.task.archivedAt && (["planning", "running", "review"].includes(item.status) || store.listDispatches(item.id).some((delivery) => delivery.interactionOnly && delivery.status === "queued")))) {
     const workspace = store.getRunWorkspace(run.id);
     if (hasActiveExecution(run.id) || workspace.traces.some((trace) => trace.status === "running")) continue;

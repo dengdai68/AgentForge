@@ -52,7 +52,7 @@ export function applyPreferences(document, value) {
   root.dataset.navIcons = preferences.showIcons ? "show" : "hide";
   root.dataset.navCounts = preferences.showCounts ? "show" : "hide";
   root.dataset.navUnread = preferences.showUnread ? "show" : "hide";
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", preferences.theme === "minimal" ? "#f7f8f6" : "#faf9f5");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", preferences.theme === "minimal" ? "#f7f9ff" : "#faf9fc");
   for (const item of document.querySelectorAll(".sidebar .nav-item[data-view]")) {
     item.hidden = preferences.hiddenViews.includes(item.dataset.view);
   }

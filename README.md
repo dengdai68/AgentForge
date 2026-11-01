@@ -29,10 +29,10 @@ npm start
 
 ## CLI
 
-在「设置 → 命令行 CLI」安装用户级命令后：
+Mac 安装版启动时默认安装用户级命令，并复用当前客户端登录；安装问题可在「设置 → 命令行 CLI」查看及修复：
 
 ```bash
-agentforge auth login --username admin
+agentforge auth status
 agentforge teams list
 agentforge tasks create --help
 ```
@@ -55,3 +55,5 @@ npm run package:mac:check
 本仓库只提供客户端；本机服务要求父进程 IPC、随机 loopback 端口与 bootstrap 信息。直接运行服务会在打开存储前拒绝，父进程断开时退出。不提供独立 Web 部署或终端管理员初始化。
 
 数字员工以当前系统用户权限执行本机操作。当前是本机单管理员 Beta，Runtime bypass 不等于沙箱；运行中的任务依赖本机服务，不具备云端高可用或多租户能力。
+
+应用更新：安装支持更新功能的客户端后，启动及运行期间自动检查正式版，更新信息及按钮仅在“设置 → 更新 → 应用更新”区域显示，不弹通知卡，Beta/预发布不参与。也可在“设置 → 更新 → 应用更新”手动检查、查看 Release 并下载。Developer ID 签名版本支持任务结束后重启安装；当前临时签名版本下载 DMG 后手动安装。首次从旧客户端升级到支持更新的版本仍需手动安装。详见 [应用更新](docs/24-desktop-updates.md)。

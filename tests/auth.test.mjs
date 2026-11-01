@@ -245,3 +245,34 @@ test("remote configuration requires exact HTTPS origins and sets Secure cookies"
     await auth.guard(request,{...response,writeHead:status=>assert.equal(status,403)},new URL("https://example.com/api/auth/login"));
   } finally { auth?.close(); await rm(root,{recursive:true,force:true}); }
 });
+
+test('CLI delegation requires a real parent login and ends on parent logout, reset and restart', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'af-cli-delegation-')), databasePath = join(root, 'auth.sqlite');
+  let auth;
+  const server = createServer(async (req, res) => {
+    if (await auth.guard(req, res, new URL(req.url, 'http://localhost'))) return;
+    res.writeHead(200); res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const create = () => createAuth({databasePath, origins:[origin]}); auth = create();
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); auth.close(); await rm(root,{recursive:true,force:true}); });
+  await auth.setAdministrator('delegate-user','Synthetic-parent-password');
+  const request = (path, cookie, body) => fetch(origin + path, { method: body ? 'POST' : 'GET', headers:{Origin:origin, 'Content-Type':'application/json', ...(cookie ? {Cookie:cookie} : {})}, ...(body ? {body:JSON.stringify(body)} : {}) });
+  assert.equal((await request('/api/auth/cli-session',null,{})).status,401);
+  const login = async () => (await request('/api/auth/login',null,{username:'delegate-user',password:'Synthetic-parent-password'})).headers.get('set-cookie').split(';')[0];
+  let parent = await login();
+  const issue = async () => (await request('/api/auth/cli-session',parent,{})).json();
+  const first = await issue(); assert.notEqual(first.cookie,parent);
+  assert.equal((await issue()).cookie,first.cookie,'renewal reuses the same parent delegation');
+  assert.equal((await request('/api/auth/session',first.cookie)).status,200);
+  assert.equal((await request('/api/auth/cli-session',first.cookie,{})).status,403,'no delegation chains');
+  await request('/api/auth/logout',parent,{});
+  assert.equal((await request('/api/auth/session',first.cookie)).status,401);
+  parent = await login(); const second = await issue();
+  auth.close(); auth = create();
+  assert.equal((await request('/api/auth/session',parent)).status,200,'persistent parent remains valid');
+  assert.equal((await request('/api/auth/session',second.cookie)).status,401,'ephemeral child does not survive restart');
+  const third = await issue(); await auth.setAdministrator('delegate-user','Synthetic-reset-password');
+  assert.equal((await request('/api/auth/session',third.cookie)).status,401);
+});

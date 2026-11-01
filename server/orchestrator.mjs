@@ -74,6 +74,7 @@ export function failureSignature(kind, message) {
 }
 async function invokeRuntime(store, agent, input, files) {
   try {
+    store.assertRuntimeEnabled(agent.runtime);
     return await withDiagnosticContext({ traceId: input.traceId }, () => withHistoryTools(store, agent, input, provider, files));
   } catch (error) {
     if (error instanceof RuntimeCancelledError || error instanceof RuntimeSessionMissingError) throw error;
@@ -107,9 +108,9 @@ function acceptedWorkspaceBaseline(initial, artifacts) {
   return entries;
 }
 
-function managerDispatch(store, runId, dedupeKey, messageIds = []) {
+function managerDispatch(store, runId, dedupeKey, messageIds = [], sourceMessageId = null) {
   const run = store.getRun(runId), task = store.getRunTask(runId);
-  return store.enqueueDispatch(runId, { recipientAgentId: run.manager.id, workflowNodeId: task.workflowSnapshot.nodes[0].id, purpose: "manager", dedupeKey, messageIds, coordinationFollowup: true, deferredRevisit: dedupeKey.startsWith("redispatch:") });
+  return store.enqueueDispatch(runId, { recipientAgentId: run.manager.id, workflowNodeId: task.workflowSnapshot.nodes[0].id, purpose: "manager", dedupeKey, messageIds, sourceMessageId, coordinationFollowup: true, deferredRevisit: dedupeKey.startsWith("redispatch:") });
 }
 
 // Queue ordering for concurrent coordination messages. A deferred revisit is
@@ -124,7 +125,7 @@ export function dispatchBlocksHandoff(item, now = Date.now()) {
 // Post-decision scheduling for an accepted managerDecision. Returns what was
 // scheduled ("blocked" when the decision must wait). Never rewrites or cancels
 // failed dispatches, frozen history or older deliveries.
-export function scheduleManagerFollowup(store, runId, delivery, decision) {
+export function scheduleManagerFollowup(store, runId, delivery, decision, sourceMessageId = null) {
   if (!decision || typeof decision !== 'object' || Array.isArray(decision) || Object.keys(decision).some(key => !['nextNodeId', 'nextAgentId', 'rationale'].includes(key))) {
     throw new Error('managerDecision 仅接受 nextNodeId、nextAgentId、rationale；咨询必须使用顶层 consultation，不能嵌入 managerDecision');
   }
@@ -137,12 +138,12 @@ export function scheduleManagerFollowup(store, runId, delivery, decision) {
       // A deferred decision must never be dropped silently: record the fact
       // and queue a manager re-evaluation behind the pending work.
       const note = store.addMessage({ runId, traceId: delivery.traceIds?.at(-1) || null, sender: { type: "system", id: "agentforge", name: "AgentForge" }, recipientAgentId: run.manager.id, kind: "coordination_notice", content: `上一项安排（节点 ${decision.nextNodeId} → 成员 ${decision.nextAgentId}）因当时仍有未结束投递而暂未建立派工；请在当前队列清空后基于最新状态重新决定下一步，不要假设该安排已执行。` });
-      managerDispatch(store, runId, "redispatch:" + delivery.id, [note.id]);
+      managerDispatch(store, runId, "redispatch:" + delivery.id, [note.id], note.id);
       return { scheduled: "blocked", requeued: true };
     }
     const recipientId = decision.nextAgentId;
     store.setCurrentFocus(runId, next, decision.rationale || "项目经理安排下一次协作");
-    store.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: next, purpose: "node", dedupeKey: "handoff:" + delivery.id });
+    store.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: next, purpose: "node", dedupeKey: "handoff:" + delivery.id, sourceMessageId });
     return { scheduled: "handoff" };
   }
   store.requestHumanAcceptance(runId, { traceId: delivery.traceIds?.at(-1) || null, summary: decision.rationale || "项目经理已提交人类验收。" });
@@ -165,30 +166,33 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
       store.addMessage({ runId, traceId: trace.id, sender: { type: "system", id: "agentforge", name: "AgentForge" }, recipientAgentId: run.manager.id, kind: "coordination_notice", content: `消息未能投递：${error.message}。员工原文：${content}` });
     }
   }
+  let resultMessage;
   if (delivery.purpose === "inquiry") {
     store.addMessage({ runId, traceId: trace.id, sender, recipientHuman: true, replyToMessageId: delivery.messageIds[0], kind: "inquiry_answer", content });
   } else if (delivery.purpose === "consultation" && !output.consultation) {
     const parent = store.getDispatch(delivery.parentDispatchId);
     store.answerQuestion(runId, parent.waitingMessageId, content, sender, trace.id);
   } else {
-    store.addMessage({ runId, workflowNodeId: delivery.workflowNodeId, traceId: trace.id, sender, kind: ["manager", "delivery_review"].includes(delivery.purpose) ? "manager_decision" : "handoff", content });
+    resultMessage = store.addMessage({ runId, workflowNodeId: delivery.workflowNodeId, traceId: trace.id, sender, kind: ["manager", "delivery_review"].includes(delivery.purpose) ? "manager_decision" : "handoff", content });
   }
   store.completeTrace(trace.id); store.completeDispatch(delivery.id);
   if (["manager", "delivery_review"].includes(delivery.purpose)) {
     if (output.deliveryReview) store.recordDeliveryReview(runId, trace.id, output.deliveryReview);
     const decision = output.managerDecision || (output.deliveryReview?.verdict === "pass" ? { nextNodeId: null, rationale: content } : null);
-    if (decision && Object.hasOwn(decision, "nextNodeId")) {
-      try { scheduleManagerFollowup(store, runId, { ...delivery, traceIds: [trace.id] }, decision); }
-      catch (error) {
-        const note = store.addMessage({ runId, traceId: trace.id, sender: { type: "system", id: "agentforge", name: "AgentForge" }, recipientAgentId: run.manager.id, kind: "coordination_notice", content: `派发未能送达：${error.message}。请指定下一位接收成员与节点。` });
-        managerDispatch(store, runId, "routing:" + delivery.id, [note.id]);
+    if (!(decision && Object.hasOwn(decision, "nextNodeId")) && (output.deliveryReview?.verdict === "rework" || output.consultation)) {
+      managerDispatch(store, runId, "followup:" + delivery.id, [], resultMessage?.id);
+    } else {
+      try {
+        if (!decision || !Object.hasOwn(decision, "nextNodeId")) throw new Error('本轮缺少 managerDecision，正文报告不能建立派工或提交验收。请返回 managerDecision（nextNodeId、nextAgentId、rationale）；提交人类验收时前两项为 null，需要咨询则使用顶层 consultation');
+        scheduleManagerFollowup(store, runId, { ...delivery, traceIds: [trace.id] }, decision, resultMessage?.id);
+      } catch (error) {
+        const note = store.addMessage({ runId, traceId: trace.id, sender: { type: "system", id: "agentforge", name: "AgentForge" }, recipientAgentId: run.manager.id, kind: "coordination_notice", content: `协调决定未能执行：${error.message}` });
+        managerDispatch(store, runId, "routing:" + delivery.id, [note.id], note.id);
       }
-    } else if (output.deliveryReview?.verdict === "rework" || output.consultation) {
-      managerDispatch(store, runId, "followup:" + delivery.id);
     }
   } else if (!["consultation", "inquiry"].includes(delivery.purpose) || output.consultation) {
     store.addEvent({ type: "trace.accepted", runId, actor: sender, message: "已记录员工交接。", data: { traceId: trace.id, workflowNodeId: delivery.workflowNodeId, artifactCount: artifacts.length } });
-    managerDispatch(store, runId, "delivery:" + delivery.id);
+    managerDispatch(store, runId, "delivery:" + delivery.id, [], resultMessage?.id);
   }
   store.syncWaiting(runId);
 }

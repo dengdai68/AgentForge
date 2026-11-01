@@ -144,46 +144,22 @@ try {
   if (cliMode) ({ developer, tester, team, flow } = await setupCliConfiguration({ root, api, page, username: 'development-e2e', password, repository }));
   if (process.env.AGENTFORGE_RUNTIME_E2E === '1' || guiPath) {
     await page.goto(`${origin}/settings/runtime`);
-    const fresh = page.locator('[data-runtime-profile="new"]');
-    await fresh.locator('summary').click();
-    await fresh.locator('[name="name"]').fill('实测 Claude 连接');
-    await fresh.getByRole('button', { name: '添加配置', exact: true }).click();
-    await page.getByRole('heading', { name: '实测 Claude 连接', exact: true }).waitFor();
-    let profiles = (await api('/api/settings/runtime-profiles')).profiles;
-    const claude = profiles.find(item => item.name === '实测 Claude 连接');
-    const card = page.locator(`[data-runtime-profile="${claude.id}"]`);
-    await card.locator('summary').click();
-    await card.locator('[name="executable"]').fill('/agentforge-real-e2e-missing-cli');
-    await card.getByRole('button', { name: '保存配置', exact: true }).click();
-    await card.getByText('已保存。可测试此配置。', { exact: true }).waitFor();
-    await card.getByRole('button', { name: '测试连接', exact: true }).click();
-    await wait('real missing CLI failure', async () => (await card.locator('[data-runtime-result]').textContent()).includes('连接测试失败'));
-    const failure = await card.locator('[data-runtime-result]').textContent();
-    await card.locator('[name="executable"]').fill('');
-    await card.getByRole('button', { name: '保存配置', exact: true }).click();
-    await card.getByText('已保存。可测试此配置。', { exact: true }).waitFor();
-    await card.getByRole('button', { name: '测试连接', exact: true }).click();
-    await wait('real Claude connection', async () => (await card.locator('[data-runtime-result]').textContent()).includes('连接测试通过'), 120000);
-    const success = await card.locator('[data-runtime-result]').textContent();
-    let codexResult = null;
-    if (process.env.AGENTFORGE_RUNTIME_E2E === '1') {
-      const codex = profiles.find(item => item.provider === 'codex');
-      const codexCard = page.locator(`[data-runtime-profile="${codex.id}"]`);
-      await codexCard.getByRole('button', { name: '测试连接', exact: true }).click();
-      await wait('real Codex connection', async () => (await codexCard.locator('[data-runtime-result]').textContent()).includes('连接测试通过'), 120000);
-      codexResult = await codexCard.locator('[data-runtime-result]').textContent();
+    const profiles = (await api('/api/settings/runtime-profiles')).profiles;
+    assert.equal(profiles.length,2);
+    for (const profile of profiles.filter(item=>item.provider==='claude-code'||process.env.AGENTFORGE_RUNTIME_E2E==='1')) {
+      const row=page.locator(`[data-runtime-profile="${profile.id}"]`);
+      await row.locator('summary').click();
+      const drawer=page.locator('.runtime-inline-editor'); assert.equal(await drawer.locator('input,select').count(),2);
+      await drawer.getByRole('button',{name:'测试连接',exact:true}).click();
+      await wait('real fixed Runtime connection',async()=> (await drawer.locator('[data-runtime-result]').textContent()).includes('连接测试通过'),120000);
+      await drawer.locator('..').locator('summary').click();
     }
-    for (const employeeId of [developer.id, tester.id, team.managerAgentId]) {
-      const employee = (await api('/api/bootstrap')).agents.find(item => item.id === employeeId);
-      await api(`/api/agents/${employeeId}`, { runtime: { ...employee.runtime, profileId: claude.id } }, 'PUT');
-    }
-    await page.screenshot({ path: 'screenshots/runtime-settings-web.png', fullPage: true });
-    await writeFile(join(root, 'runtime-settings-evidence.json'), JSON.stringify({ failure, success, codex: codexResult, guiPath, profileId: claude.id }, null, 2));
+    await page.screenshot({path:'screenshots/runtime-settings-web.png',fullPage:true});
   }
   if (process.env.AGENTFORGE_LOGS_E2E === "1") {
     assert.equal((await fetch(`${origin}/api/settings/execution-logs`)).status, 401);
     for (const [kind, targetId, source] of [["agent", developer.id, "private"], ["team", team.id, "group"]]) {
-      await api(`/api/agents/${developer.id}`, { runtime: { ...developer.runtime, executable: join(root, "missing-cli") } }, "PUT");
+      // Fixed Runtime paths are not writable; real diagnostic events come from the requested call below.
       const { conversation } = await api("/api/communications", { kind, targetId });
       await api(`/api/communications/${conversation.id}/messages`, { content: "日志验收：请只回答 17 加 25 等于多少，不使用工具，不转交。", mentionAgentIds: [developer.id], clientRequestId: `logs-${source}-${Date.now()}` });
       const delivery = await wait(`${source} actual CLI spawn failure`, async () => (await api(`/api/communications/${conversation.id}`)).deliveries.find(row => row.status === "failed"));

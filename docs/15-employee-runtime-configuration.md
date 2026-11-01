@@ -34,7 +34,7 @@ MCP 详情提供编辑名称、说明及 JSON；保存生成新版本并原子�
 {"runtime":{"profileId":"<Runtime ID>","extensionSelection":{"pluginIds":[],"mcpIds":[]}}}
 ```
 
-HTTP/CLI 拒绝 `skillIds`、员工 `mcpJson`、连接字段、手工路径及派生 manifest。省略 runtime 或更新字段时保留现有绑定；显式 extensionSelection 必须包含两个数组并完整替换。新员工默认使用现有 Claude 连接，无连接时先在设置创建；不隐式新建连接。
+HTTP/CLI 拒绝 `skillIds`、员工 `mcpJson`、连接字段、手工路径及派生 manifest。省略 runtime 或更新字段时保留现有绑定；显式 extensionSelection 必须包含两个数组并完整替换。新员工默认使用固定 Claude Code 项，停用时须先在设置启用；不能自行新建连接。
 
 安装、列表、员工选择均以插件版本为单位；Skill/Subagent/Hook 只在插件详情中查看，不可单选。插件自带 MCP 会拆为独立市场项，选插件不会隐式启用服务。
 
@@ -68,7 +68,7 @@ Claude 使用所选 --plugin-dir 原生加载 Skill/Subagent/Hook，空 setting-
 
 ## 集中 Runtime
 
-设置拥有具名连接的 Provider、模型、CLI路径、Codex profile、effort；员工只引用 profileId。连接更新投影到当前员工，不改冻结工作。Provider 创建后不可改；切换 Provider 选择另一个连接并重新核对扩展兼容性。任何连接只要没有当前员工引用即可显式删除（含默认项），不会自动补回或修改 CLI 凭据。
+设置固定 Claude Code 和 Codex 各一项，员工引用 profileId；只编辑模型/思考等级及 enabled 开关。旧具名连接的新增、删除、命名、CLI 路径及 Codex profile 输入不再接受。完整当前协议见本文末尾。
 
 测试按钮使用保存配置、新会话与空扩展调用真实 CLI/模型；成功须验证结构化应答。失败/超时写本机日志，页面只显示结果和日志路径。不创建业务任务，也不等于任务可交付。沿用各 CLI 自身登录，不新增模型 Token/Base URL 存储。
 
@@ -76,13 +76,13 @@ Claude 使用所选 --plugin-dir 原生加载 Skill/Subagent/Hook，空 setting-
 
 Runtime 配置新增可选 `effort`（思考等级，空 = CLI 默认），随 model 一同保存、回读、投影给绑定员工并进入真实调用；已有 Task/Run/排队沟通快照保持冻结。Store 按 Provider 校验 effort 档位集合（Claude Code：low/medium/high/xhigh/max；Codex：加 ultra，均来自真实 CLI 观察），明显非法值拒绝；模型仍是自由文本——2026-10-25 人类裁决允许手工输入，服务端不做列表成员硬校验，但 UI/CLI 如实标注"不在当前列表"。
 
-模型列表只来自真实来源，经受认证 `GET /api/settings/runtime-profiles/models?provider=…&executable=…` 提供（server/runtime/model-catalog.mjs）：Codex 用与真实 spawn 相同的 cliEnvironment 执行 `codex debug models`（0.160.0 起），投影 slug/名称/可见性/逐模型 supported_reasoning_levels；visibility 为 hide 的模型不列出，目录可见不等于账号可用（实测 gpt-5.5 在目录中但被 ChatGPT 账号拒绝，返回明确 model_not_found），实际可用性以连接测试/调用为准。Claude Code 无离线列表命令（官方文档确认），目录 = 文档内置别名（default/best/fable/sonnet/opus/haiku/sonnet[1m]/opus[1m]/opusplan）+ settings.json `model`/env 与进程环境（进程优先，与 claudeMarketEnvironment 同边界）中的 ANTHROPIC_MODEL 与 ANTHROPIC_DEFAULT_*_MODEL 别名钉住及 _SUPPORTED_CAPABILITIES 能力声明；只读模型/名称/说明/能力键，凭据键绝不读取或回显。查询失败、空列表如实返回错误/空集，不编造列表。市场扩展执行带 `--setting-sources ''`，settings.json 的 model 字段在该模式下不生效（ANTHROPIC_* 环境键仍按同一优先级生效），目录说明已如实标注。
+模型列表只来自真实来源，经受认证 `GET /api/settings/runtime-profiles/models?provider=…` 提供（server/runtime/model-catalog.mjs）：Codex 用与真实 spawn 相同的 cliEnvironment 执行 `codex debug models`（0.160.0 起），投影 slug/名称/可见性/逐模型 supported_reasoning_levels；visibility 为 hide 的模型不列出，目录可见不等于账号可用（实测 gpt-5.5 在目录中但被 ChatGPT 账号拒绝，返回明确 model_not_found），实际可用性以连接测试/调用为准。Claude Code 无离线列表命令（官方文档确认），目录 = 文档内置别名（default/best/fable/sonnet/opus/haiku/sonnet[1m]/opus[1m]/opusplan）+ settings.json `model`/env 与进程环境（进程优先，与 claudeMarketEnvironment 同边界）中的 ANTHROPIC_MODEL 与 ANTHROPIC_DEFAULT_*_MODEL 别名钉住及 _SUPPORTED_CAPABILITIES 能力声明；只读模型/名称/说明/能力键，凭据键绝不读取或回显。查询失败、空列表如实返回错误/空集，不编造列表。市场扩展执行带 `--setting-sources ''`，settings.json 的 model 字段在该模式下不生效（ANTHROPIC_* 环境键仍按同一优先级生效），目录说明已如实标注。
 
 生效链路：Claude 调用追加 `--model`/`--effort`（2.1.216 实测，非法档位 CLI 仅告警回退，故保存侧必须校验）；Codex 追加 `--model` 与 `-c model_reasoning_effort="<level>"`（0.160.0 实测该键被识别、非法值不被本地拒绝，故保存侧必须校验）。保存校验分两层：Store 按 Provider 档位集合拒绝明显非法值；HTTP 在模型存在于真实目录时按该模型声明的档位拒绝不适用值（Codex 逐模型、Claude 按能力声明），模型不在目录（手工输入）或目录查询失败时不臆造拒绝。连接测试使用保存的 model+effort。resume 会话照常携带两参数：Claude `--resume` 下 `--model`/`--effort` 覆盖原会话选择（官方文档机制，已实测参数接受）；Codex `exec resume` 下 `-c`/`--model` 覆盖同理。切换模型时 UI 清除不在新模型档位集合内的旧 effort 并明示；模型能力未知（无声明/不在目录）时不臆造拒绝，如实标注由 CLI 解析回退。
 
 目录与执行环境一致性：市场扩展执行（`--setting-sources ''`）经 claudeMarketEnvironment 只回注明确列举的连接键，该白名单与目录读取键一致——ANTHROPIC_MODEL、四个 ANTHROPIC_DEFAULT_*_MODEL 别名钉住及对应 _SUPPORTED_CAPABILITIES 能力声明、地址与代理键；进程环境优先。目录声明的别名钉住/能力在实际 spawn 同样生效（回归测试锁定）。
 
-Web 设置模型字段为可搜索筛选的原生 datalist 下拉 + 手工输入，思考等级为联动 select，加载中/空/失败三态与"手工输入不在列表"标注齐备；目录请求带序号，切换 Provider/CLI 路径或连续刷新时过期响应不覆盖新列表。CLI `runtimes models PROVIDER [--executable PATH]` 返回同一目录，schema/help/输出同步 effort 字段与 models 操作。桌面共用该设置页，无新增 IPC/桥。目录与保存校验的 CLI 路径仅拒绝控制字符（execFile 不经 shell，空格/中文路径合法）；Codex 目录为全局目录，`codex debug models` 不接受 --profile（实测 CLI 明确拒绝），命名 profile 只影响调用时配置。
+Web 设置模型字段为可搜索筛选的建议列表 + 手工输入，思考等级为联动 select，加载中/空/失败三态与"手工输入不在列表"标注齐备；目录请求带序号，连续刷新或切换页面时过期响应不覆盖新列表。CLI `runtimes models PROVIDER` 返回同一目录，schema/help/输出同步 effort 字段与 models 操作。桌面共用该设置页，无新增 IPC/桥。目录和调用共用服务 PATH 发现的固定 CLI，不接受界面/CLI 指定路径或命名 Codex profile。
 
 
 ### GitHub / GitLab 私有仓库拉取 Token（2026-10-12）
@@ -92,3 +92,11 @@ Web 设置模型字段为可搜索筛选的原生 datalist 下拉 + 手工输入
 Task 继续冻结不含凭据的 repository URL/ref。`server/index.mjs` 只把 URL 解析能力交给 Run Files；Run Files 只在 URL 精确匹配 `https://github.com/...` 或 `https://gitlab.com/...` 时，在 clone/fetch 子进程中以临时 credential helper 传入 Token（GitHub 用户名 `x-access-token`，GitLab 用户名 `oauth2`），按主机拒绝重定向/其他主机请求并在检出后删除 helper。Token 不进入 URL、命令参数、workspace-ready 标记、Task/Run/Trace/Event/Artifact、日志或 Agent Prompt。clone 禁用 Git hooks、子模块与 LFS 自动下载；既有本机 Git URL 重写并不成为平台 Token 授权。
 
 这仅解决公共 GitHub/GitLab HTTPS 的读取：SSH、自托管实例、GitHub App/OAuth、Token 轮换和写权限不在范围；已有本机 Git/SSH 认证仍可照常工作。拉取 Token 不等于 `deliveryAuthorization`，不授权 push、合并或部署；这些外部操作仍需 Task 明确的人类授权。由于 Runtime 是用户授权的本机 bypass，0600 私有文件和临时 helper 不是沙箱，也不能防御同一 OS 用户的直接读取。
+
+## 固定 Runtime 配置（当前协议）
+
+Runtime 目录固定为 Claude Code 和 Codex，每种 Provider 只有一项；名称由 Provider 决定，不允许创建、删除或自定义名称/CLI 路径/Codex profile。`GET /api/settings/runtime-profiles` 返回 id、provider、enabled、model、effort、employeeCount；`PUT .../:id` 接受非空部分对象 `{enabled?:boolean, model?:string, effort?:string}`。旧创建/删除、名称及连接字段写入明确拒绝；员工仍用 profileId 引用，现有两项 ID 不变。模型目录不接受自定义 executable，沿服务发现的本机 CLI。当前员工随保存更新模型与档位，已有 Task/Run/排队投递的模型及档位快照不改。
+
+设置以两行固定 Runtime 展示可用开关，配置默认折叠，页内展开仅编辑模型名与思考等级；折叠保留表单 DOM 与草稿。停用是当前实例的调用开关：不终止已启动的 Provider；阻止新的任务启动、沟通发送和后续 Provider 调用，包括旧任务后续调用。现有员工绑定及历史不移除，停用项在员工选择器标注，不可新绑定。重新启用不会伪装失败调用已成功，失败任务/投递按原恢复入口继续。
+
+新工作区预置两项并启用。开发阶段不维护具名多连接协议或迁移：多个同 Provider 配置的旧开发数据须由操作者先合并配置，服务明确报错，不擅自选择或重置真实实例。

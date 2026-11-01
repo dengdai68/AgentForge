@@ -16,6 +16,7 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
       try {
         if (!item.available) throw new Error("被 @ 的成员已离开团队或停用，请恢复成员后重试");
         const agent = item.agentSnapshot, cwd = resolve(root, key, agent.id);
+        store.assertRuntimeEnabled(agent.runtime);
         await mkdir(cwd, { recursive: true, mode: 0o700 });
         const canonicalRoot = await realpath(root), actual = await realpath(cwd);
         if (!actual.startsWith(canonicalRoot + sep)) throw new Error("沟通目录越界");

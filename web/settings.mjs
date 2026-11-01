@@ -1,12 +1,14 @@
 import { DIRECTORY_THEMES, NAVIGATION, normalizePreferences } from "./preferences.mjs";
 
-export const SETTINGS_PAGES = { general: "常规", appearance: "外观", workspace: "工作目录", cli: "命令行 CLI", repositories: "仓库访问", runtime: "Runtime", plugins: "插件更新", logs: "运行日志" };
+export const SETTINGS_PAGES = { general: "常规", appearance: "外观", workspace: "工作目录", cli: "命令行 CLI", repositories: "仓库访问", runtime: "Runtime", updates: "更新", logs: "运行日志" };
 const escape = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 
 // Mirrors the provider effort vocabularies observed from the real CLIs in
 // server/runtime/model-catalog.mjs; tests assert both sides stay equal. The
 // catalog endpoint refines per-model availability whenever it loads.
 export const RUNTIME_EFFORT_LEVELS = { "claude-code": ["low", "medium", "high", "xhigh", "max"], codex: ["low", "medium", "high", "xhigh", "max", "ultra"] };
+
+const runtimeOptionLabel = value => String(value).replace(/^[a-z]/, char => char.toUpperCase());
 
 // Effort select options for a provider/model pair. catalog is null until the
 // real source loads (or after it failed); fallbacks are labelled honestly and
@@ -17,16 +19,50 @@ export function runtimeEffortOptions(provider, modelId, catalog) {
   if (provider === "claude-code") {
     if (entry) {
       if (!entry.levels?.length) return { options: defaults, note: entry.note || "配置声明该模型不支持思考档位。" };
-      return { options: [...defaults, ...entry.levels.map(id => ({ value: id, label: id }))], note: entry.note || "" };
+      return { options: [...defaults, ...entry.levels.map(id => ({ value: id, label: runtimeOptionLabel(id) }))], note: entry.note || "" };
     }
-    return { options: [...defaults, ...RUNTIME_EFFORT_LEVELS["claude-code"].map(id => ({ value: id, label: id }))], note: modelId ? "模型不在列表中（手工输入）；档位按 Claude Code CLI 集合展示，实际支持以调用为准。" : "档位由 CLI 按模型实际支持解析，不支持时回退。" };
+    return { options: [...defaults, ...RUNTIME_EFFORT_LEVELS["claude-code"].map(id => ({ value: id, label: runtimeOptionLabel(id) }))], note: modelId ? "模型不在列表中（手工输入）；档位按 Claude Code CLI 集合展示，实际支持以调用为准。" : "档位由 CLI 按模型实际支持解析，不支持时回退。" };
   }
   if (entry) {
-    const levels = (entry.levels || []).map(level => ({ value: level.id, label: level.default ? `${level.id}（模型默认）` : level.id }));
+    const levels = (entry.levels || []).map(level => ({ value: level.id, label: level.default ? `${runtimeOptionLabel(level.id)}（模型默认）` : runtimeOptionLabel(level.id) }));
     if (!levels.length) return { options: defaults, note: "目录中该模型未声明思考档位。" };
     return { options: [...defaults, ...levels], note: "档位来自 codex debug models 目录；账号实际可用性以调用为准。" };
   }
-  return { options: [...defaults, ...RUNTIME_EFFORT_LEVELS.codex.map(id => ({ value: id, label: id }))], note: modelId ? "模型不在目录中（手工输入）；档位按 Codex 全局集合展示，逐模型支持以调用为准。" : "未选择模型；逐模型档位在选择模型后精确展示，当前为 Codex 全局集合。" };
+  return { options: [...defaults, ...RUNTIME_EFFORT_LEVELS.codex.map(id => ({ value: id, label: runtimeOptionLabel(id) }))], note: modelId ? "模型不在目录中（手工输入）；档位按 Codex 全局集合展示，逐模型支持以调用为准。" : "未选择模型；逐模型档位在选择模型后精确展示，当前为 Codex 全局集合。" };
+}
+
+export function createAppUpdateUI(panel, desktop) {
+  const status = panel.querySelector('[data-app-update-status]'), version = panel.querySelector('[data-app-version]');
+  const check = panel.querySelector('[data-app-update-check]'), download = panel.querySelector('[data-app-update-download]');
+  const install = panel.querySelector('[data-app-update-install]'), progress = panel.querySelector('progress');
+  const note = panel.querySelector('[data-app-update-note]');
+  let disposed = false, observed;
+  function accept(value) {
+    if (disposed) return; observed = value;
+    version.textContent = `当前版本 ${value.currentVersion || '—'}${value.version ? ` · 最新正式版 ${value.version}` : ''}`;
+    status.textContent = value.message || '正在读取更新状态…';
+    const busy = ['checking','downloading'].includes(value.phase);
+    check.disabled = busy; check.textContent = value.phase === 'checking' ? '正在检查…' : '检查更新';
+    download.hidden = !value.canDownload; download.disabled = busy;
+    install.hidden = !value.canInstall; install.textContent = value.installMode === 'native' ? '重启并安装' : '打开安装包';
+    progress.hidden = value.phase !== 'downloading'; progress.value = value.percent || 0;
+    note.textContent = value.phase === 'downloading' ? `已下载 ${Math.floor(value.percent || 0)}%`
+      : value.version && value.installMode === 'manual' ? '当前版本或发布包不满足原生自动安装条件；下载后手动安装。' : '启动后及运行期间自动检查正式版；不会自动下载或打断任务重启。';
+  }
+  async function run(method) {
+    if (disposed) return;
+    check.disabled = download.disabled = install.disabled = true;
+    try { accept(await desktop[method]()); }
+    catch (error) { if (!disposed) { if (observed) accept(observed); status.textContent = error.message || '更新操作失败，请重试'; } }
+    finally { if (!disposed) install.disabled = false; }
+  }
+  const unsubscribe = desktop?.onAppUpdate?.(accept);
+  check.onclick = () => run('checkAppUpdate'); download.onclick = () => run('downloadAppUpdate'); install.onclick = () => run('installAppUpdate');
+  return { async refresh() {
+    if (disposed || panel.hidden) return;
+    if (!desktop?.getAppUpdateState) { status.textContent = '请使用支持应用更新的客户端版本。'; check.disabled = true; return; }
+    await run('getAppUpdateState');
+  }, dispose() { disposed = true; unsubscribe?.(); } };
 }
 
 export function createClosePreferenceUI(panel, desktop) {
@@ -77,7 +113,7 @@ export function createCliInstallationUI(panel, desktop) {
   function accept(value) {
     available = value.canInstall === true;
     paths.textContent = [value.commandPath, ...(value.profilePaths || [])].filter(Boolean).join('\n');
-    status.textContent = value.cancelled ? (value.installed ? '已取消重新安装；现有 CLI 保持不变。' : '已取消，未安装。') : value.installed ? '已安装。请新开终端运行 agentforge help；已有终端需重新打开。' : value.message || '尚未安装。确认后仅写入当前用户的命令与受管 PATH 配置块。';
+    status.textContent = value.cancelled ? (value.installed ? '已取消重新安装；现有 CLI 保持不变。' : '已取消，未安装。') : value.installed ? '已安装。请新开终端运行 agentforge help；已有终端需重新打开。' : value.message || '自动安装尚未完成，可重试安装；仅写入当前用户的命令与受管 PATH 配置块。';
     button.textContent = value.installed ? '重新安装 CLI' : '安装 CLI';
     button.hidden = !value.supported;
   }
@@ -88,7 +124,7 @@ export function createCliInstallationUI(panel, desktop) {
       button.hidden = true; retry.hidden = true;
       status.textContent = '客户端宿主接口不可用，请重新打开应用后安装 CLI。'; return;
     }
-    busy = true; sync(); status.textContent = install ? '请在客户端确认安装…' : '正在检查 CLI 安装…';
+    busy = true; sync(); status.textContent = install ? '正在安装 CLI…' : '正在检查 CLI 安装…';
     try {
       const value = await (install ? desktop.installCli() : desktop.getCliInstallation());
       if (!disposed) accept(value);
@@ -151,11 +187,12 @@ export function createPluginUpdateSettingsUI(panel, api) {
 export function createSettingsUI({ api, notify, navigate, getPreferences, updatePreferences, clearInvalid, setInvalid, onWorkspaceSaved = () => {}, openModal, closeModal, confirmDialog, onDataReset, onResetStarted = () => {}, onResetFailed = () => {} }) {
   let root = null, repositoriesLoaded = false, workspaceLoaded = false, runtimeLoaded = false;
   let logRequest = 0, currentPage = null;
-  let closePreferenceUI = null, cliInstallationUI = null, pluginUpdateUI = null;
+  let closePreferenceUI = null, cliInstallationUI = null, pluginUpdateUI = null, appUpdateUI = null;
   const refreshHostSettings = () => {
     if (currentPage === "general") void closePreferenceUI?.refresh();
     if (currentPage === "cli") void cliInstallationUI?.refresh();
-    if (currentPage === "plugins") void pluginUpdateUI?.refresh();
+    if (currentPage === "updates") void pluginUpdateUI?.refresh();
+    if (currentPage === "updates") void appUpdateUI?.refresh();
   };
   function confirmDataReset() {
     openModal(`<h2>清除所有数据</h2><p class="modal-intro">永久删除此工作区的账号、任务与沟通记录、数字员工、团队、工作流、Runtime 与扩展配置、仓库 Token、交付文件及系统创建的任务目录。清除后重新设置管理员。</p><p class="settings-note">外部已有项目目录、工作根目录及本机 Claude Code / Codex 登录与会话保留。请先停止正在执行的任务和沟通。此操作无法撤销。</p><form id="reset-data-form"><div class="form-field"><label for="reset-current-password">当前密码</label><input id="reset-current-password" name="password" type="password" autocomplete="current-password" required /></div><div class="form-field"><label for="reset-confirmation">输入「清除所有数据」确认</label><input id="reset-confirmation" name="confirmation" autocomplete="off" required /></div><p data-reset-error role="alert"></p><div class="form-actions"><button class="ghost-button" type="button" data-cancel-reset>取消</button><button class="danger-button" type="submit" disabled>清除并重新开始</button></div></form>`);
@@ -206,135 +243,141 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
       const { profiles } = await api('/api/settings/runtime-profiles');
       if (!container.isConnected) return;
       container.replaceChildren();
-      for (const profile of [...profiles, null]) {
-        const card = document.createElement('details'); card.className = 'repository-access-card';
-        card.dataset.runtimeProfile = profile?.id || 'new';
-        const value = profile || { name: '', provider: 'claude-code', model: '', executable: '', profile: '', effort: '' };
-        const modelListId = `runtime-models-${profile?.id || 'new'}`;
-        card.innerHTML = `<summary><h4>${profile ? escape(profile.name) : '新增 Runtime'}</h4><span class="field-hint">${profile ? `${escape(profile.provider)} · ${profile.employeeCount} 位员工${profile.system ? ' · 默认' : ''}` : '展开填写配置'}</span></summary><form class="runtime-profile-form"><div class="form-grid">
-          <div class="form-field"><label>配置名称<input name="name" value="${escape(value.name)}" required maxlength="120" /></label></div>
-          <div class="form-field"><label>Provider<select name="provider" ${profile ? 'disabled' : ''}><option value="claude-code" ${value.provider === 'claude-code' ? 'selected' : ''}>Claude Code</option><option value="codex" ${value.provider === 'codex' ? 'selected' : ''}>Codex</option></select></label></div>
-          <div class="form-field runtime-model-field"><label for="${modelListId}-input">模型</label><div class="runtime-model-row"><div class="runtime-model-picker"><input id="${modelListId}-input" name="model" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${modelListId}" value="${escape(value.model)}" placeholder="选择或输入模型" autocomplete="off" spellcheck="false" /><button type="button" class="model-picker-toggle" aria-label="展开模型列表" aria-controls="${modelListId}">⌄</button><div id="${modelListId}" class="model-options" role="listbox" aria-label="模型列表" hidden></div></div><button type="button" class="model-refresh" data-refresh-models aria-label="刷新模型列表" title="刷新模型列表"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7M20 7v5"/></svg></button></div><p class="field-hint" data-model-status>模型列表：尚未加载。</p></div>
-          <div class="form-field"><label>思考等级<select name="effort"></select></label><p class="field-hint" data-effort-status></p></div>
-          <div class="form-field"><label>CLI 路径<input name="executable" value="${escape(value.executable || '')}" placeholder="留空使用服务 PATH 中的 CLI" spellcheck="false" /></label></div>
-          <div class="form-field" data-cli-profile ${value.provider === 'codex' ? '' : 'hidden'}><label>Codex profile<input name="profile" value="${escape(value.profile)}" placeholder="可选：本机 config.toml 中的 profile" /></label></div>
-          </div><p class="field-hint">${profile ? `${profile.employeeCount} 位员工使用；保存影响新任务和新沟通投递，已有任务不变。` : '保存后可在数字员工中选择。'}认证沿用本机 CLI 登录。</p>
-          <div class="form-actions"><button class="primary-button compact" type="submit">${profile ? '保存配置' : '添加配置'}</button>${profile ? '<button type="button" class="small-button" data-test-runtime>测试连接</button>' : ''}${profile ? `<button type="button" class="danger-button compact" data-delete-runtime ${profile.employeeCount ? 'disabled title="请先为使用此配置的员工切换 Runtime（含停用员工）"' : ''}>删除配置</button>` : ''}</div>
-          <p role="status" data-runtime-result style="overflow-wrap:anywhere;user-select:text"></p></form>`;
-        container.append(card);
-        const form = card.querySelector('form'), status = card.querySelector('[data-runtime-result]');
-        const modelInput = form.elements.model, effortSelect = form.elements.effort;
-        const modelStatus = card.querySelector('[data-model-status]'), effortStatus = card.querySelector('[data-effort-status]');
-        const modelOptions = card.querySelector('.model-options');
-        let activeOption = -1;
-        function closeModels() { modelOptions.hidden = true; modelInput.setAttribute('aria-expanded', 'false'); modelInput.removeAttribute('aria-activedescendant'); activeOption = -1; }
-        function showModels(all = false) { syncModel(all); modelOptions.hidden = false; modelInput.setAttribute('aria-expanded', 'true'); }
-        function chooseModel(id) { modelInput.value = id; closeModels(); modelInput.dispatchEvent(new Event('input', { bubbles: true })); closeModels(); modelInput.focus(); }
-        card.querySelector('.model-picker-toggle').addEventListener('click', () => { if (modelOptions.hidden) { modelInput.focus(); showModels(true); } else closeModels(); });
-        modelInput.addEventListener('click', () => showModels(true));
-        modelInput.addEventListener('keydown', event => {
-          if (event.key === 'Escape') { event.preventDefault(); closeModels(); return; }
-          if (event.key === 'Tab') { closeModels(); return; }
-          if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
-          if (event.key === 'Enter') { if (!modelOptions.hidden && activeOption >= 0) { event.preventDefault(); chooseModel(modelOptions.children[activeOption].dataset.value); } return; }
-          event.preventDefault(); if (modelOptions.hidden) showModels();
-          const options = [...modelOptions.querySelectorAll('[role="option"]')]; if (!options.length) return;
-          activeOption = activeOption < 0 ? (event.key === 'ArrowDown' ? 0 : options.length - 1) : (activeOption + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
-          options.forEach((option, index) => option.setAttribute('aria-selected', String(index === activeOption)));
-          modelInput.setAttribute('aria-activedescendant', options[activeOption].id); options[activeOption].scrollIntoView({ block: 'nearest' });
-        });
-        card.addEventListener('focusout', event => { if (!card.querySelector('.runtime-model-picker').contains(event.relatedTarget)) closeModels(); });
-        const catalog = { state: 'idle', data: null, error: '', request: 0 };
-        const findModel = () => catalog.data?.models?.find(item => item.id === modelInput.value.trim()) || null;
-        function syncModel(all = false) {
-          modelOptions.replaceChildren(); activeOption = -1; modelInput.removeAttribute('aria-activedescendant');
-          const query = all ? "" : modelInput.value.trim().toLowerCase();
-          if (catalog.state === 'ok') for (const item of catalog.data.models.filter(item => !query || `${item.id} ${item.label || ''}`.toLowerCase().includes(query))) {
-            const option = document.createElement('div'); option.setAttribute('role', 'option'); option.setAttribute('aria-selected', 'false'); option.id = `${modelListId}-${modelOptions.children.length}`;
-            option.dataset.value = item.id; option.textContent = item.id + (item.resolvedTo ? ` → ${item.resolvedTo}` : '');
-            option.addEventListener('mousedown', event => event.preventDefault()); option.addEventListener('click', () => chooseModel(item.id)); modelOptions.append(option);
+      for (const profile of profiles) {
+        const label = profile.provider === 'codex' ? 'Codex' : 'Claude Code';
+        const row = document.createElement('div'); row.className = 'runtime-provider-row'; row.dataset.runtimeProfile = profile.id;
+        row.innerHTML = `<details class="runtime-config"><summary aria-label="${label} 配置"><span class="runtime-expand-icon" aria-hidden="true">›</span><div><h4>${label}</h4><p class="field-hint" data-runtime-summary></p></div></summary></details><div class="runtime-provider-actions"><label class="runtime-availability"><input type="checkbox" role="switch" aria-label="${label} 可用" ${profile.enabled ? 'checked' : ''} /><span data-enabled-label>${profile.enabled ? '可用' : '已停用'}</span></label></div><p role="status" data-row-result></p>`;
+        container.append(row);
+        const summary = row.querySelector('[data-runtime-summary]');
+        const syncSummary = () => { summary.textContent = `${profile.model ? runtimeOptionLabel(profile.model) : 'CLI 默认模型'} · ${profile.effort ? runtimeOptionLabel(profile.effort) : '默认思考等级'} · ${profile.employeeCount} 位员工`; };
+        syncSummary();
+        const toggle = row.querySelector('[role="switch"]'), rowResult = row.querySelector('[data-row-result]');
+        toggle.onchange = async () => {
+          toggle.disabled = true;
+          try {
+            Object.assign(profile, await api(`/api/settings/runtime-profiles/${encodeURIComponent(profile.id)}`, { method: 'PUT', body: JSON.stringify({ enabled: toggle.checked }) }));
+            row.querySelector('[data-enabled-label]').textContent = profile.enabled ? '可用' : '已停用';
+            const test = row.querySelector('[data-test-runtime]');
+            if (test) test.disabled = !profile.enabled || test.form.dataset.busy === 'true';
+            rowResult.textContent = profile.enabled ? '已启用。' : '已停用；已开始的调用继续，新的调用需启用后重试。';
+          } catch (error) { toggle.checked = profile.enabled; rowResult.textContent = error.message; }
+          finally { toggle.disabled = false; }
+        };
+        const disclosure = row.querySelector('details');
+        disclosure.addEventListener('toggle', () => {
+          if (!disclosure.open || disclosure.querySelector('.runtime-inline-editor')) return;
+          const card = document.createElement('div'); card.className = 'runtime-inline-editor'; card.setAttribute('role', 'region'); card.setAttribute('aria-label', `${label} 配置`);
+          const value = profile;
+          const modelListId = `runtime-models-${profile.id}`;
+          card.innerHTML = `<form class="runtime-profile-form"><div class="form-grid">
+            <div class="form-field runtime-model-field"><label for="${modelListId}-input">模型名字</label><div class="runtime-model-row"><div class="runtime-model-picker"><input id="${modelListId}-input" name="model" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${modelListId}" value="${escape(value.model)}" placeholder="选择或输入模型" autocomplete="off" spellcheck="false" /><button type="button" class="model-picker-toggle" aria-label="展开模型列表" aria-controls="${modelListId}">⌄</button><div id="${modelListId}" class="model-options" role="listbox" aria-label="模型列表" hidden></div></div><button type="button" class="model-refresh" data-refresh-models aria-label="刷新模型列表" title="刷新模型列表">↻</button></div><p class="field-hint" data-model-status>模型列表：尚未加载。</p></div>
+            <div class="form-field runtime-effort-field"><label for="${modelListId}-effort">思考等级</label><select id="${modelListId}-effort" name="effort"></select><p class="field-hint" data-effort-status hidden></p></div>
+            </div><div class="form-actions"><button class="primary-button compact" type="submit">保存配置</button><button type="button" class="small-button" data-test-runtime ${profile.enabled ? '' : 'disabled'}>测试连接</button></div>
+            <p role="status" data-runtime-result style="overflow-wrap:anywhere;user-select:text"></p></form>`;
+          disclosure.append(card);
+          const form = card.querySelector('form'), status = card.querySelector('[data-runtime-result]');
+          const modelInput = form.elements.model, effortSelect = form.elements.effort;
+          const modelStatus = card.querySelector('[data-model-status]'), effortStatus = card.querySelector('[data-effort-status]');
+          const modelOptions = card.querySelector('.model-options');
+          let activeOption = -1;
+          function closeModels() { modelOptions.hidden = true; modelInput.setAttribute('aria-expanded', 'false'); modelInput.removeAttribute('aria-activedescendant'); activeOption = -1; }
+          function showModels(all = false) { syncModel(all); modelOptions.hidden = false; modelInput.setAttribute('aria-expanded', 'true'); }
+          function chooseModel(id) { modelInput.value = id; closeModels(); modelInput.dispatchEvent(new Event('input', { bubbles: true })); closeModels(); modelInput.focus(); }
+          card.querySelector('.model-picker-toggle').addEventListener('click', () => { if (modelOptions.hidden) { modelInput.focus(); showModels(true); } else closeModels(); });
+          modelInput.addEventListener('click', () => showModels(true));
+          modelInput.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); closeModels(); return; }
+            if (event.key === 'Tab') { closeModels(); return; }
+            if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+            if (event.key === 'Enter') { if (!modelOptions.hidden && activeOption >= 0) { event.preventDefault(); chooseModel(modelOptions.children[activeOption].dataset.value); } return; }
+            event.preventDefault(); if (modelOptions.hidden) showModels();
+            const options = [...modelOptions.querySelectorAll('[role="option"]')]; if (!options.length) return;
+            activeOption = activeOption < 0 ? (event.key === 'ArrowDown' ? 0 : options.length - 1) : (activeOption + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+            options.forEach((option, index) => option.setAttribute('aria-selected', String(index === activeOption)));
+            modelInput.setAttribute('aria-activedescendant', options[activeOption].id); options[activeOption].scrollIntoView({ block: 'nearest' });
+          });
+          card.querySelector('.runtime-model-picker').addEventListener('mouseleave', closeModels);
+          disclosure.addEventListener('toggle', () => { if (!disclosure.open) closeModels(); });
+          root.addEventListener('pointerdown', event => { if (!event.target.closest('.runtime-model-picker')) closeModels(); });
+          card.addEventListener('focusout', event => { if (!card.querySelector('.runtime-model-picker').contains(event.relatedTarget)) closeModels(); });
+          const catalog = { state: 'idle', data: null, error: '', request: 0 };
+          const findModel = () => catalog.data?.models?.find(item => item.id === modelInput.value.trim()) || null;
+          function syncModel(all = false) {
+            modelStatus.hidden = catalog.state !== 'failed';
+            modelOptions.replaceChildren(); activeOption = -1; modelInput.removeAttribute('aria-activedescendant');
+            const query = all ? "" : modelInput.value.trim().toLowerCase();
+            if (catalog.state === 'ok') for (const item of catalog.data.models.filter(item => !query || `${item.id} ${item.label || ''}`.toLowerCase().includes(query))) {
+              const option = document.createElement('div'); option.setAttribute('role', 'option'); option.setAttribute('aria-selected', 'false'); option.id = `${modelListId}-${modelOptions.children.length}`;
+              option.dataset.value = item.id; option.textContent = runtimeOptionLabel(item.id) + (item.resolvedTo ? ` → ${runtimeOptionLabel(item.resolvedTo)}` : ''); option.title = option.textContent;
+              option.addEventListener('mousedown', event => event.preventDefault()); option.addEventListener('click', () => chooseModel(item.id)); modelOptions.append(option);
+            }
+            if (!modelOptions.children.length) { const empty = document.createElement('p'); empty.textContent = catalog.state === 'loading' ? '正在加载…' : catalog.state === 'failed' ? '加载失败，可重试或手工输入' : '无匹配模型，可手工输入'; modelOptions.append(empty); }
+            const model = modelInput.value.trim();
+            if (catalog.state === 'loading') modelStatus.textContent = '模型列表：正在加载…';
+            else if (catalog.state === 'failed') modelStatus.textContent = `模型列表加载失败：${catalog.error}；仍可手工输入模型名。`;
+            else if (catalog.state === 'ok' && !catalog.data.models.length) modelStatus.textContent = `模型列表为空（来源：${catalog.data.source}）；可手工输入。`;
+            else if (catalog.state === 'ok') {
+              const found = findModel();
+              modelStatus.textContent = `模型列表（${catalog.data.source}）：${catalog.data.models.length} 个可选，输入即筛选；也可手工输入。` + (model ? found ? `当前值在列表中${found.current ? '，为本机当前生效模型' : ''}。` : '当前值不在列表中（手工输入），可保存；实际可用性以连接测试与真实调用为准。' : '留空使用 CLI 默认模型。');
+            } else modelStatus.textContent = '模型列表：尚未加载。';
           }
-          if (!modelOptions.children.length) { const empty = document.createElement('p'); empty.textContent = catalog.state === 'loading' ? '正在加载…' : catalog.state === 'failed' ? '加载失败，可重试或手工输入' : '无匹配模型，可手工输入'; modelOptions.append(empty); }
-          const model = modelInput.value.trim();
-          if (catalog.state === 'loading') modelStatus.textContent = '模型列表：正在加载…';
-          else if (catalog.state === 'failed') modelStatus.textContent = `模型列表加载失败：${catalog.error}；仍可手工输入模型名。`;
-          else if (catalog.state === 'ok' && !catalog.data.models.length) modelStatus.textContent = `模型列表为空（来源：${catalog.data.source}）；可手工输入。`;
-          else if (catalog.state === 'ok') {
-            const found = findModel();
-            modelStatus.textContent = `模型列表（${catalog.data.source}）：${catalog.data.models.length} 个可选，输入即筛选；也可手工输入。` + (model ? found ? `当前值在列表中${found.current ? '，为本机当前生效模型' : ''}。` : '当前值不在列表中（手工输入），可保存；实际可用性以连接测试与真实调用为准。' : '留空使用 CLI 默认模型。');
-          } else modelStatus.textContent = '模型列表：尚未加载。';
-        }
-        function syncEffort(cleared = '') {
-          const previous = effortSelect.value;
-          const { options, note } = runtimeEffortOptions(form.elements.provider.value, modelInput.value.trim(), catalog.state === 'ok' ? catalog.data : null);
-          effortSelect.replaceChildren(...options.map(option => { const element = document.createElement('option'); element.value = option.value; element.textContent = option.label; return element; }));
-          if (previous && options.some(option => option.value === previous)) effortSelect.value = previous;
-          else if (previous) { effortSelect.value = ''; cleared = '原思考等级不适用于当前模型，已清除；保存前请重新选择。'; }
-          effortStatus.textContent = [cleared, note].filter(Boolean).join(' ');
-        }        async function loadCatalog() {
-          // Sequence every request: a response that returns after the user
-          // switched provider/executable or refreshed is stale and must never
-          // overwrite the newer list or touch the effort options.
-          const request = ++catalog.request;
-          catalog.state = 'loading'; catalog.error = ''; syncModel();
-          const provider = form.elements.provider.value, executable = form.elements.executable.value.trim();
-          try {
-            const data = await api(`/api/settings/runtime-profiles/models?provider=${encodeURIComponent(provider)}${executable ? `&executable=${encodeURIComponent(executable)}` : ''}`);
-            if (!form.isConnected || request !== catalog.request) return;
-            catalog.data = data; catalog.state = 'ok';
-          } catch (error) {
-            if (!form.isConnected || request !== catalog.request) return;
-            catalog.data = null; catalog.error = error.message; catalog.state = 'failed';
+          function syncEffort(cleared = '') {
+            const previous = effortSelect.value;
+            const { options } = runtimeEffortOptions(profile.provider, modelInput.value.trim(), catalog.state === 'ok' ? catalog.data : null);
+            effortSelect.replaceChildren(...options.map(option => { const element = document.createElement('option'); element.value = option.value; element.textContent = option.label; return element; }));
+            if (previous && options.some(option => option.value === previous)) effortSelect.value = previous;
+            else if (previous) { effortSelect.value = ''; cleared = '原思考等级不适用于当前模型，已清除；保存前请重新选择。'; }
+            effortStatus.textContent = cleared;
+            effortStatus.hidden = !cleared;
           }
-          syncModel(); syncEffort();
-        }
-        card.addEventListener('toggle', () => { if (card.open && catalog.state === 'idle') loadCatalog(); });
-        card.querySelector('[data-refresh-models]').addEventListener('click', () => { catalog.state = 'idle'; loadCatalog(); });
-        modelInput.addEventListener('input', () => { showModels(); syncEffort(); });
-        form.elements.executable.addEventListener('change', () => { if (catalog.state !== 'idle') { catalog.request++; catalog.state = 'idle'; catalog.data = null; if (card.open) loadCatalog(); else { syncModel(); syncEffort(); } } });
-        syncModel();
-        syncEffort();
-        // Setting a select value before its options exist silently no-ops;
-        // apply the saved effort only after the option set is built.
-        if (value.effort) effortSelect.value = value.effort;
-        let dirty = false;
-        form.addEventListener('input', () => { dirty = true; status.textContent = '尚未保存；请保存后测试。'; });
-        form.elements.provider.addEventListener('change', () => { card.querySelector('[data-cli-profile]').hidden = form.elements.provider.value !== 'codex'; catalog.request++; catalog.state = 'idle'; catalog.data = null; if (card.open) loadCatalog(); else { syncModel(); syncEffort(); } });
-        const busy = value => form.querySelectorAll('input,select,button').forEach(control => { control.disabled = value || Boolean(profile && control.name === 'provider') || Boolean(profile?.employeeCount && control.hasAttribute('data-delete-runtime')); });
-        form.addEventListener('submit', async event => {
-          event.preventDefault(); busy(true);
-          const input = Object.fromEntries(['name','provider','model','executable','profile','effort'].map(key => [key, form.elements[key].value.trim()]));
-          try {
-            const saved = await api(`/api/settings/runtime-profiles${profile ? '/' + encodeURIComponent(profile.id) : ''}`, { method: profile ? 'PUT' : 'POST', body: JSON.stringify(input) });
-            if (!form.isConnected) return;
-            if (!profile) { await loadRuntimes(); return; }
-            card.querySelector('h4').textContent = saved.name;
-            dirty = false; status.textContent = '已保存。可测试此配置。';
-          } catch (error) { if (form.isConnected) status.textContent = error.message; }
-          finally { busy(false); }
-        });
-        card.querySelector('[data-test-runtime]')?.addEventListener('click', async () => {
-          if (dirty) { status.textContent = '请先保存修改，再测试已保存的配置。'; return; }
-          busy(true); status.textContent = '正在实际调用模型（最长约 90 秒）…';
-          try {
-            const result = await api(`/api/settings/runtime-profiles/${encodeURIComponent(profile.id)}/test`, { method: 'POST', body: '{}' });
-            if (form.isConnected) status.textContent = `${result.ok ? '连接测试通过：已收到有效模型应答' : result.timedOut ? '连接测试超时' : '连接测试失败'} · ${(result.durationMs / 1000).toFixed(1)} 秒。日志：${result.logPath} · ${result.testId}`;
-          } catch (error) { if (form.isConnected) status.textContent = `测试请求失败：${error.message}`; }
-          finally { busy(false); }
-        });
-        card.querySelector('[data-delete-runtime]')?.addEventListener('click', () => {
-          openModal(`<h2>删除 Runtime 配置</h2><p>删除「${escape(profile.name)}」？仅移除此配置，不删除 CLI 登录或历史任务。仍被员工引用时服务端会拒绝。</p><div class="form-actions"><button class="ghost-button" data-cancel-runtime-delete>取消</button><button class="danger-button" data-confirm-runtime-delete>删除配置</button></div><p role="alert" data-runtime-delete-error></p>`);
-          const confirm = document.querySelector('[data-confirm-runtime-delete]');
-          const feedback = document.querySelector('[data-runtime-delete-error]');
-          document.querySelector('[data-cancel-runtime-delete]').onclick = closeModal;
-          confirm.onclick = async () => {
-            confirm.disabled = true;
+          async function loadCatalog() {
+            // Sequence every request: a response that returns after the user
+            // collapsed the section or refreshed is stale and must never
+            // overwrite the newer list or touch the effort options.
+            const request = ++catalog.request;
+            catalog.state = 'loading'; catalog.error = ''; syncModel();
+            const provider = profile.provider;
             try {
-              await api(`/api/settings/runtime-profiles/${encodeURIComponent(profile.id)}`, { method: 'DELETE', body: '{}' });
-              if (confirm.isConnected) closeModal();
-              if (container.isConnected && currentPage === 'runtime') await loadRuntimes(); else runtimeLoaded = false;
-            } catch (error) { if (confirm.isConnected) { feedback.textContent = error.message; confirm.disabled = false; } }
-          };
+              const data = await api(`/api/settings/runtime-profiles/models?provider=${encodeURIComponent(provider)}`);
+              if (!form.isConnected || request !== catalog.request) return;
+              catalog.data = data; catalog.state = 'ok';
+            } catch (error) {
+              if (!form.isConnected || request !== catalog.request) return;
+              catalog.data = null; catalog.error = error.message; catalog.state = 'failed';
+            }
+            syncModel(); syncEffort();
+          }
+          void loadCatalog();
+          card.querySelector('[data-refresh-models]').addEventListener('click', () => { catalog.state = 'idle'; loadCatalog(); });
+          modelInput.addEventListener('input', () => { showModels(); syncEffort(); });
+          syncModel();
+          syncEffort();
+          // Setting a select value before its options exist silently no-ops;
+          // apply the saved effort only after the option set is built.
+          if (value.effort) effortSelect.value = value.effort;
+          let dirty = false;
+          form.addEventListener('input', () => { dirty = true; status.textContent = '尚未保存；请保存后测试。'; });
+          const busy = value => { form.dataset.busy = String(value); form.querySelectorAll('input,select,button').forEach(control => { control.disabled = value || Boolean(!profile.enabled && control.hasAttribute('data-test-runtime')); }); };
+          form.addEventListener('submit', async event => {
+            event.preventDefault(); busy(true);
+            const input = Object.fromEntries(['model','effort'].map(key => [key, form.elements[key].value.trim()]));
+            try {
+              const saved = await api(`/api/settings/runtime-profiles/${encodeURIComponent(profile.id)}`, { method: 'PUT', body: JSON.stringify(input) });
+              if (!form.isConnected) return;
+              Object.assign(profile, saved); syncSummary();
+              dirty = false; status.textContent = profile.enabled ? '已保存。可测试此配置。' : '已保存。启用后可测试。';
+            } catch (error) { if (form.isConnected) status.textContent = error.message; }
+            finally { busy(false); }
+          });
+          card.querySelector('[data-test-runtime]')?.addEventListener('click', async () => {
+            if (dirty) { status.textContent = '请先保存修改，再测试已保存的配置。'; return; }
+            busy(true); status.textContent = '正在实际调用模型（最长约 90 秒）…';
+            try {
+              const result = await api(`/api/settings/runtime-profiles/${encodeURIComponent(profile.id)}/test`, { method: 'POST', body: '{}' });
+              if (form.isConnected) status.textContent = `${result.ok ? '连接测试通过：已收到有效模型应答' : result.timedOut ? '连接测试超时' : '连接测试失败'} · ${(result.durationMs / 1000).toFixed(1)} 秒。日志：${result.logPath} · ${result.testId}`;
+            } catch (error) { if (form.isConnected) status.textContent = `测试请求失败：${error.message}`; }
+            finally { busy(false); }
+          });
         });
       }
     } catch (error) { if (container.isConnected) { runtimeLoaded = false; container.innerHTML = `<p role="alert">${escape(error.message)}</p><button class="small-button" data-retry-runtime>重新读取</button>`; } }
@@ -388,7 +431,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
     const label = escape(provider.label), id = escape(provider.id);
     card.innerHTML = `<div class="repository-access-card-head"><div><h4>${label}</h4><p>HTTPS · ${escape(provider.host)}</p></div><span class="status-pill ${provider.configured ? "active" : "paused"}">${provider.configured ? "已配置" : "未配置"}</span></div>
       <p class="field-hint">${provider.id === "github" ? "使用具有 Contents: Read 权限的 fine-grained personal access token。" : "使用具有 read_repository 权限的 personal access token。"} 保存后不会显示原值。</p>
-      <form class="git-credential-form" novalidate><div class="form-field"><label for="git-token-${id}">${label} Token</label><input id="git-token-${id}" name="token" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴新的 Token" /><div class="field-error" role="alert"></div></div><div class="form-actions"><button type="submit" class="primary-button compact">保存 Token</button>${provider.configured ? `<button type="button" class="ghost-button" data-remove-git-token="${id}">移除 Token</button>` : ""}</div></form>`;
+      <form class="git-credential-form" novalidate><div class="form-field"><label for="git-token-${id}">${label} Token</label><div class="repository-token-row"><input id="git-token-${id}" name="token" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴新的 Token" /><button type="submit" class="primary-button compact">保存 Token</button>${provider.configured ? `<button type="button" class="ghost-button" data-remove-git-token="${id}">移除 Token</button>` : ""}</div><div class="field-error" role="alert"></div></div></form>`;
     const form = card.querySelector("form");
     const busy = (disabled) => form.querySelectorAll("button").forEach((button) => { button.disabled = disabled; });
     const accept = (result) => {
@@ -450,8 +493,8 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
         <nav class="settings-nav" aria-label="设置分类">${Object.entries(SETTINGS_PAGES).map(([id, label]) => `<button type="button" data-settings-page="${id}">${label}</button>`).join("")}</nav>
         <div class="settings-content">
           <section class="settings-section" data-settings-panel="general" hidden>
-            <h3>常规</h3><p class="settings-description">此设备上的客户端行为。</p>
-            <form data-close-form><fieldset class="settings-radio-group"><legend>关闭主窗口时</legend><label class="settings-radio-option"><input type="radio" name="closeMode" value="quit" disabled /><span><strong>退出程序</strong><small>关闭客户端与它启动的本机后台。</small></span></label><label class="settings-radio-option"><input type="radio" name="closeMode" value="tray" disabled /><span><strong>保留在菜单栏</strong><small>继续运行，可通过 Mac 顶部图标重新打开窗口。</small></span></label></fieldset><p class="field-hint">Cmd+Q 始终退出程序。</p><div class="form-actions"><button class="primary-button compact" type="submit" disabled>保存</button></div></form>
+            <h3>常规</h3>
+            <form data-close-form><fieldset class="settings-radio-group"><legend>关闭主窗口时</legend><label class="settings-radio-option"><input type="radio" name="closeMode" value="quit" disabled /><span>退出程序</span></label><label class="settings-radio-option"><input type="radio" name="closeMode" value="tray" disabled /><span>保留在菜单栏</span></label></fieldset><p class="field-hint">Cmd+Q 始终退出程序。</p><div class="form-actions"><button class="primary-button compact" type="submit" disabled>保存</button></div></form>
             <p data-close-status role="status">正在读取客户端偏好…</p><button class="small-button" data-close-retry hidden>重试</button>
             <div class="settings-signout"><button type="button" class="ghost-button" id="logout-button">退出登录</button></div>
           </section>
@@ -460,12 +503,23 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             <div class="form-actions"><button type="button" class="primary-button compact" data-cli-install disabled>安装 CLI</button><button type="button" class="small-button" data-cli-refresh>刷新</button></div>
             <p data-cli-status role="status">正在检查 CLI 安装…</p><pre data-cli-paths style="white-space:pre-wrap;overflow-wrap:anywhere;user-select:text"></pre>
             <p class="settings-note">仅 Mac 安装包支持，适用于默认配置目录的 zsh/bash。客户端确认窗口列出将写入的文件；不使用 sudo，不覆盖其他同名命令。安装后新开终端；移动客户端后请重新安装 CLI。自定义 Shell/ZDOTDIR 需手动配置。</p>
-            <details><summary>AI 配置 CLI 使用说明</summary><p class="settings-note">先打开客户端，再由操作者登录 CLI；会话与浏览器独立，不读取浏览器 Cookie 或数据库。安装动作不会自动登录。</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;user-select:text">agentforge help\nagentforge schema agents\nagentforge auth login --username YOUR_NAME</pre><p class="field-hint">无需系统 Node。help / schema 提供字段、依赖顺序和完整 JSON 模板；源码使用 npm --silent run cli -- help。交互登录隐藏输入密码；脚本显式使用 --password-stdin 管道，不放在命令参数。配置保存不等于任务执行，不能自动确认交付。CLI 会话是本机管理员权限，只交给可信 AI。</p></details>
+            <details><summary>AI 配置 CLI 使用说明</summary><p class="settings-note">安装版启动时默认安装 CLI，并复用当前客户端登录授权；客户端未登录时可单独登录。CLI 不读取浏览器 Cookie 或数据库。</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;user-select:text">agentforge help\nagentforge schema agents\nagentforge auth login --username YOUR_NAME</pre><p class="field-hint">无需系统 Node。help / schema 提供字段、依赖顺序和完整 JSON 模板；源码使用 npm --silent run cli -- help。交互登录隐藏输入密码；脚本显式使用 --password-stdin 管道，不放在命令参数。配置保存不等于任务执行，不能自动确认交付。CLI 会话是本机管理员权限，只交给可信 AI。</p></details>
           </section>
-          <section class="settings-section" data-settings-panel="plugins" hidden>
-            <h3>插件更新</h3><p class="settings-description">自动检查已安装 Git 插件；仅在 AgentForge 服务运行时生效。</p>
+          <section class="settings-section" data-settings-panel="updates" hidden>
+            <h3>更新</h3>
+            <section class="settings-update-module" aria-labelledby="app-update-title">
+            <h4 id="app-update-title">应用更新</h4><p class="settings-description" data-app-version>正在读取当前版本…</p>
+            <p data-app-update-status role="status" aria-live="polite">正在读取更新状态…</p>
+            <progress class="app-update-progress" max="100" value="0" aria-label="安装包下载进度" hidden></progress>
+            <div class="form-actions"><button type="button" class="small-button" data-app-update-check>检查更新</button><button type="button" class="primary-button compact" data-app-update-download hidden>下载更新</button><button type="button" class="primary-button compact" data-app-update-install hidden>重启并安装</button></div>
+            <p class="app-update-repository">GitHub：<a data-app-github href="https://github.com/dengdai68/AgentForge-App" target="_blank" rel="noopener noreferrer">https://github.com/dengdai68/AgentForge-App</a></p>
+            <p class="settings-note" data-app-update-note>只检查正式版，Beta 不参与更新。</p>
+            </section>
+            <section class="settings-update-module" aria-labelledby="plugin-update-title">
+            <h4 id="plugin-update-title">插件更新</h4><p class="settings-description">自动检查已安装 Git 插件；仅在 AgentForge 服务运行时生效。</p>
             <form data-plugin-update-form><label class="settings-check"><input type="checkbox" name="enabled" aria-label="插件自动更新" disabled>启用自动更新</label><div class="form-field plugin-update-interval"><label for="plugin-update-interval">检查周期（分钟）</label><input id="plugin-update-interval" type="number" name="intervalMinutes" min="1" max="1440" step="1" required disabled><p class="field-hint">默认 2 分钟，范围 1–1440 分钟。</p></div><div class="form-actions"><button type="submit" class="primary-button compact" disabled>保存</button><button type="button" class="small-button" data-check-plugin-updates disabled>立即检查</button></div><p data-plugin-update-note role="status"></p></form>
             <p data-plugin-update-status role="status">正在读取…</p><p class="settings-note">关闭自动更新后仍可立即检查；已开始的检查继续完成。本地目录与固定 SHA 不追随远端更新，不更新 MCP 或应用本身。当前员工使用新版本，已启动任务保留冻结配置。</p>
+            </section>
           </section>
           <section class="settings-section" data-settings-panel="logs" hidden>
             <h3>运行日志</h3><p class="settings-description">任务、私聊、群聊与本机服务的详细诊断写入本机文件，此处只显示路径。</p>
@@ -495,8 +549,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             ].map(([id, label, hint]) => `<label class="settings-toggle"><span><strong>${label}</strong><small>${hint}</small></span><input type="checkbox" data-display-option="${id}" aria-label="显示${label}" /></label>`).join("")}
           </section>
           <section class="settings-section" data-settings-panel="repositories" aria-labelledby="repositories-title" hidden>
-            <h3 id="repositories-title">仓库访问</h3><p class="settings-description">为 GitHub / GitLab 私有 HTTPS 仓库保存本机拉取 Token。仓库地址与分支仍在研发数字员工中绑定。</p>
-            <div class="repository-access-boundary"><strong>仓库读取凭据</strong><span>此 Token 用于 clone/fetch；数字员工的其他操作由本机用户及其现有 Git 凭据执行。Token 不进入仓库 URL、任务、提示词、Artifact 或审计。</span></div>
+            <h3 id="repositories-title">仓库访问</h3><p class="settings-description">Token 仅用于拉取私有仓库，保存后不回显。</p>
             <div id="git-credential-config" class="repository-access-grid" aria-live="polite"></div>
           </section>
           <section class="settings-section" data-settings-panel="workspace" aria-labelledby="workspace-settings-title" hidden>
@@ -506,15 +559,16 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             <h3 id="data-management-title">数据管理</h3><p class="settings-description">清除工作区数据，回到首次使用状态。</p><p class="settings-note">包含账号与会话、任务与沟通、数字员工与团队、工作流、Runtime、插件与 MCP 配置、仓库 Token、交付文件、系统创建的任务目录和当前实例诊断日志。外部已有项目及本机 CLI 登录与会话保留。旧版共用日志不自动删除。</p><button type="button" class="danger-button" data-reset-all>清除所有数据</button>
           </section>
           <section class="settings-section" data-settings-panel="runtime" aria-labelledby="runtime-title" hidden>
-            <h3 id="runtime-title">Runtime</h3><p class="settings-description">统一管理执行配置，数字员工只选择配置。展开连接后编辑或测试；未使用的配置可删除。测试会实际调用模型，可能消耗已登录账号的额度；不加载员工技能或 MCP。</p>
+            <h3 id="runtime-title">Runtime</h3><p class="settings-description">保存后用于后续调用；留空使用 CLI 默认配置。</p>
             <div class="repository-access-grid" data-runtime-config></div>
           </section>
         </div></div>`;
       const layout = root.firstElementChild;
       closePreferenceUI = createClosePreferenceUI(root.querySelector('[data-settings-panel="general"]'), globalThis.window?.agentforgeDesktop);
-      pluginUpdateUI = createPluginUpdateSettingsUI(root.querySelector('[data-settings-panel="plugins"]'), api);
+      pluginUpdateUI = createPluginUpdateSettingsUI(root.querySelector('[data-settings-panel="updates"]'), api);
       const cliPanel = root.querySelector('[data-settings-panel="cli"]');
       cliInstallationUI = createCliInstallationUI(cliPanel, host);
+      appUpdateUI = createAppUpdateUI(root.querySelector('[data-settings-panel="updates"]'), host);
       globalThis.window?.addEventListener("focus", refreshHostSettings);
       layout.addEventListener("click", (event) => {
         const button = event.target.closest("button");
@@ -561,6 +615,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
     closePreferenceUI?.dispose(); closePreferenceUI = null;
     cliInstallationUI?.dispose(); cliInstallationUI = null;
     pluginUpdateUI?.dispose(); pluginUpdateUI = null;
+    appUpdateUI?.dispose(); appUpdateUI = null;
     ++logRequest;
     currentPage = null;
     if (root) { inputClear(root); root.replaceChildren(); }

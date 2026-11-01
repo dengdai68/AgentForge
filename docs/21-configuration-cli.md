@@ -1,5 +1,9 @@
 # CLI 指南
 
+协作读模型以消息/事件为主线，按 sourceMessageId 或唯一的已有定向消息、Dispatch/Trace 引用关联真实派工；不按正文、名字或时间猜测，不回填历史。deliveries 明示投递当前状态，history 保留每次执行与重试的实际时间，经理协调为全流程范围。CLI 保留完整投递/执行事实、验收关联及有界文件 ID/名称引用（files 最多8项、fileCount 为总数）；完整文件列表用 artifacts 查询。已知员工交接结果信封从 rawResponse 提取已记录的报告正文，去除重复结构化结果，原始消息和控制台事实不变。客户端协作区展示成员总结、沟通和关键人类状态，保留单一“本轮控制台”入口；不自动附加投递状态、技术失败/重试通知、验收文件清单或平台验收说明。长消息全文一次渲染 Markdown，超过10行仅收起区域，展开不重建 DOM，Run 内保留阅读状态。控制台无顶部错误摘要，失败记录在日志内标红；员工状态按自己的最新 Trace 显示错误/执行中/正常，重试成功后清除旧错误。未验证事项保留员工原文，不自动判定交付质量；存储、调度、模型输入和人类确认规则不变。
+
+任务协作时间线合并同一 Run 的全部 Message、实际 Dispatch 与协调事件。接收人表示处理对象，不表示私密级别：经理派工指向接手员工，工作交接指向经理，咨询/答复保留双方，没有处理对象的发言只显示发送者。sourceMessageId 仅关联同 Run 来源消息，正文与首个实际投递合并；同源额外投递归入同一消息；无法用已存引用关联的投递独立注明，不猜测历史来源。显示节点、尝试次数、重试/错误和真实投递状态；发言与接手执行提供独立控制台入口。任务确认、取消、暂停、恢复等事件按时间保留，不输出原始 Provider 帧或提示词。
+
 重复手动导入按同一来源地址＋插件名称匹配插件，按安装名称（去首尾空格、区分大小写）匹配 MCP；不同来源的同名插件保留。成功以新不可变版本覆盖当前目录项，原子更新所有当前员工（含停用）的选择并合并重复引用；Task/Run、排队投递和历史文件不变。失败整批保留原目录及绑定，候选从当前目录退役。首次安装不自动绑定员工；已存在的重复项在下次同标识导入时一并替换，不做全库清理。响应增加 replacements（kind/id/previousId/name）、employees（仅 ID/名称）、historyRetained；原 plugins/mcps 或 MCP 摘要字段不变。
 
 本仓库仅提供客户端；首次管理员设置在应用内。CLI 继续连接客户端私有 endpoint，配置/任务/auth 命令和字段不变。
@@ -8,7 +12,7 @@
 
 workflows create/update/schema/--help 的 artifactPaths 支持任意规范工作目录相对文件或目录（artifacts/media/、reports/、summary.md），缺省为空；不再限定docs或作为接纳白名单。任务artifacts可查询非docs业务快照；CLI没有当前目录浏览/下载命令，本轮不扩权。
 
-插件更新命令：plugins updates 查询当前服务检查状态、周期、下次检查、最近更新回执与错误摘要；plugins check-updates 请求立即检查（异步返回，随后 updates 查询）；plugins auto-update --file settings.json 接受 {enabled?:boolean,intervalMinutes?:integer}，至少一项，周期1–1440分钟（默认2）。三个操作的 --help 逐层展示参数，默认可读文本、显式 --json。设置与客户端「设置 → 插件更新」一致，CLI仍只连接客户端，不直接访问Git。关闭时可立即检查，保存后按新周期计时；当前员工统一切换新版本，冻结任务、排队调用及 MCP 选择不变；退出服务后不继续检查。
+插件更新命令：plugins updates 查询当前服务检查状态、周期、下次检查、最近更新回执与错误摘要；plugins check-updates 请求立即检查（异步返回，随后 updates 查询）；plugins auto-update --file settings.json 接受 {enabled?:boolean,intervalMinutes?:integer}，至少一项，周期1–1440分钟（默认2）。三个操作的 --help 逐层展示参数，默认可读文本、显式 --json。设置与客户端「设置 → 更新 → 插件更新」一致，CLI仍只连接客户端，不直接访问Git。关闭时可立即检查，保存后按新周期计时；当前员工统一切换新版本，冻结任务、排队调用及 MCP 选择不变；退出服务后不继续检查。
 
 mcps update ID --file patch.json 编辑名称/说明/单服务 JSON，至少提供一项；省略 content 保留配置。完整参数与脱敏值保留规则见 mcps update --help。成功返回新 id、previousId 和更新员工 ID/名称，不倾倒员工详情；后续用新 ID get。当前员工原子切换，冻结任务和排队调用不变，不兼容或并发修改时拒绝。安装仍用 create；首次不自动绑定，重复导入按安装名称覆盖并更新已有选择。
 
@@ -57,7 +61,7 @@ TTY 隐藏输入密码；脚本使用显式 `--password-stdin`。没有密码命
 
 市场来源遵循 Claude/Codex 的 Git/本地部分规范：相对目录、local/path、HTTPS github/url/git-subdir，支持 ref 和完整 sha（sha 优先），安装所有条目并保留真实提交。不执行 npm/archive/command 来源，遇到时整批失败。`plugins list` 的 Runtime 列只列支持项；`plugins get ID` 的 compatibility 给出两种 Runtime 的 supported/reasons，组件注明 providers。静态支持不代表依赖、CLI 或账号已实测。不兼容的员工选择由 HTTP 拒绝。stdio MCP 额外提供 cwd（绝对路径）/env_vars（变量名数组）时仅支持 Codex；普通 stdio/远程传输的两 Runtime 支持不变。
 
-`runtimes models PROVIDER [--executable PATH]` 返回真实模型/思考等级目录；`effort` 空值使用 CLI 默认。详细参数以当前命令帮助为准。
+`runtimes models PROVIDER` 返回真实模型/思考等级目录；`effort` 空值使用 CLI 默认。详细参数以当前命令帮助为准。
 
 ## 任务
 
@@ -78,3 +82,9 @@ TTY 隐藏输入密码；脚本使用显式 `--password-stdin`。没有密码命
 退出码：0 成功，2 输入/用法，3 登录/会话，4 服务拒绝，5 连接/超时/不确定响应，130 交互取消。写入不自动重试；连接中断后先读取核实，再决定是否重发。
 
 输入文件最大 1 MiB，HTTP 响应最大 16 MiB，请求限时 120 秒。会话目录/文件要求当前用户、0700/0600，拒绝符号链接。命令只走认证 HTTP，不直接访问 Store 或 Runtime。
+
+## 当前 Runtime 与客户端登录
+
+`runtimes` 仅有 list/get/update/test/models；固定 Claude Code 和 Codex，不能 create/delete/命名。update ID --file patch.json 接受 model、effort、enabled 的非空部分对象；ID 或固定 Provider 名称可引用。models PROVIDER 不再支持 --executable。停用阻止新的 Provider 调用，不取消已运行调用；历史快照不变。
+
+安装版默认安装 Shell 命令，无需手动点击。CLI 默认复用已登录客户端的正式委托授权，客户端未登录且无独立 CLI 会话时才需 `auth login`。显式 --session-file 使用独立会话；auth logout 只撤销独立会话，共享授权请在客户端退出。实例重启自动更新共享凭证，CLI 不跟随旧端口、不读取浏览器 Cookie/数据库。

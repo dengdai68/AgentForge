@@ -30,7 +30,7 @@ try{
   await page.goto(base+'/marketplace');await page.locator('[data-install-plugin]').waitFor();assert.equal(await page.locator('[data-plugin-updates], [data-check-plugin-updates]').count(),0);
   await page.locator('[data-install-plugin]').click();await page.locator('#market-source').fill(origin.url);await page.locator('#market-entry-form [type=submit]').click();await page.locator('#market-entry-form').waitFor({state:'detached'});await page.locator('.installed-extension-card').first().waitFor();
   const installed=(await api('/api/runtime/marketplace')).plugins[0];
-  await page.goto(base+'/settings/plugins');await page.locator('[name=intervalMinutes]:not(:disabled)').waitFor();assert.equal(await page.getByRole('checkbox',{name:'插件自动更新'}).isChecked(),true);
+  await page.goto(base+'/settings/updates');await page.locator('[name=intervalMinutes]:not(:disabled)').waitFor();assert.equal(await page.getByRole('checkbox',{name:'插件自动更新'}).isChecked(),true);
   const saveSettings=async()=>{await page.locator('[data-plugin-update-form] [type=submit]').click();await page.getByText('已保存。',{exact:true}).waitFor();};
   await page.locator('[name=intervalMinutes]').fill('7');await saveSettings();assert.equal((await api('/api/runtime/marketplace/updates')).intervalMs,420000);
   await page.reload();await page.locator('[name=intervalMinutes]:not(:disabled)').waitFor();assert.equal(await page.locator('[name=intervalMinutes]').inputValue(),'7');

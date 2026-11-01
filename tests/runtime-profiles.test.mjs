@@ -8,41 +8,38 @@ import { createStore } from '../server/store.mjs';
 import { probeRuntime } from '../server/runtime/probe.mjs';
 import { registerExecution } from '../server/runtime/registry.mjs';
 
-test('Runtime deletion is atomic, protects real references and preserves frozen work across restart', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'af-profile-delete-'));
+test('fixed Runtime slots retain IDs, gate new work and preserve frozen snapshots across restart', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'af-fixed-runtime-'));
   const options = { databasePath: join(root, 'state.sqlite'), workspaceRoot: root };
   let store = createStore(options);
   const defaults = store.listRuntimeProfiles();
   assert.equal(defaults.length, 2);
-  const profile = store.saveRuntimeProfile({ name: 'Disposable', provider: 'claude-code', model: 'frozen' });
-  const worker = store.createAgent({ name: 'Worker', role: 'writer', runtime: { profileId: profile.id } });
+  const profile = defaults.find(item => item.provider === 'claude-code');
+  store.saveRuntimeProfile({ model: 'frozen' }, profile.id);
+  const worker = store.createAgent({ name: 'Worker', runtime: { profileId: profile.id } });
   const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id] });
   const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
   const task = store.createTask({ title: 'Frozen', objective: 'Write', teamId: team.id, workflowTemplateId: flow.id });
   const chat = store.openCommunication({ kind: 'agent', targetId: worker.id });
-  store.sendCommunication(chat.id, { content: 'Question', clientRequestId: randomUUID(), mentionAgentIds: [] });
-  assert.throws(() => store.deleteRuntimeProfile(profile.id), /仍被/);
-  store.updateAgent(worker.id, { status: 'inactive' });
-  assert.throws(() => store.deleteRuntimeProfile(profile.id), /停用/);
-  store.updateAgent(worker.id, { status: 'active', runtime: { profileId: defaults[0].id } });
+  store.saveRuntimeProfile({ enabled: false, model: 'next' }, profile.id);
+  assert.throws(() => store.createRun(task.id), /已停用/);
+  assert.throws(() => store.sendCommunication(chat.id, { content: 'Question', clientRequestId: randomUUID() }), /已停用/);
+  assert.throws(() => store.assertRuntimeEnabled(worker.runtime), /已停用/);
+  assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.model, 'frozen');
+  assert.equal(store.listAgents().find(item => item.id === worker.id).runtime.model, 'next');
   const before = store.snapshot();
-  assert.throws(() => store.transaction(() => { store.deleteRuntimeProfile(profile.id); throw new Error('rollback'); }), /rollback/);
+  assert.throws(() => store.transaction(() => { store.saveRuntimeProfile({ enabled: true }, profile.id); throw new Error('rollback'); }), /rollback/);
   assert.deepEqual(store.snapshot(), before);
-  assert.equal(store.deleteRuntimeProfile(profile.id).id, profile.id);
-  assert.ok(!store.listRuntimeProfiles().some(item => item.id === profile.id));
-  assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.profileId, profile.id);
-  const delivery = store.claimCommunication(chat.id);
-  assert.equal(delivery.agentSnapshot.runtime.profileId, profile.id);
-  assert.equal(store.snapshot().events.filter(event => event.type === 'settings.runtime_deleted').length, 1);
-  assert.throws(() => store.deleteRuntimeProfile(profile.id), /不存在/);
-  const unusedDefault = defaults.find(item => item.provider === 'codex');
-  store.saveRuntimeProfile({ name: 'Renamed Codex', provider: 'codex' }, unusedDefault.id);
-  store.deleteRuntimeProfile(unusedDefault.id);
-  assert.throws(() => store.deleteRuntimeProfile(defaults[0].id), /仍被/);
+  for (const input of [{ name: 'named' }, { provider: 'codex' }, { executable: '/custom' }, { profile: 'local' }, {}, {enabled:'yes'}, {model:null}, {effort:null}]) assert.throws(() => store.saveRuntimeProfile(input, profile.id));
+  assert.throws(() => store.saveRuntimeProfile({ model: 'new' }), /固定/);
   store.close(); store = createStore(options);
-  assert.ok(!store.listRuntimeProfiles().some(item => item.id === profile.id));
-  assert.ok(!store.listRuntimeProfiles().some(item => item.id === unusedDefault.id));
-  assert.ok(store.listRuntimeProfiles().every(item => !item.system));
+  assert.deepEqual(store.listRuntimeProfiles().map(item => item.id), defaults.map(item => item.id));
+  assert.equal(store.listRuntimeProfiles().find(item => item.id === profile.id).enabled, false);
+  store.saveRuntimeProfile({ enabled: true }, profile.id);
+  assert.doesNotThrow(() => store.assertRuntimeEnabled(worker.runtime));
+  assert.ok(store.createRun(task.id));
+  assert.ok(store.sendCommunication(chat.id, { content: 'Question', clientRequestId: randomUUID() }));
+  assert.equal(store.listRuntimeProfiles().length, 2);
   store.close();
 });
 
@@ -50,19 +47,19 @@ test('central runtime edits update bound employees but preserve queued work and 
   const root = await mkdtemp(join(tmpdir(), 'agentforge-profiles-'));
   const options = { databasePath: join(root, 'state.sqlite'), workspaceRoot: root };
   let store = createStore(options);
-  const profile = store.saveRuntimeProfile({ name: 'Shared Claude', provider: 'claude-code', model: 'test-model' });
+  const profile = store.saveRuntimeProfile({ model: 'test-model' }, store.listRuntimeProfiles().find(item => item.provider === 'claude-code').id);
   const a = store.createAgent({ name: 'A', role: 'writer', runtime: { profileId: profile.id } });
   const b = store.createAgent({ name: 'B', role: 'writer', runtime: { profileId: profile.id, skillPaths: [join(root, 'skill.md')] } });
   const team = store.createTeam({ name: 'Test', memberAgentIds: [a.id, b.id] });
   const flow = store.createWorkflowTemplate({ name: 'Write', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'writer', dependsOn: [] }] });
   const task = store.createTask({ title: 'Frozen', objective: 'Write a document', teamId: team.id, workflowTemplateId: flow.id });
-  store.saveRuntimeProfile({ name: 'Changed', provider: 'claude-code', model: 'next-model' }, profile.id);
+  store.saveRuntimeProfile({ model: 'next-model' }, profile.id);
   assert.equal(store.listAgents().find(item => item.id === a.id).runtime.model, 'next-model');
   assert.deepEqual(store.listAgents().find(item => item.id === b.id).runtime.skillPaths, [join(root, 'skill.md')]);
   assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.model, 'test-model');
-  assert.throws(() => store.saveRuntimeProfile({ name: 'Bad', provider: 'codex' }, profile.id), /Provider/);
-  assert.throws(() => store.saveRuntimeProfile({ name: 'Bad', token: 'secret' }), /字段/);
-  assert.throws(() => store.saveRuntimeProfile({ name: 'Changed', provider: 'claude-code' }), /名称已存在/);
+  assert.throws(() => store.saveRuntimeProfile({ name: 'Bad', provider: 'codex' }, profile.id), /仅接受/);
+  assert.throws(() => store.saveRuntimeProfile({ name: 'Bad', token: 'secret' }), /仅接受/);
+  assert.throws(() => store.saveRuntimeProfile({ name: 'Changed', provider: 'claude-code' }), /仅接受/);
   assert.throws(() => store.createAgent({ name: 'Bad', role: 'writer', runtime: { profileId: 'missing' } }), /不存在/);
   const expected = store.listRuntimeProfiles(); store = createStore(options);
   assert.deepEqual(store.listRuntimeProfiles(), expected);
@@ -70,13 +67,12 @@ test('central runtime edits update bound employees but preserve queued work and 
   assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.model, 'test-model');
 });
 
-test('legacy concrete runtime configurations remain distinct and do not overwrite peers', () => {
+test('Store only exposes the two fixed provider slots when internal employees are bound', () => {
   const store = createStore();
-  const a = store.createAgent({ name: 'A', role: 'a', runtime: { model: 'one', executable: '/one/claude' } });
-  const b = store.createAgent({ name: 'B', role: 'a', runtime: { model: 'two', executable: '/two/claude' } });
-  assert.notEqual(a.runtime.profileId, b.runtime.profileId);
-  store.updateAgent(a.id, { runtime: { model: 'three' } });
-  assert.equal(store.listAgents().find(item => item.id === b.id).runtime.model, 'two');
+  for (const provider of ['claude-code', 'codex']) store.createAgent({ name: provider, runtime: { provider } });
+  assert.equal(store.listRuntimeProfiles().length, 2);
+  assert.ok(store.listRuntimeProfiles().every(item => !Object.hasOwn(item, 'name') && !Object.hasOwn(item, 'executable')));
+  store.close();
 });
 
 test('runtime probe checks structured response, isolates extensions, and exposes only result/path', async () => {
@@ -111,7 +107,7 @@ test('new communication uses changed profile and resets the model session, queue
   send();
   const profile = store.listRuntimeProfiles().find(item => item.id === employee.runtime.profileId);
   const { id, employeeCount, system, ...input } = profile;
-  store.saveRuntimeProfile({ ...input, model: 'changed-model' }, id);
+  store.saveRuntimeProfile({ model: 'changed-model' }, id);
   const queued = store.claimCommunication(thread.id);
   assert.equal(queued.agentSnapshot.runtime.model, employee.runtime.model);
   assert.equal(store.prepareCommunicationSession(thread.id, queued.id, '/tmp/probe-chat').resume, true);
@@ -135,28 +131,28 @@ test('runtime effort is validated per provider, reprojected to employees and fro
   const root = await mkdtemp(join(tmpdir(), 'af-profile-effort-'));
   const options = { databasePath: join(root, 'state.sqlite'), workspaceRoot: root };
   let store = createStore(options);
-  const claude = store.saveRuntimeProfile({ name: 'Effort Claude', provider: 'claude-code', model: 'sonnet', effort: 'high' });
+  const claude = store.saveRuntimeProfile({ model: 'sonnet', effort: 'high' }, store.listRuntimeProfiles().find(item => item.provider === 'claude-code').id);
   assert.equal(claude.effort, 'high');
-  const codex = store.saveRuntimeProfile({ name: 'Effort Codex', provider: 'codex', effort: 'ultra' });
+  const codex = store.saveRuntimeProfile({ effort: 'ultra' }, store.listRuntimeProfiles().find(item => item.provider === 'codex').id);
   assert.equal(codex.effort, 'ultra');
   for (const [input, pattern] of [
-    [{ name: 'Bad 1', provider: 'claude-code', effort: 'ultra' }, /思考等级/],
-    [{ name: 'Bad 2', provider: 'codex', effort: 'nonsense' }, /思考等级/],
-    [{ name: 'Bad 3', provider: 'claude-code', effort: 'high\nrm' }, /单行/],
-    [{ name: 'Bad 4', provider: 'claude-code', effort: 'high', token: 'x' }, /字段/]
-  ]) assert.throws(() => store.saveRuntimeProfile(input), pattern);
+    [{ effort: 'ultra' }, /思考等级/],
+    [{ effort: 'nonsense' }, /思考等级/],
+    [{ effort: 'high\nrm' }, /单行/],
+    [{ effort: 'high', token: 'x' }, /仅接受/]
+  ]) assert.throws(() => store.saveRuntimeProfile(input, claude.id), pattern);
   const worker = store.createAgent({ name: 'W', runtime: { profileId: claude.id } });
   assert.equal(store.listAgents().find(item => item.id === worker.id).runtime.effort, 'high');
   const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id] });
   const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
   const task = store.createTask({ title: 'Frozen', objective: 'Write', teamId: team.id, workflowTemplateId: flow.id });
-  store.saveRuntimeProfile({ name: 'Effort Claude', provider: 'claude-code', model: 'opus', effort: 'max' }, claude.id);
+  store.saveRuntimeProfile({ model: 'opus', effort: 'max' }, claude.id);
   assert.equal(store.listAgents().find(item => item.id === worker.id).runtime.effort, 'max', 'profile edit reprojects effort to bound employees');
   assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.effort, 'high', 'frozen task snapshot keeps the previous effort');
-  assert.throws(() => store.saveRuntimeProfile({ name: 'Effort Claude', provider: 'claude-code', effort: 'ultra' }, claude.id), /思考等级/);
-  const cleared = store.saveRuntimeProfile({ name: 'Effort Claude', provider: 'claude-code', effort: '' }, claude.id);
+  assert.throws(() => store.saveRuntimeProfile({ effort: 'ultra' }, claude.id), /思考等级/);
+  const cleared = store.saveRuntimeProfile({ effort: '' }, claude.id);
   assert.equal(cleared.effort, '');
-  store.saveRuntimeProfile({ name: 'Effort Claude', provider: 'claude-code', effort: 'low' }, claude.id);
+  store.saveRuntimeProfile({ effort: 'low' }, claude.id);
   store.close(); store = createStore(options);
   assert.equal(store.listRuntimeProfiles().find(item => item.id === claude.id).effort, 'low', 'effort survives restart');
   assert.equal(store.listRuntimeProfiles().find(item => item.id === codex.id).effort, 'ultra');
