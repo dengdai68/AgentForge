@@ -1,0 +1,23 @@
+[
+  {
+    "package": "@deepseek-ai/dsh-hooks-claude-code",
+    "version": "0.2.1-rc.2",
+    "license": "MIT",
+    "integrity": "sha512-ffxiP1LFioz9zupGsSomYTwnNxm/RG/eBsLVHUzM7pUAe1lJJcoDxlsntDkPfe1AeQxrAKqohql7yl2baK1Klw==",
+    "file": "hooks-claude-code.mjs"
+  },
+  {
+    "package": "@deepseek-ai/dsh-hooks-codex",
+    "version": "0.2.1-rc.2",
+    "license": "MIT",
+    "integrity": "sha512-wzcyUjfTjfA/Ym+maC98AEmhxv7ZbIgl8aa+5i0n0Ol9NDwAxher7XUsIG6hog2Hur1vd0fE695bFR8V+ETraQ==",
+    "file": "hooks-codex.mjs"
+  },
+  {
+    "package": "@deepseek-ai/dsh-hook-protocol",
+    "version": "0.2.1-rc.2",
+    "license": "MIT",
+    "integrity": "sha512-tB1djstWPu0t4/EYv5LQiprzMiCwRp6TcmKp8YS99XHsTNFAfiqX6OUobpxpbU3F2Uos7Qp6feUqzaVDAU3SiA==",
+    "file": "hook-protocol.mjs"
+  }
+]

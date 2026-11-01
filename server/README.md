@@ -55,9 +55,9 @@ Store 拥有状态，Runtime 不直接写领域对象。平台执行员工和经
 
 认证工作目录 PUT 先验证非根绝对路径，再 mkdir 创建缺失父/子目录，核对实际位置和权限后由 Store 保存；失败保留原设置及诊断 cause，不清理目录或搬动旧任务。CLI 创建任务继续使用当前根，不新增设置命令。
 
-扩展统一为插件级不可变版本：Git/本机来源中全部插件作为一个批次发布，失败不留下部分安装；自带 MCP 拆成独立市场项，不随插件启用。认证详情接口按需读组件/脱敏 JSON；员工输入仅 pluginIds/mcpIds，创建/编辑均可设置状态。stdio/SSE/Streamable HTTP 支持两种 Runtime。完整契约见 docs/15。
+扩展统一为插件级不可变版本：Git/本机来源中全部插件作为一个批次发布，失败不留下部分安装；自带 MCP 拆成独立市场项，不随插件启用。认证详情接口按需读组件/脱敏 JSON；员工输入仅 pluginIds/mcpIds，创建/编辑均可设置状态。stdio/SSE/Streamable HTTP 支持三种 Runtime。完整契约见 docs/15。
 
-插件市场接受 Claude/Codex 市场中的本地条目及 HTTPS github/url/git-subdir 远程条目，保留真实 revision；不支持来源整批失败。组件按 Runtime 分别解析，API 返回 providers/compatibility 及原因，员工绑定由同一解析拒绝不兼容选择。配置根允许祖先正常别名、受管目录本身拒绝链接。含 Codex 专用 cwd/env_vars 的 MCP 仅供 Codex，工作目录由启动器应用。
+插件市场接受 Claude/Codex 市场中的本地条目及 HTTPS github/url/git-subdir 远程条目，保留真实 revision；不支持来源整批失败。组件按 Runtime 分别解析，API 返回 providers/compatibility 及原因，员工绑定由同一解析拒绝不兼容选择。配置根允许祖先正常别名、受管目录本身拒绝链接。含 cwd/env_vars 的 MCP 供 Codex/DeepSeek Harness 使用，工作目录由启动器应用。
 
 手动重复导入由 HTTP 串行准备；Store 按同来源地址＋名称、MCP 按安装名称覆盖，Store.replaceImportedExtensions 事务更新当前员工（含停用）、合并重复引用并退役旧目录项。失败整批保留原状态，候选退役；冻结任务和排队调用的文件不变。回执包含 reference-only replacements/employees/historyRetained。
 
@@ -68,3 +68,13 @@ Store 拥有状态，Runtime 不直接写领域对象。平台执行员工和经
 长任务的 Claude 后台等待使用原生生命周期，不以成功轮次后的安静误判执行失败。prompts 只投递必要上下文：成员消息来源与正文保留，内部路由元数据、空配置、员工选人说明及批量 Artifact 哈希不重复注入；交付证据按需查询，详见 docs/22。
 
 经理回复缺少协调决定与决定字段不完整采用同一真实纠错路径；不让已完成 Trace、空队列和 running 状态静默并存，也不以正文代替领域命令。
+
+固定 Runtime 增加 DeepSeek Harness；认证配置资源、Store 开关/冻结/会话确认、任务 Orchestrator 和普通沟通都调用独立 SDK 适配器。原生模型目录和连接测试共用真实配置，不另设 DeepSeek Harness HTTP 权限或存储 Token。MCP 安装/导入返回 DeepSeek Harness 兼容声明；专用 Hook/Subagent 组件不兼容，已有安装版本不迁移。
+
+Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+
+submitHumanMessage 允许省略/null recipientAgentId，默认路由给冻结 Run 经理；显式成员校验和精确澄清回复优先规则保持。终态仅答疑、归档只读；HTTP/CLI 使用同一领域命令。
+
+插件源标准兼容由 runtime/plugin-compatibility 及目标 Runtime 适配器负责；当前安装支持矩阵只读重算，Store 冻结摘要，HTTP/CLI 共用同一结果。契约见 docs/26。
+
+插件/MCP 兼容机制由三种 Runtime 分别真实验证，入口 scripts/test-plugin-runtimes-real.mjs；详见 docs/26。

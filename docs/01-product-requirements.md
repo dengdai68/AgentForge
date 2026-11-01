@@ -37,3 +37,5 @@ AgentForge 在本机组织由 Claude Code/Codex 驱动的数字团队。
 桌面首次启动设置管理员。Runtime 使用已安装并登录的本机 CLI；模型可从目录选择或手工输入，思考等级按 Provider 能力配置。登录态持久保存，默认不因时间自动过期，退出或重置后撤销。
 
 员工以本机用户权限运行，工作目录是启动位置。平台不提供 Agent 沙箱或多租户隔离。客户端与 CLI 的账户与数据边界见认证和客户端文档。
+
+Runtime 增加固定 DeepSeek Harness项，任务和普通沟通均可选择；与 Claude Code/Codex 共用可用开关、模型和思考配置及员工绑定。当前支持 DeepSeek Harness 内置 DeepSeek API Key/账号模型路由，未导入用户自定义 pi-ai 路由。所选 Skill/MCP 与历史按原生接口加载；不兼容的第三方 Hook/Subagent 不标记为支持。

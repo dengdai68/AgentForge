@@ -17,3 +17,9 @@
 协作投影的 `tone` / `statusCode` 仅供界面按真实消息/投递状态配色；CLI 不输出视觉元数据，文本/JSON 同步完整协作投影，仍不输出视觉元数据。
 
 `toolCommandSummary` 提取已脱敏 Shell 命令或 Read/Write 文件路径；`toolFileInput` 提取完整 JSON 中的文件路径与写入文本，无法解析不猜测。
+
+共享 Runtime 名称投影识别 DeepSeek Harness；DeepSeek Harness 事件仍进入现有 auditVersion=2 正文/思考/工具和原生会话显示，不引入公开原始 SDK 报文。
+
+协作 UI 不重复展示回复的问题副本，但共享投影和 CLI 仍保留 replyToMessageId/来源关联；记录数量与 @ 说明不占协作顶部。未指定接收人的默认经理路由由 Store 拥有。
+
+控制台 Markdown 正文不另设纵向高度上限；时间线负责纵向滚动，列表缩进保留编号，代码/表格保留横向滚动。兼容性标签来自同一服务派生矩阵。

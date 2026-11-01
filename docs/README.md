@@ -16,3 +16,7 @@
 | 关系图 | [本地图形渲染](12-local-diagram-rendering.md) |
 
 文档只描述当前行为。开发流水、临时验收记录和已废弃方案不保留在使用指南中；版本变化见 [CHANGELOG](../CHANGELOG.md)。
+
+- [DeepSeek Harness Runtime 接入决策](25-dsh-runtime.md)
+
+- [26：Runtime 插件源标准兼容](26-runtime-plugin-compatibility.md)：统一导入、原生组件、冻结计划及明确失败边界。

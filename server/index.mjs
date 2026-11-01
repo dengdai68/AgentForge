@@ -16,6 +16,7 @@ import { createRuntimeConfiguration } from "./runtime/configuration.mjs";
 import { desktopServiceStoragePaths } from "./data-home.mjs";
 import { createMarketplace } from "./runtime/marketplace.mjs";
 import { probeRuntime } from "./runtime/probe.mjs";
+import { runtimeInstalled } from "./runtime/cli-environment.mjs";
 import { runtimeModelCatalog, assertModelEffort } from "./runtime/model-catalog.mjs";
 import { createCommunicationService } from "./communication.mjs";
 import { queryHistory } from "./history/bridge.mjs";
@@ -51,7 +52,7 @@ const authOptions = { databasePath: storage.authDatabasePath, origins: [], boots
 const dataReset = createDataReset({ databasePath, authDatabasePath: authOptions.databasePath, runFilesRoot, runtimeConfigRoot, logDirectory: diagnostics().status().directory, protectedPaths: [root] });
 await dataReset.recover();
 let auth;
-const storeOptions = { databasePath, workspaceRoot, onSaveDiagnostic: (record) => {
+const storeOptions = { databasePath, workspaceRoot, runtimeInstalled, onSaveDiagnostic: (record) => {
   if (record.outcome === "error" || record.elapsedMs >= 250) diagnostic("persistence.save", record);
 } };
 let store = createStore(storeOptions);
@@ -346,8 +347,9 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
 
   if (pathname === "/api/settings/runtime-profiles/models" && request.method === "GET") {
     const provider = searchParams.get("provider") || "";
-    if (!["claude-code", "codex"].includes(provider)) throw new Error("provider 必须是 claude-code 或 codex");
+    if (!["claude-code", "codex", "dsh"].includes(provider)) throw new Error("provider 必须是 claude-code、codex 或 dsh");
     if (searchParams.has("executable")) throw new Error("固定 Runtime 不接受自定义 executable");
+    if (!runtimeInstalled(provider)) throw new Error("Runtime 未安装或当前客户端找不到可执行文件；安装并配置 PATH 后重新打开客户端");
     sendJson(response, 200, await runtimeModelCatalog({ provider }));
     return true;
   }
@@ -361,13 +363,13 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     const effort = typeof input?.effort === "string" ? input.effort.trim() : "";
     const model = typeof input?.model === "string" ? input.model.trim() : "";
     const provider = input?.provider || "claude-code";
-    if (!effort || !model || !["claude-code", "codex"].includes(provider)) return;
+    if (!effort || !model || !["claude-code", "codex", "dsh"].includes(provider) || !runtimeInstalled(provider)) return;
     const catalog = await runtimeModelCatalog({ provider }).catch(error => { diagnostic("settings.model_catalog_validation_skipped", { error }); return null; });
     assertModelEffort(catalog, model, effort);
   }
   if (pathname === "/api/settings/runtime-profiles" && request.method === "POST") {
     const input = await readJson(request);
-    throw new Error("Runtime 固定为 Claude Code 和 Codex，不支持新增");
+    throw new Error("Runtime 固定为 Claude Code、Codex 和 DeepSeek Harness，不支持新增");
   }
   const runtimeProfileMatch = pathname.match(/^\/api\/settings\/runtime-profiles\/([^/]+)(\/test)?$/);
   if (runtimeProfileMatch && request.method === "PUT" && !runtimeProfileMatch[2]) {

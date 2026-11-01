@@ -104,6 +104,9 @@ test('all task commands progressively disclose their own data and compact relate
     if (operation === 'progress') { assert.deepEqual(result.pendingQuestions, [{ id: question.id, name: '标题' }]); assert.deepEqual(result.participants[0], { id: employee.id, name: employee.name }); }
     if (operation === 'questions') assert.equal(result.items[0].content, question.content);
   }
+  const defaultMessage = await invoke('message', { content: '没有指定接收人，交给项目经理' });
+  assert.equal(defaultMessage.message.recipient.id, manager.id);
+  assert.deepEqual(resources.tasks.operationInputs.message.schema.required, ['content']);
   const text = await captured(args('get'), { fetcher });
   assert.match(text.stdout, /agentforge teams get team_one/); assert.match(text.stdout, /agentforge workflows get flow_one/); assert.match(text.stdout, /agentforge agents get manager_one/);
   assert.doesNotMatch(text.stdout, /systemPrompt|memberSnapshots|workflowSnapshot|runtime|INTERNAL_EMPLOYEE/);
@@ -139,7 +142,7 @@ test('task CLI queries scoped progress, filters and collaboration and rejects st
   for (const replyToMessageId of ['other_question', 'already_answered']) await assert.rejects(invoke(['reply', task.id, '--file', '-'], { content: '回答', replyToMessageId }), error => error.code === 'QUESTION_NOT_PENDING');
   await assert.rejects(invoke(['reply', task.id, '--run', 'other_run', '--file', '-'], { content: '回答', replyToMessageId: question.id }), error => error.code === 'NOT_FOUND');
   await assert.rejects(invoke(['message', task.id, '--file', '-'], { content: '普通消息', replyToMessageId: question.id }), error => error.code === 'USAGE');
-  await assert.rejects(invoke(['message', task.id, '--file', '-'], { content: '普通消息' }), error => error.code === 'USAGE');
+  await assert.rejects(invoke(['message', task.id, '--file', '-'], { content: '普通消息', recipientAgentId: '' }), error => error.code === 'USAGE');
   assert.equal(writes.length, 0);
   await invoke(['reply', task.id, '--file', '-'], { content: '采用内部简报', replyToMessageId: question.id });
   assert.equal(writes[0].path, '/api/runs/run_one/messages'); assert.equal(writes[0].body.replyToMessageId, question.id);
@@ -301,6 +304,20 @@ async function fixture() {
   await invoke(['auth', 'login', '--username', 'operator', '--password-stdin'], 'synthetic-password\n');
   return { root, sessionFile, invoke, calls, state, fetcher };
 }
+test('Runtime CLI resolves full fixed names and makes missing installation distinct from user disabling', async () => {
+  const f = await fixture();
+  try {
+    f.state.profiles.push({ id: 'runtime_dsh', provider: 'dsh', installed: false, enabled: false, model: '', effort: '' });
+    assert.equal((await f.invoke(['runtimes', 'get', 'DeepSeek Harness'])).id, 'runtime_dsh');
+    assert.equal((await f.invoke(['runtimes', 'get', 'Claude Code'])).id, 'runtime_one');
+    const data = await f.invoke(['runtimes', 'list']);
+    const text = formatOutput(['runtimes', 'list'], data, { columns: 120 });
+    assert.match(text, /DeepSeek Harness/); assert.match(text, /未安装/);
+    assert.equal(data.items.find(item => item.provider === 'dsh').installed, false);
+    assert.match(formatOutput(['runtimes', 'get'], f.state.profiles[1]), /本机已安装/);
+    await assert.rejects(f.invoke(['agents', 'get', 'DeepSeek Harness']), error => error.code === 'USAGE');
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
 test('MCP update is progressive, accepts partial input and sends an authenticated PUT without nested resources',async()=>{
   const f=await fixture();try{
     const help=await captured(['mcps','update','--help']);assert.match(help.stdout,/update ID --file/);assert.match(help.stdout,/隐藏值/);assert.match(help.stdout,/新版本/);
@@ -609,7 +626,7 @@ test('runtime connection schema validates effort vocabulary and model stays free
   await assert.rejects(f.invoke(['runtimes', 'update', 'runtime_one', '--file', '-'], { ...base, name: 'z', effort: 'extreme' }), error => error.code === 'USAGE');
   await assert.rejects(f.invoke(['runtimes', 'update', 'runtime_one', '--file', '-'], { ...base, name: 'z', effort: undefined, unknown: 1 }), error => error.code === 'USAGE');
   const schema = await execute(['schema', 'runtimes']);
-  assert.deepEqual(schema.schema.properties.effort.enum, ['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  assert.deepEqual(schema.schema.properties.effort.enum, ['', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
   assert.match(schema.schema.properties.model.description, /runtimes models/);
 });
 

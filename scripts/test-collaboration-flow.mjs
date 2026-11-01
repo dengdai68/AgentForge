@@ -10,7 +10,7 @@ import { createFixtureStore } from '../tests/fixture-store.mjs';
 import { createRunFiles } from '../server/run-files.mjs';
 import { createAuth } from '../server/auth.mjs';
 import { execute as cli } from '../cli/main.mjs';
-import { executionContent } from '../server/runtime/local-cli.mjs';
+import { executionContent, promptSnapshot } from '../server/runtime/local-cli.mjs';
 
 await mkdir('.data', { recursive: true });
 const root = await mkdtemp(resolve('.data/collaboration-flow-'));
@@ -64,6 +64,7 @@ s.retryDispatch(instruction.id, 'FLOW_OLD_ERROR：一次临时故障', 0);
 s.addEvent({ type: 'dispatch.retry_scheduled', runId: run.id, message: 'FLOW_RETRY：保留原始重试说明。', data: { dispatchId: instruction.id } });
 s.claimDispatch(run.id); const recovered = trace(instruction, s.getRunAgent(run.id, 'agent_engineer'));
 s.completeTrace(recovered.id); s.completeDispatch(instruction.id);
+s.attachTracePrompt(recovered.id, await files.writePromptSnapshot(run.id, recovered.id, promptSnapshot('FLOW_PROMPT_ALIGNMENT：提示词与会话 ID 对齐验证。')));
 for(const content of [executionContent({thinking:'FLOW_THINKING：先核对输入，再检查交付。'}),{version:1,fields:{thinking:{text:'',redacted:true,truncated:false}}},executionContent({thinking:'FLOW_FILTERED：继续检查\nAPI_KEY=SECRET_SENTINEL\n其余正文保留。'})]) {
  const contentRef=await files.writeConsoleContent(run.id,recovered.id,content);
  s.addEvent({type:'runtime.event',runId:run.id,actor:actor(s.getRunAgent(run.id,'agent_engineer')),message:'模型正在整理执行方案',data:{auditVersion:2,traceId:recovered.id,presentation:'thinking',providerEventType:'assistant',contentRef}});
@@ -99,6 +100,8 @@ try {
   await page.locator('#account-name').waitFor();
   await page.goto(origin + '/runs/' + run.id);
   await page.locator('.collaboration-row').first().waitFor();
+  assert.equal(await page.locator('.collaboration-toolbar small, .collaboration-reference, .human-guide').count(), 0);
+  assert.equal(await page.locator('#instruction-text').getAttribute('placeholder'), '输入消息…');
   while (await page.locator('[data-collaboration-older]').count()) await page.locator('[data-collaboration-older]').click();
   const rows = page.locator('.collaboration-row');
   const row = marker => rows.filter({ has: page.locator('.collaboration-markdown, .collaboration-plain').filter({ hasText: marker }) });
@@ -226,5 +229,19 @@ try {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'narrow collaboration has no page overflow');
   await page.locator('.human-message-list').evaluate(el => { el.scrollTop = 0; });
   await page.screenshot({ path: join(root, 'flow-narrow.png'), fullPage: true });
+  for (const theme of ['minimal', 'warm']) for (const width of [1320, 760]) {
+    await app.evaluate(({ BrowserWindow }, { origin, width }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith(origin)).setContentSize(width, 800), { origin, width });
+    await page.waitForFunction(width => innerWidth === width, width);
+    await page.goto(origin + '/settings/appearance'); await page.locator(`[name="theme"][value="${theme}"]`).check();
+    await page.goto(origin + '/runs/' + run.id); await page.locator('#console-mode').click();
+    await page.locator('[data-select-agent="agent_engineer"]').click();
+    const prompt = page.locator(`[data-console-key="prompt:${recovered.id}"]`);
+    await prompt.waitFor(); if (await prompt.getAttribute('open') === null) await prompt.locator('summary').click();
+    const text = prompt.locator('.prompt-snapshot-text'); await text.waitFor();
+    const session = prompt.locator('.console-session-id');
+    assert.ok(Math.abs((await text.boundingBox()).x - (await session.boundingBox()).x) < 1, 'native session label aligns with the prompt content box');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: join(root, `prompt-session-${theme}-${width}.png`), fullPage: true });
+  }
   console.log('PASS' + ' ' + (appBundle ? 'packaged' : 'source') + ' collaboration flow; evidence: ' + root);
 } finally { await app.close(); }

@@ -55,11 +55,15 @@ try {
       let supportStyle;
       for (const view of ['marketplace','mcp-marketplace']) {
         await page.goto(origin + '/' + view); await page.locator('[data-market-list] .agent-card').first().waitFor();
-        const supported = await page.locator('.runtime-support[data-supported=true]').first().evaluate(presentation);
-        const unsupported = await page.locator('.runtime-support[data-supported=false]').first().evaluate(presentation);
-        assert.ok(contrast(supported) >= 4.5, 'Runtime supported label contrast'); assert.ok(contrast(unsupported) >= 4.5, 'Runtime unsupported label contrast');
-        if (supportStyle) assert.deepEqual(supported,supportStyle,'MCP and plugin support share exact computed styling'); else supportStyle=supported;
+        assert.equal(await page.locator('[data-market-list] .runtime-support, [data-market-list] .extension-runtime-badges').count(),0,'market cards omit Runtime support labels');
+        assert.equal(await page.locator('[data-market-list] .extension-card-meta').first().locator('span').count(),1,'card metadata contains only version or ID');
         await page.locator('[data-extension-detail]').first().click(); await page.locator('.extension-detail-overview').waitFor();
+        if(view==='marketplace') {
+          const supported=await page.locator('.plugin-runtime-compatibility .runtime-support[data-supported=true]').first().evaluate(presentation);
+          const unsupported=await page.locator('.plugin-runtime-compatibility .runtime-support[data-supported=false]').first().evaluate(presentation);
+          assert.ok(contrast(supported)>=4.5);assert.ok(contrast(unsupported)>=4.5);
+          supportStyle=supported;
+        }
         assert.equal(await page.locator('.extension-detail-overview .agent-card-avatar').evaluate(n => { const c=getComputedStyle(n);return c.color===c.backgroundColor; }),false);
         await page.locator('[data-close-modal]').click();
         await page.screenshot({ path:join(root,`${theme}-${width}-${view}.png`) });

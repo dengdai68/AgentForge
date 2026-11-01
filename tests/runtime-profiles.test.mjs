@@ -8,12 +8,42 @@ import { createStore } from '../server/store.mjs';
 import { probeRuntime } from '../server/runtime/probe.mjs';
 import { registerExecution } from '../server/runtime/registry.mjs';
 
+test('missing Runtime is effectively disabled and locked without rewriting preferences or frozen facts', () => {
+  let installed = true;
+  const store = createStore({ workspaceRoot: join(tmpdir(), 'agentforge-missing-runtime'), runtimeInstalled: provider => provider !== 'dsh' || installed });
+  const profile = store.listRuntimeProfiles().find(item => item.provider === 'dsh');
+  const worker = store.createAgent({ name: 'Worker', runtime: { profileId: profile.id } });
+  const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id] });
+  const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
+  const task = store.createTask({ title: 'Frozen', objective: 'Write', teamId: team.id, workflowTemplateId: flow.id });
+  const chat = store.openCommunication({ kind: 'agent', targetId: worker.id });
+  const frozen = store.getTask(task.id).memberSnapshots;
+  installed = false;
+  const missing = store.listRuntimeProfiles().find(item => item.id === profile.id);
+  assert.equal(missing.installed, false); assert.equal(missing.enabled, false);
+  const before = store.snapshot();
+  for (const enabled of [true, false]) assert.throws(() => store.saveRuntimeProfile({ enabled }, profile.id), /未安装/);
+  assert.deepEqual(store.snapshot(), before, 'rejected switches do not persist changes');
+  assert.throws(() => store.createRun(task.id), /未安装/);
+  assert.throws(() => store.sendCommunication(chat.id, { content: 'Hello', clientRequestId: randomUUID() }), /未安装/);
+  assert.deepEqual(store.getTask(task.id).memberSnapshots, frozen);
+  assert.equal(store.saveRuntimeProfile({ model: 'offline-model' }, profile.id).enabled, false);
+  installed = true;
+  assert.equal(store.listRuntimeProfiles().find(item => item.id === profile.id).installed, true);
+  store.saveRuntimeProfile({ enabled: false }, profile.id);
+  installed = false; installed = true;
+  assert.equal(store.listRuntimeProfiles().find(item => item.id === profile.id).enabled, false, 'installation does not override an explicit disabled preference');
+  store.saveRuntimeProfile({ enabled: true }, profile.id);
+  assert.ok(store.createRun(task.id));
+  store.close();
+});
+
 test('fixed Runtime slots retain IDs, gate new work and preserve frozen snapshots across restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'af-fixed-runtime-'));
   const options = { databasePath: join(root, 'state.sqlite'), workspaceRoot: root };
   let store = createStore(options);
   const defaults = store.listRuntimeProfiles();
-  assert.equal(defaults.length, 2);
+  assert.equal(defaults.length, 3);
   const profile = defaults.find(item => item.provider === 'claude-code');
   store.saveRuntimeProfile({ model: 'frozen' }, profile.id);
   const worker = store.createAgent({ name: 'Worker', runtime: { profileId: profile.id } });
@@ -39,7 +69,7 @@ test('fixed Runtime slots retain IDs, gate new work and preserve frozen snapshot
   assert.doesNotThrow(() => store.assertRuntimeEnabled(worker.runtime));
   assert.ok(store.createRun(task.id));
   assert.ok(store.sendCommunication(chat.id, { content: 'Question', clientRequestId: randomUUID() }));
-  assert.equal(store.listRuntimeProfiles().length, 2);
+  assert.equal(store.listRuntimeProfiles().length, 3);
   store.close();
 });
 
@@ -67,10 +97,10 @@ test('central runtime edits update bound employees but preserve queued work and 
   assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.model, 'test-model');
 });
 
-test('Store only exposes the two fixed provider slots when internal employees are bound', () => {
+test('Store only exposes the three fixed provider slots when internal employees are bound', () => {
   const store = createStore();
-  for (const provider of ['claude-code', 'codex']) store.createAgent({ name: provider, runtime: { provider } });
-  assert.equal(store.listRuntimeProfiles().length, 2);
+  for (const provider of ['claude-code', 'codex', 'dsh']) store.createAgent({ name: provider, runtime: { provider } });
+  assert.equal(store.listRuntimeProfiles().length, 3);
   assert.ok(store.listRuntimeProfiles().every(item => !Object.hasOwn(item, 'name') && !Object.hasOwn(item, 'executable')));
   store.close();
 });

@@ -129,9 +129,8 @@ button { cursor:pointer; }
 .application-icon { display:block; flex:none; width:28px; height:28px; object-fit:contain; }
 .app-update-progress { width:100%; height:8px; accent-color:var(--accent); }
 .settings-update-module + .settings-update-module { margin-top:24px; padding-top:20px; border-top:1px solid var(--line); }
-.settings-update-module > h4 { margin:0 0 12px; font-size:13px; }
-.app-update-repository { margin:12px 0; color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
-.app-update-repository a { color:var(--accent); text-underline-offset:2px; }
+.app-update-version { display:flex; align-items:baseline; flex-wrap:wrap; gap:8px; }
+.app-update-version a { color:var(--accent); text-underline-offset:2px; white-space:nowrap; }
 .workspace-card { display:flex; align-items:center; gap:10px; padding:10px; margin-bottom:24px; border:1px solid #303a30; border-radius:12px; background:#192019; }
 .workspace-avatar,.user-avatar { display:grid; place-items:center; width:29px; height:29px; border-radius:9px; color:var(--dark); background:var(--lime); font-weight:700; font-size:12px; }
 .workspace-card small,.user-card small { display:block; color:#7f8980; font-size:10px; line-height:1.4; }
@@ -1751,11 +1750,11 @@ button { cursor:pointer; }
 
 /* Console assistant bodies render Markdown; parsing/sanitizing failures fall
    back to the escaped plain-text block, so content is never lost. */
-.console-markdown { max-height:var(--execution-content-max-height); margin:3px 0; overflow:auto; color:var(--ink); font-size:13px; line-height:1.7; overflow-wrap:anywhere; }
+.console-markdown { min-width:0; margin:3px 0; color:var(--ink); font-size:13px; line-height:1.7; overflow-wrap:anywhere; }
 .console-markdown > :first-child { margin-top:0; }
 .console-markdown > :last-child { margin-bottom:0; }
 .console-markdown p, .console-markdown ul, .console-markdown ol, .console-markdown blockquote { margin:6px 0; }
-.console-markdown ul, .console-markdown ol { padding-left:1.5em; }
+.console-markdown ul, .console-markdown ol { padding-left:2em; }
 .console-markdown h1, .console-markdown h2, .console-markdown h3, .console-markdown h4 { margin:12px 0 6px; color:var(--ink); line-height:1.35; }
 .console-markdown h1 { font-size:17px; } .console-markdown h2 { font-size:15px; } .console-markdown h3, .console-markdown h4 { font-size:13px; }
 .console-markdown a { color:var(--lime-dark); text-decoration:underline; }
@@ -1912,6 +1911,7 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 
 .console-session-id { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px 10px; margin-top:5px; color:var(--muted); font-size:11px; }
 .console-session-id code { user-select:text; overflow-wrap:anywhere; font:11px/1.6 ui-monospace,SFMono-Regular,monospace; color:var(--ink); }
+.prompt-snapshot > .console-session-id { margin:5px 12px 0 26px; }
 
 /* Large configuration forms keep their actions visible at every window size. */
 .modal.workflow-detail-modal,.modal.workflow-editor-modal,.modal.team-config-modal {
@@ -1990,7 +1990,7 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 .runtime-availability input[role="switch"]:checked { background:var(--accent); border-color:var(--accent); }
 .runtime-availability input[role="switch"]:checked::before { left:15px; background:#fff; }
 .runtime-availability input[role="switch"]:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
-.runtime-availability input[role="switch"]:disabled { opacity:.6; cursor:wait; }
+.runtime-availability input[role="switch"]:disabled { opacity:.6; cursor:not-allowed; }
 
 /* Task creation reserves the main editing area for the user's description. */
 .modal.task-create-modal { display:flex; flex-direction:column; width:min(900px,calc(100vw - 40px)); max-width:calc(100vw - 40px); max-height:calc(100dvh - 40px); box-sizing:border-box; overflow:hidden; }

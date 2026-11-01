@@ -18,3 +18,8 @@ Packaged application resources also include the Electron MIT license and the
 Chromium third-party notices in licenses/electron/LICENSE and
 licenses/electron/LICENSES.chromium.html, copied from the locked Electron
 distribution without changing their contents.
+
+DeepSeek Harness command Hook bridges (0.2.1-rc.2) retain their MIT licenses
+in server/runtime/vendor/dsh-hooks/*.LICENSE. Unmodified upstream files and
+package integrity are identified in provenance.json; hook-guard.mjs is an
+AgentForge adapter, not upstream code.

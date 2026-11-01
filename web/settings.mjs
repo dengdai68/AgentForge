@@ -6,7 +6,7 @@ const escape = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&
 // Mirrors the provider effort vocabularies observed from the real CLIs in
 // server/runtime/model-catalog.mjs; tests assert both sides stay equal. The
 // catalog endpoint refines per-model availability whenever it loads.
-export const RUNTIME_EFFORT_LEVELS = { "claude-code": ["low", "medium", "high", "xhigh", "max"], codex: ["low", "medium", "high", "xhigh", "max", "ultra"] };
+export const RUNTIME_EFFORT_LEVELS = { "claude-code": ["low", "medium", "high", "xhigh", "max"], codex: ["low", "medium", "high", "xhigh", "max", "ultra"], dsh: ["off", "low", "high", "max"] };
 
 const runtimeOptionLabel = value => String(value).replace(/^[a-z]/, char => char.toUpperCase());
 
@@ -26,9 +26,9 @@ export function runtimeEffortOptions(provider, modelId, catalog) {
   if (entry) {
     const levels = (entry.levels || []).map(level => ({ value: level.id, label: level.default ? `${runtimeOptionLabel(level.id)}（模型默认）` : runtimeOptionLabel(level.id) }));
     if (!levels.length) return { options: defaults, note: "目录中该模型未声明思考档位。" };
-    return { options: [...defaults, ...levels], note: "档位来自 codex debug models 目录；账号实际可用性以调用为准。" };
+    return { options: [...defaults, ...levels], note: provider === "dsh" ? "档位来自 DeepSeek Harness 原生模型目录；账号实际可用性以调用为准。" : "档位来自 codex debug models 目录；账号实际可用性以调用为准。" };
   }
-  return { options: [...defaults, ...RUNTIME_EFFORT_LEVELS.codex.map(id => ({ value: id, label: runtimeOptionLabel(id) }))], note: modelId ? "模型不在目录中（手工输入）；档位按 Codex 全局集合展示，逐模型支持以调用为准。" : "未选择模型；逐模型档位在选择模型后精确展示，当前为 Codex 全局集合。" };
+  return { options: [...defaults, ...RUNTIME_EFFORT_LEVELS[provider].map(id => ({ value: id, label: runtimeOptionLabel(id) }))], note: modelId ? "模型不在目录中（手工输入）；档位按此 Runtime 集合展示，逐模型支持以调用为准。" : "未选择模型；逐模型档位在选择模型后精确展示。" };
 }
 
 export function createAppUpdateUI(panel, desktop) {
@@ -195,7 +195,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
     if (currentPage === "updates") void appUpdateUI?.refresh();
   };
   function confirmDataReset() {
-    openModal(`<h2>清除所有数据</h2><p class="modal-intro">永久删除此工作区的账号、任务与沟通记录、数字员工、团队、工作流、Runtime 与扩展配置、仓库 Token、交付文件及系统创建的任务目录。清除后重新设置管理员。</p><p class="settings-note">外部已有项目目录、工作根目录及本机 Claude Code / Codex 登录与会话保留。请先停止正在执行的任务和沟通。此操作无法撤销。</p><form id="reset-data-form"><div class="form-field"><label for="reset-current-password">当前密码</label><input id="reset-current-password" name="password" type="password" autocomplete="current-password" required /></div><div class="form-field"><label for="reset-confirmation">输入「清除所有数据」确认</label><input id="reset-confirmation" name="confirmation" autocomplete="off" required /></div><p data-reset-error role="alert"></p><div class="form-actions"><button class="ghost-button" type="button" data-cancel-reset>取消</button><button class="danger-button" type="submit" disabled>清除并重新开始</button></div></form>`);
+    openModal(`<h2>清除所有数据</h2><p class="modal-intro">永久删除此工作区的账号、任务与沟通记录、数字员工、团队、工作流、Runtime 与扩展配置、仓库 Token、交付文件及系统创建的任务目录。清除后重新设置管理员。</p><p class="settings-note">外部已有项目目录、工作根目录及本机 Claude Code / Codex / DeepSeek Harness 登录与会话保留。请先停止正在执行的任务和沟通。此操作无法撤销。</p><form id="reset-data-form"><div class="form-field"><label for="reset-current-password">当前密码</label><input id="reset-current-password" name="password" type="password" autocomplete="current-password" required /></div><div class="form-field"><label for="reset-confirmation">输入「清除所有数据」确认</label><input id="reset-confirmation" name="confirmation" autocomplete="off" required /></div><p data-reset-error role="alert"></p><div class="form-actions"><button class="ghost-button" type="button" data-cancel-reset>取消</button><button class="danger-button" type="submit" disabled>清除并重新开始</button></div></form>`);
     const form = document.querySelector("#reset-data-form"), button = form.querySelector('[type="submit"]');
     form.oninput = () => { button.disabled = !form.elements.password.value || form.elements.confirmation.value !== "清除所有数据"; };
     form.querySelector('[data-cancel-reset]').onclick = closeModal;
@@ -244,24 +244,33 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
       if (!container.isConnected) return;
       container.replaceChildren();
       for (const profile of profiles) {
-        const label = profile.provider === 'codex' ? 'Codex' : 'Claude Code';
+        const label = profile.provider === 'dsh' ? 'DeepSeek Harness' : profile.provider === 'codex' ? 'Codex' : 'Claude Code';
         const row = document.createElement('div'); row.className = 'runtime-provider-row'; row.dataset.runtimeProfile = profile.id;
-        row.innerHTML = `<details class="runtime-config"><summary aria-label="${label} 配置"><span class="runtime-expand-icon" aria-hidden="true">›</span><div><h4>${label}</h4><p class="field-hint" data-runtime-summary></p></div></summary></details><div class="runtime-provider-actions"><label class="runtime-availability"><input type="checkbox" role="switch" aria-label="${label} 可用" ${profile.enabled ? 'checked' : ''} /><span data-enabled-label>${profile.enabled ? '可用' : '已停用'}</span></label></div><p role="status" data-row-result></p>`;
+        const availabilityLabel = () => profile.installed ? (profile.enabled ? '可用' : '已停用') : '未安装';
+        row.innerHTML = `<details class="runtime-config"><summary aria-label="${label} 配置"><span class="runtime-expand-icon" aria-hidden="true">›</span><div><h4>${label}</h4><p class="field-hint" data-runtime-summary></p></div></summary></details><div class="runtime-provider-actions"><label class="runtime-availability"><input type="checkbox" role="switch" aria-label="${label} 可用" ${profile.enabled ? 'checked' : ''} ${profile.installed ? '' : 'disabled'} /><span data-enabled-label>${availabilityLabel()}</span></label></div><p role="status" data-row-result></p>`;
         container.append(row);
         const summary = row.querySelector('[data-runtime-summary]');
         const syncSummary = () => { summary.textContent = `${profile.model ? runtimeOptionLabel(profile.model) : 'CLI 默认模型'} · ${profile.effort ? runtimeOptionLabel(profile.effort) : '默认思考等级'} · ${profile.employeeCount} 位员工`; };
         syncSummary();
         const toggle = row.querySelector('[role="switch"]'), rowResult = row.querySelector('[data-row-result]');
+        const syncAvailability = () => {
+          toggle.checked = profile.enabled; toggle.disabled = !profile.installed;
+          row.querySelector('[data-enabled-label]').textContent = availabilityLabel();
+          const test = row.querySelector('[data-test-runtime]');
+          if (test) test.disabled = !profile.enabled || test.form.dataset.busy === 'true';
+        };
         toggle.onchange = async () => {
           toggle.disabled = true;
           try {
             Object.assign(profile, await api(`/api/settings/runtime-profiles/${encodeURIComponent(profile.id)}`, { method: 'PUT', body: JSON.stringify({ enabled: toggle.checked }) }));
-            row.querySelector('[data-enabled-label]').textContent = profile.enabled ? '可用' : '已停用';
-            const test = row.querySelector('[data-test-runtime]');
-            if (test) test.disabled = !profile.enabled || test.form.dataset.busy === 'true';
+            syncAvailability();
             rowResult.textContent = profile.enabled ? '已启用。' : '已停用；已开始的调用继续，新的调用需启用后重试。';
-          } catch (error) { toggle.checked = profile.enabled; rowResult.textContent = error.message; }
-          finally { toggle.disabled = false; }
+          } catch (error) {
+            const current = await api('/api/settings/runtime-profiles').catch(() => null);
+            Object.assign(profile, current?.profiles.find(item => item.id === profile.id));
+            syncAvailability(); rowResult.textContent = error.message;
+          }
+          finally { toggle.disabled = !profile.installed; }
         };
         const disclosure = row.querySelector('details');
         disclosure.addEventListener('toggle', () => {
@@ -303,6 +312,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
           const catalog = { state: 'idle', data: null, error: '', request: 0 };
           const findModel = () => catalog.data?.models?.find(item => item.id === modelInput.value.trim()) || null;
           function syncModel(all = false) {
+            if (!profile.installed) { modelStatus.hidden = false; modelStatus.textContent = '未安装或客户端找不到可执行文件；安装并配置 PATH 后重新打开客户端。'; return; }
             modelStatus.hidden = catalog.state !== 'failed';
             modelOptions.replaceChildren(); activeOption = -1; modelInput.removeAttribute('aria-activedescendant');
             const query = all ? "" : modelInput.value.trim().toLowerCase();
@@ -331,6 +341,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             effortStatus.hidden = !cleared;
           }
           async function loadCatalog() {
+            if (!profile.installed) { syncModel(); return; }
             // Sequence every request: a response that returns after the user
             // collapsed the section or refreshed is stale and must never
             // overwrite the newer list or touch the effort options.
@@ -364,7 +375,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             try {
               const saved = await api(`/api/settings/runtime-profiles/${encodeURIComponent(profile.id)}`, { method: 'PUT', body: JSON.stringify(input) });
               if (!form.isConnected) return;
-              Object.assign(profile, saved); syncSummary();
+              Object.assign(profile, saved); syncSummary(); syncAvailability();
               dirty = false; status.textContent = profile.enabled ? '已保存。可测试此配置。' : '已保存。启用后可测试。';
             } catch (error) { if (form.isConnected) status.textContent = error.message; }
             finally { busy(false); }
@@ -506,17 +517,15 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             <details><summary>AI 配置 CLI 使用说明</summary><p class="settings-note">安装版启动时默认安装 CLI，并复用当前客户端登录授权；客户端未登录时可单独登录。CLI 不读取浏览器 Cookie 或数据库。</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;user-select:text">agentforge help\nagentforge schema agents\nagentforge auth login --username YOUR_NAME</pre><p class="field-hint">无需系统 Node。help / schema 提供字段、依赖顺序和完整 JSON 模板；源码使用 npm --silent run cli -- help。交互登录隐藏输入密码；脚本显式使用 --password-stdin 管道，不放在命令参数。配置保存不等于任务执行，不能自动确认交付。CLI 会话是本机管理员权限，只交给可信 AI。</p></details>
           </section>
           <section class="settings-section" data-settings-panel="updates" hidden>
-            <h3>更新</h3>
             <section class="settings-update-module" aria-labelledby="app-update-title">
-            <h4 id="app-update-title">应用更新</h4><p class="settings-description" data-app-version>正在读取当前版本…</p>
+            <h3 id="app-update-title">应用更新</h3><p class="settings-description app-update-version"><span data-app-version>正在读取当前版本…</span><a data-app-github href="https://github.com/dengdai68/AgentForge-App" target="_blank" rel="noopener noreferrer">GitHub</a></p>
             <p data-app-update-status role="status" aria-live="polite">正在读取更新状态…</p>
             <progress class="app-update-progress" max="100" value="0" aria-label="安装包下载进度" hidden></progress>
             <div class="form-actions"><button type="button" class="small-button" data-app-update-check>检查更新</button><button type="button" class="primary-button compact" data-app-update-download hidden>下载更新</button><button type="button" class="primary-button compact" data-app-update-install hidden>重启并安装</button></div>
-            <p class="app-update-repository">GitHub：<a data-app-github href="https://github.com/dengdai68/AgentForge-App" target="_blank" rel="noopener noreferrer">https://github.com/dengdai68/AgentForge-App</a></p>
             <p class="settings-note" data-app-update-note>只检查正式版，Beta 不参与更新。</p>
             </section>
             <section class="settings-update-module" aria-labelledby="plugin-update-title">
-            <h4 id="plugin-update-title">插件更新</h4><p class="settings-description">自动检查已安装 Git 插件；仅在 AgentForge 服务运行时生效。</p>
+            <h3 id="plugin-update-title">插件更新</h3><p class="settings-description">自动检查已安装 Git 插件；仅在 AgentForge 服务运行时生效。</p>
             <form data-plugin-update-form><label class="settings-check"><input type="checkbox" name="enabled" aria-label="插件自动更新" disabled>启用自动更新</label><div class="form-field plugin-update-interval"><label for="plugin-update-interval">检查周期（分钟）</label><input id="plugin-update-interval" type="number" name="intervalMinutes" min="1" max="1440" step="1" required disabled><p class="field-hint">默认 2 分钟，范围 1–1440 分钟。</p></div><div class="form-actions"><button type="submit" class="primary-button compact" disabled>保存</button><button type="button" class="small-button" data-check-plugin-updates disabled>立即检查</button></div><p data-plugin-update-note role="status"></p></form>
             <p data-plugin-update-status role="status">正在读取…</p><p class="settings-note">关闭自动更新后仍可立即检查；已开始的检查继续完成。本地目录与固定 SHA 不追随远端更新，不更新 MCP 或应用本身。当前员工使用新版本，已启动任务保留冻结配置。</p>
             </section>

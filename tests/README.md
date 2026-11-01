@@ -63,3 +63,11 @@ UI 使用隔离 Electron 实例检查宽窄布局、搜索、展开和滚动。�
 任务创建展示在 smoke 静态契约与 scripts/test-task-creation.mjs 隔离界面验收同步；显式验收内容仍按原协议冻结，隐藏说明不改变 Runtime 权限或 CLI 能力。
 
 application-updates.test.mjs 覆盖严格正式版与SemVer、GitHub 404/错误、下载并发与显式触发、真实流式校验/失败清理、后台周期停止、IPC来源限制及真实子服务空闲锁（忙写入拒绝、锁中HTTP写入拒绝、正确ID释放）。签名安装真实闭环仍需正式签名Release。
+
+dsh.test.mjs 覆盖第三个固定 Provider、冻结模型/角色与禁用、公开事件过滤、SDK 身份、原生后续等待、非 JSON/终止原因、会话缺失与取消。协议夹具仅验证传输，真实模型与完整任务另跑 test-dsh-real。
+
+Runtime 安装可用性由 cli-environment 与 runtime-profiles 测试分别覆盖 PATH/可执行权限/链接/移除及 Store 的锁定、调用门禁、冻结事实和偏好保留；CLI 覆盖完整展示名称和安装状态输出。
+
+任务协作消息覆盖未指定/null 接收人默认冻结经理、显式成员校验、待答澄清不被普通消息消费、终态仅答疑；renderer 保留明确 @ 与精确回复，移除顶部冗余和答复问题副本。
+
+`plugin-compatibility.test.mjs` 覆盖安全 YAML、两种源的冻结计划、源完整性、旧安装只读重算、未映射组件与 Hook 审计隐私；真实子代理/Hook 在 scripts/test-dsh-real.mjs 另验。

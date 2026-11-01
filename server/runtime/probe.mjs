@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { runClaudeCodeCli, runCodexCli } from "./local-cli.mjs";
+import { runClaudeCodeCli, runCodexCli, runDshCli } from "./local-cli.mjs";
 import { terminateExecution } from "./registry.mjs";
 import { diagnostic, diagnostics, withDiagnosticContext } from "../diagnostics.mjs";
 
@@ -21,7 +21,7 @@ export async function probeRuntime(profile, { timeoutMs = 90000, invoke } = {}) 
       timer = setTimeout(() => { expired = true; terminateExecution(testId, "连接测试超时"); }, timeoutMs);
       const runtime = { provider: profile.provider, executable: profile.executable, model: profile.model, effort: profile.effort || "", profile: profile.profile, skillPaths: [], pluginPaths: [], mcpConfigPaths: [], extensionSelection: { pluginIds: [], mcpIds: [] }, extensionManifest: [] };
       diagnostic("runtime_test.started", { provider: profile.provider, model: profile.model, effort: profile.effort || "" });
-      const result = await (invoke || (profile.provider === "codex" ? runCodexCli : runClaudeCodeCli))({ runtime, workspacePath: directory, traceDirectory, schemaPath, finalPath: join(traceDirectory, "final.json"), outputSchema, prompt: 'Connection check only. Do not use tools or read or write files. Return exactly {"status":"ok"} using the required output schema.', runId: testId, executionKey: testId, canStart: () => !expired, idleTimeoutMs: timeoutMs, apiRetryTimeoutMs: timeoutMs, onEvent: async () => {} });
+      const result = await (invoke || (profile.provider === "dsh" ? runDshCli : profile.provider === "codex" ? runCodexCli : runClaudeCodeCli))({ runtime, workspacePath: directory, traceDirectory, schemaPath, finalPath: join(traceDirectory, "final.json"), outputSchema, prompt: 'Connection check only. Do not use tools or read or write files. Return exactly {"status":"ok"} using the required output schema.', runId: testId, executionKey: testId, canStart: () => !expired, idleTimeoutMs: timeoutMs, apiRetryTimeoutMs: timeoutMs, onEvent: async () => {} });
       if (expired) throw new Error("连接测试超时");
       const output = JSON.parse(result.finalText);
       if (output.status !== "ok" || Object.keys(output).length !== 1) throw new Error("模型未返回有效测试应答");

@@ -2,7 +2,7 @@
 // Providers: AGENTFORGE_SETTINGS_REAL=1. Never modifies the installed instance.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
-import { mkdtemp, mkdir, writeFile, stat, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, stat, readFile, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -14,6 +14,7 @@ import { createAuth } from '../server/auth.mjs';
 await mkdir('.data',{recursive:true});
 const root = await mkdtemp(resolve('.data/runtime-settings-')), home = join(root,'home');
 const bundle = process.env.AGENTFORGE_SETTINGS_APP, data = bundle ? join(home,'.agentforge/desktop') : join(root,'client');
+const missing = process.env.AGENTFORGE_SETTINGS_MISSING === '1';
 const real = process.env.AGENTFORGE_SETTINGS_REAL === '1', password = randomBytes(20).toString('hex');
 await mkdir(home,{recursive:true,mode:0o700});
 await mkdir(join(home,'.agentforge'),{recursive:true,mode:0o700});
@@ -34,6 +35,7 @@ store.updateRun(completedRun.id,{status:'review'}); store.setTaskStatus(complete
 store.updateRun(completedRun.id,{status:'awaiting_acceptance'}); store.setTaskStatus(completedTask.id,'awaiting_acceptance'); store.confirmRunCompletion(completedRun.id);
 store.close();
 await mkdir(completedRun.workspacePath,{recursive:true});
+if (missing) for (const file of ['.zprofile','.zshrc']) await writeFile(join(home,file),'export PATH=/usr/bin:/bin:/usr/sbin:/sbin\n');
 if (real) {
   const bin = join(home,'test-bin'); await mkdir(bin);
   const quote = value => "'"+value.replaceAll("'","'\\''")+"'";
@@ -44,7 +46,7 @@ if (real) {
   await writeFile(join(home,'.zprofile'),'export PATH='+quote(bin)+':"$PATH"\n');
   await writeFile(join(home,'.zshrc'),'export PATH='+quote(bin)+':"$PATH"\n');
 }
-const app = await electron.launch({...(bundle ? {executablePath:resolve(bundle,'Contents/MacOS/AgentForge')} : {}),args:bundle ? [] : ['apps/electron/main.mjs'],env:{...process.env,HOME:home,...(real ? {CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude')} : {}),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
+const app = await electron.launch({...(bundle ? {executablePath:resolve(bundle,'Contents/MacOS/AgentForge')} : {}),args:bundle ? [] : ['apps/electron/main.mjs'],env:{...process.env,HOME:home,...(missing ? {PATH:'/usr/bin:/bin:/usr/sbin:/sbin',ZDOTDIR:home} : {}),...(real ? {CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude')} : {}),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
 const evidence = {root,bundle:bundle||'source',real,cases:[]}, errors = [];
 const poll = async (label,check,timeout=30000) => {const started=Date.now();for(;;){const value=await check();if(value)return value;if(Date.now()-started>timeout)throw Error('Timed out: '+label);await new Promise(resolve=>setTimeout(resolve,500));}};
 try {
@@ -55,15 +57,57 @@ try {
   const endpoint = join(data,'desktop-endpoint.json');
   const cli = async (args,success=true) => {try {const result=await promisify(execFile)(bundle ? resolve(bundle,'Contents/Resources/cli/agentforge') : process.execPath,bundle ? [...args,'--endpoint-file',endpoint,'--json'] : [resolve('cli/main.mjs'),...args,'--endpoint-file',endpoint,'--json'],{env:{...process.env,HOME:home},timeout:15000});assert.ok(success);return JSON.parse(result.stdout).data;}catch(error){if(success)throw error;assert.equal(error.code,3);return null;}};
   await poll('host delegation',()=>stat(join(data,'desktop-cli-session.json')).catch(()=>null));
+  if (missing) {
+    await page.goto(origin+'/settings/runtime');
+    const dsh = page.locator(`[data-runtime-profile="${profiles.dsh.id}"]`);
+    await dsh.getByRole('heading',{name:'DeepSeek Harness',exact:true}).waitFor();
+    assert.equal((await cli(['runtimes','get','DeepSeek Harness'])).installed,false);
+    const toggle=dsh.getByRole('switch');
+    for (const theme of ['minimal','warm']) for (const width of [1320,760]) {
+      await app.evaluate(({BrowserWindow},{origin,width})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,760),{origin,width});
+      await page.waitForFunction(width=>innerWidth===width,width);
+      await page.goto(origin+'/settings/appearance'); await page.locator(`[name="theme"][value="${theme}"]`).check();
+      await page.goto(origin+'/settings/runtime'); await toggle.waitFor();
+      assert.equal(await toggle.isDisabled(),true); assert.equal(await toggle.isChecked(),false);
+      await dsh.getByText('未安装',{exact:true}).waitFor();
+      await dsh.locator('summary').click();
+      assert.equal(await dsh.getByRole('button',{name:'测试连接',exact:true}).isDisabled(),true);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      await page.screenshot({path:join(root,`missing-${theme}-${width}.png`)});
+    }
+    for (const enabled of [true,false]) assert.equal((await api(`/api/settings/runtime-profiles/${profiles.dsh.id}`,{enabled},'PUT')).status,400);
+    assert.equal((await api(`/api/settings/runtime-profiles/${profiles.dsh.id}/test`,{})).status,400);
+    assert.equal((await api('/api/settings/runtime-profiles/models?provider=dsh')).status,400);
+    const offline=await api(`/api/settings/runtime-profiles/${profiles.dsh.id}`,{model:'offline-model'},'PUT');
+    assert.equal(offline.status,200); assert.equal(offline.value.enabled,false);
+    const patch=join(root,'enable.json'); await writeFile(patch,JSON.stringify({enabled:true}));
+    await assert.rejects(cli(['runtimes','update','dsh','--file',patch]),error=>error.code===4 && /未安装/.test(error.stdout));
+    assert.equal((await api(`/api/tasks/${task.id}/run`,{})).status,400);
+    assert.equal((await api(`/api/communications/${chat.id}/messages`,{content:'missing runtime',clientRequestId:randomBytes(12).toString('hex')})).status,400);
+    const bin=join(home,'.local/bin'); await mkdir(bin,{recursive:true});
+    const executable=join(bin,'dsh'), marker=join(root,'unexpected-cli-execution');
+    await writeFile(executable,`#!/bin/sh\ntouch '${marker}'\n`,{mode:0o700});
+    await page.goto(origin+'/settings/runtime'); await toggle.waitFor();
+    assert.equal(await toggle.isDisabled(),false);
+    assert.equal((await cli(['runtimes','get','dsh'])).installed,true);
+    await toggle.uncheck(); await dsh.getByText('已停用；',{exact:false}).waitFor();
+    await toggle.check(); await dsh.getByText('已启用。',{exact:true}).waitFor();
+    await rm(executable);
+    await toggle.uncheck(); await poll('uninstalled switch locked',()=>toggle.isDisabled());
+    assert.equal(await toggle.isChecked(),false);
+    await dsh.getByText('未安装',{exact:true}).waitFor();
+    await assert.rejects(stat(marker),{code:'ENOENT'});
+    evidence.cases.push('full DeepSeek Harness label; missing installation locks switch; HTTP/CLI reject enabled changes and new work; offline preferences remain editable; install/removal re-evaluated without running CLI; two themes/wide/narrow');
+  } else {
   assert.equal((await stat(join(data,'desktop-cli-session.json'))).mode&0o777,0o600);
   assert.equal((await cli(['auth','status'])).username,'settings-qa');
-  assert.equal((await cli(['runtimes','list'])).total,2);
+  assert.equal((await cli(['runtimes','list'])).total,3);
   assert.equal((await cli(['runtimes','get','codex'])).id,profiles.codex.id);
   const logout = await cli(['auth','logout']); assert.equal(logout.loggedOut,false); assert.equal((await cli(['auth','status'])).username,'settings-qa');
   console.log('PASS desktop shared login'); evidence.cases.push('CLI uses desktop authorization without separate login; CLI logout leaves desktop signed in');
   if(bundle){await poll('default installation',()=>stat(join(home,'.local/bin/agentforge')).catch(()=>null));assert.match(await readFile(join(home,'.zshrc'),'utf8'),/AgentForge CLI PATH/);const shellResult=await promisify(execFile)('/bin/zsh',['-ilc','agentforge auth status --json'],{env:{...process.env,HOME:home,ZDOTDIR:home,PATH:'/usr/bin:/bin:/usr/sbin:/sbin'},timeout:30000});assert.equal(JSON.parse(shellResult.stdout).data.username,'settings-qa');evidence.cases.push('packaged startup installs CLI automatically; a fresh shell authenticates without flags or login');}
   await page.goto(origin+'/settings/runtime'); await page.locator('.runtime-provider-row').first().waitFor();
-  assert.equal(await page.locator('.runtime-provider-row').count(),2); assert.equal(await page.getByText('新增 Runtime',{exact:true}).count(),0);
+  assert.equal(await page.locator('.runtime-provider-row').count(),3); assert.equal(await page.getByText('新增 Runtime',{exact:true}).count(),0);
   const codex = page.locator(`[data-runtime-profile="${profiles.codex.id}"]`);
   await codex.getByRole('switch').uncheck(); await codex.getByText('已停用；',{exact:false}).waitFor();
   assert.equal((await api(`/api/tasks/${task.id}/run`,{})).status,400);
@@ -196,5 +240,6 @@ try {
     evidence.realTask={runId,status:'completed',providers:[...new Set(workspace.traces.filter(t=>t.status==='completed').map(t=>t.runtime?.provider||t.agentId))]};
   }
   await api('/api/auth/logout',{}); await cli(['auth','status'],false); evidence.cases.push('desktop logout immediately revokes CLI grant');
+  }
   assert.deepEqual(errors,[]); console.log('PASS '+root);
 } catch(error) {evidence.error=String(error.stack||error);throw error;} finally {await writeFile(join(root,'evidence.json'),JSON.stringify(evidence,null,2));await app.close();}

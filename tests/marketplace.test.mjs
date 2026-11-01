@@ -106,11 +106,11 @@ test('edited MCP really calls the new service while a frozen reference still cal
   }
 });
 
-test('Codex stdio MCP preserves its working directory and does not advertise Claude compatibility',async t=>{
+test('portable stdio MCP preserves its working directory for every Runtime',async t=>{
   const {root,market}=await fixture(t),log='cwd-proof.jsonl';
   const entry=await market.add({kind:'mcp',name:'cwd-proof',description:'',content:JSON.stringify({mcpServers:{proof:{command:process.execPath,args:[resolve('scripts/marketplace-probe-mcp.mjs'),log,'CWD-PROOF'],cwd:root,env_vars:['PATH']}}})});
-  assert.deepEqual(entry.providers,['codex']);
-  await assert.rejects(market.resolve({pluginIds:[],mcpIds:[entry.id]},'claude-code'),/MCP.*Claude Code.*不支持/);
+  assert.deepEqual(entry.providers,['claude-code','codex','dsh']);
+  assert.equal((await market.resolve({pluginIds:[],mcpIds:[entry.id]},'claude-code')).extensionManifest.length,1);
   const ref=(await market.resolve({pluginIds:[],mcpIds:[entry.id]},'codex')).extensionManifest[0];
   const client=new Client({name:'cwd-proof',version:'1'}),transport=new StdioClientTransport({command:process.execPath,args:[resolve('server/runtime/mcp-launcher.mjs'),ref.path,ref.sha256,'proof'],stderr:'pipe'});
   try {await client.connect(transport);assert.match((await client.callTool({name:'read_validation_code',arguments:{}})).content[0].text,/CWD-PROOF/);}
@@ -241,7 +241,7 @@ test('details include Skills, Subagents and common command Hooks for both provid
   await mkdir(join(source,'hooks'));await writeFile(join(source,'hooks/hooks.json'),JSON.stringify({hooks:{SessionStart:[{hooks:[{type:'command',command:'echo test'}]}]}}));
   const {plugins:[entry]}=await market.import({path:source}),detail=await market.detail(entry.id,'plugin');
   assert.equal(detail.components.skills.length,2);assert.equal(detail.components.agents[0].name,'reviewer');assert.equal(detail.components.hooks[0].event,'SessionStart');
-  assert.deepEqual(detail.providers,['claude-code','codex']);
+  assert.deepEqual(detail.providers,['claude-code','codex','dsh']);
   assert.equal((await market.resolve({...empty,pluginIds:[entry.id]},'codex')).extensionManifest.length,1);
 });
 test('dual manifests keep Claude Hooks and explicit empty Codex Hooks independent, with truthful component/runtime labels',async t=>{
@@ -250,7 +250,7 @@ test('dual manifests keep Claude Hooks and explicit empty Codex Hooks independen
   await writeFile(join(source,'.codex-plugin/plugin.json'),JSON.stringify({name:'proof',skills:'./skills/',hooks:{}}));
   await writeFile(join(source,'hooks/hooks.json'),JSON.stringify({hooks:{SessionStart:[{hooks:[{type:'command',command:'echo selected'}]}]}}));
   const {plugins:[entry]}=await market.import({path:source}),detail=await market.detail(entry.id,'plugin');
-  assert.deepEqual(entry.providers,['claude-code','codex']);assert.deepEqual(detail.components.hooks[0].providers,['claude-code']);
+  assert.deepEqual(entry.providers,['claude-code','codex','dsh']);assert.deepEqual(detail.components.hooks[0].providers,['claude-code','dsh']);
   const runtime=await market.resolve({pluginIds:[entry.id],mcpIds:[]},'codex');
   const projection=JSON.parse(await readFile(join(runtime.extensionManifest[0].path,'../../.agentforge/codex.json'),'utf8'));
   assert.deepEqual(projection.hooks,[],'explicit empty Codex Hooks do not inherit the Claude startup Hook');
@@ -264,7 +264,7 @@ test('dual manifests split provider-specific MCP definitions and resolve relativ
   await writeFile(join(source,'server.mjs'),'// fixture');
   const result=await market.import({path:source});assert.equal(result.mcps.length,2);
   for(const provider of ['claude-code','codex']) {
-    const entry=result.mcps.find(item=>item.providers.length===1 && item.providers[0]===provider);assert.ok(entry);
+    const entry=result.mcps.find(item=>item.providers.includes(provider) && !item.providers.includes(provider==='codex'?'claude-code':'codex'));assert.ok(entry);
     const detail=await market.detail(entry.id,'mcp'),service=detail.configuration.mcpServers.proof;
     if(provider==='codex'){assert.match(service.cwd,/installed-plugins\/.*\/plugin$/);assert.deepEqual(service.env_vars,['PATH']);}
     else {assert.match(service.args[0],/installed-plugins\/.*\/plugin\/server.mjs$/);assert.equal(service.cwd,undefined);}
@@ -302,17 +302,21 @@ test('mixed marketplace fetches every Git remote entry, caches identical revisio
     await assert.rejects(market.import({path:catalog}),/broken.*本批次未安装/);assert.equal((await market.catalog()).plugins.length,3);
   }finally{process.env.PATH=previous;}
 });
-test('Codex and portable manifests adapt Markdown Commands into explicit Skill files without executing preprocessors',async t=>{
+test('plain Command instructions project as Skills; dynamic source Commands are never silently downgraded',async t=>{
   const {root,market}=await fixture(t);
   for(const [index,manifest] of ['.codex-plugin/plugin.json','plugin.json'].entries()) {
     const source=await plugin(root,`portable-${index}`,1);await rm(join(source,'.claude-plugin/plugin.json'));
     await mkdir(join(source,manifest.includes('/')?'.codex-plugin':'commands'),{recursive:true});await mkdir(join(source,'commands'),{recursive:true});
     await writeFile(join(source,manifest),JSON.stringify({name:`portable-${index}`,skills:'./skills/'}));
-    await writeFile(join(source,'commands/review.md'),'---\nargument-hint: file\n---\nReview $ARGUMENTS. Do not execute !`echo unexpanded` on import.');
+    await writeFile(join(source,'commands/review.md'),'---\nname: review\n---\nReview the current evidence.');
     const result=await market.import({path:source});assert.equal(result.plugins[0].components.skills,2);assert.equal(result.plugins[0].components.commands,1);
     const selected=await market.resolve({pluginIds:[result.plugins[0].id],mcpIds:[]},'codex');assert.equal(selected.skillPaths.length,2);
     assert.match(await readFile(selected.skillPaths.at(-1),'utf8'),/不提供斜杠参数展开/);
     await assert.rejects(stat(join(source,'.agentforge')),{code:'ENOENT'});
+    await writeFile(join(source,'commands/review.md'),'---\nargument-hint: file\n---\nReview $ARGUMENTS. !`echo unexpanded`');
+    const dynamic=await market.import({path:source});
+    for(const provider of ['codex','dsh']) await assert.rejects(market.resolve({pluginIds:[dynamic.plugins[0].id],mcpIds:[]},provider),/参数\/预处理/);
+    assert.equal((await market.resolve({pluginIds:[dynamic.plugins[0].id],mcpIds:[]},'claude-code')).extensionManifest.length,1);
   }
 });
 test('Codex projections execute each integrity-checked selected Hook, including repeated events, without command arguments',async t=>{
@@ -325,7 +329,7 @@ test('Codex projections execute each integrity-checked selected Hook, including 
   const executable=join(root,'codex.mjs');await writeFile(executable,'#!/usr/bin/env node\nconsole.log(process.argv.includes("features")?"skip_host_skill_discovery stable false":"[]");');await chmod(executable,0o755);
   const args=await codexMarketArgs({...runtime,executable},{},root,join(root,'trace'));
   assert.ok(args.includes('--dangerously-bypass-hook-trust'));assert.ok(!args.join(' ').includes('printf'));
-  assert.ok(args.some(value=>value.startsWith('agents.af_')));
+  assert.ok(args.some(value=>value.startsWith('agents.af_') && value.includes('[native:review]'))); // valid native alias retains source identity
   const groups=JSON.parse(args.find(value=>value.startsWith('hooks.SessionStart=')).slice('hooks.SessionStart='.length).replace(/"([^"\\]+)"=/g,'"$1":'));
   assert.equal(groups.length,2);
   for(const group of groups)await promisify(execFile)('/bin/sh',['-c',group.hooks[0].command]);
@@ -349,7 +353,7 @@ test('default Hook file remains visible alongside custom Hook declarations',asyn
   await writeFile(join(source,'custom-hooks.json'),JSON.stringify({hooks:{Stop:[]}}));
   const {plugins:[entry]}=await market.import({path:source});
   assert.deepEqual((await market.detail(entry.id,'plugin')).components.hooks.map(item=>item.event),['SessionStart','Stop']);
-  assert.deepEqual(entry.providers,['claude-code','codex']);
+  assert.deepEqual(entry.providers,['claude-code','codex','dsh']);
 });
 test('bundled MCP splits into independent selection; invalid paths and symlinks never partially install',async t=>{
   const {root,market}=await fixture(t),source=await plugin(root,'invalid',1,{mcpServers:{service:{command:'node'}}});

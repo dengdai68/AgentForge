@@ -1,0 +1,29 @@
+# ADR：以源插件标准为基准的 Runtime 兼容层
+
+## 决策
+
+Claude Code/Codex 是导入方言；其他 Runtime 负责适配源插件，用户只导入一次，不手工选择被省略的组件。保留原始安装源，按 Runtime 生成执行计划；已有安装内容可只读重新分析，不更改历史冻结引用、原生会话或操作者配置。不通过伪造 providers 声明或将独立子代理改成 Skill 来实现兼容。
+
+marketplace 拥有来源和完整性检查；plugin-compatibility 解析源组件、声明与目标计划；Runtime 在自己的调用目录物化原生配置。Store 只保存领域引用及冻结计划，不读取 Provider 配置或判断业务交付。CLI/HTTP/renderer 共用同一兼容结果，静态兼容不等于安装、授权或实际执行成功。
+
+## 依赖与复用
+
+- 直接声明现有锁文件中的 js-yaml 4.3.2，以安全 JSON schema 解析 Markdown frontmatter；不执行标签、脚本或表达式。原始正文不经过模型改写。
+- 复用 MIT 许可的 DeepSeek Harness 0.2.1-rc.2 官方 hooks-claude-code、hooks-codex、hook-protocol 的发布 JS。随应用保存原代码和许可，执行时在 Trace 私有目录物化，解析到当前实际 dsh 入口的原生 peer packages；不安装全局插件、不读取全局 Hook 配置、不从网络运行代码。
+- 官方桥接仅支持声明的事件/command 类型；在计划阶段明确拒绝不能等价执行的组件和字段，不能依赖上游“警告后跳过”的默认行为。版本不匹配明确失败，不强行加载旧桥。
+- 子代理使用 Harness 原生 spawn 服务、独立 Session 和独立作用域系统段，等待真实结果和清理，转交取消信号；不以同一模型对话中的文字角色扮演代替。
+- 多目标解析/计划结构参考 EveryInc/compound-engineering-plugin 的 Converter/Writer 模式；不直接运行其全局安装器。dsh-movein 的子代理转 Skill 策略不采用。
+
+## 兼容与冻结
+
+新增 Runtime 应通过源插件兼容验收后开放相应能力。已有当前协议安装的兼容列表是派生读模型，不以历史 providers 数组判定新适配器能力。新绑定冻结源文件摘要和计划；执行前核对源目录及计划，既有 Task/Run 使用自己的旧快照，不自动换插件或计划。新导入另外保留原始源副本，原生加载所需的 MCP 隔离及 Command 投影继续与源副本分离。
+
+Codex 子代理通过原生 SubagentStart/PreToolUse Hook 将工具选择绑定到精确 child session，父员工及其他子代理不受影响。Codex 的读取/搜索需 shell 映射；源未启用 Bash 时明确拒绝这类当前无法等价实现的工具组合。动态 Command 参数/预处理和跨 Provider 的指定模型不静默忽略。原生 `-c` 配置键不能带引号（否则成为名称本身）；源名称保留在描述，原生名称使用隔离且有效的小写唯一别名。原生 Hook 的子代理调用保留 root session_id，须优先用 agent_id 绑定子代理，不能误用根会话身份。
+
+MCP 使用统一解析与完整性启动器映射 command/args/env/cwd/传输，不按导入来源限制 Runtime。插件内的 MCP 仍独立选择，防止选择插件就自动启用未选择的服务。前端不提供手工降级组件的转换选项。
+
+## 验证
+
+覆盖 Claude/Codex 两类源、纯 Skill/MCP、独立子代理、Hook 实际执行/拒绝、未知组件失败、源完整性、历史冻结及 UI/CLI 一致性。真实模型完整任务验证到可见人类确认；使用隔离 HOME 和数据，不改造真实实例。控制台普通 Markdown 仅由时间线纵向滚动，列表保留编号空间；代码与宽表格保留横向滚动。
+
+跨 Runtime 门禁由 `scripts/test-plugin-runtimes-real.mjs` 给出两种源 × 三种 Provider 的逐项证据，包含 Skill/子代理/Hook 与三种 MCP 传输真实调用。卡片不展示支持标签；详情与选择器仍保留静态能力、失败原因。兼容机制验证与业务插件完整流程验收分别记录，不能互相替代。

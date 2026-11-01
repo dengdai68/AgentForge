@@ -93,3 +93,15 @@ test-marketplace-edit.mjs 同时验收角色宽窄空态与 MCP 一致、重复�
 `test-collaboration-flow.mjs` 另验证控制台 SSE 追加与工作区摘要刷新保留日志 DOM、正文选择和阅读位置；其事件是隔离呈现夹具，不代替真实 Provider 长任务验证。
 
 test-application-updates.mjs 用隔离 HOME/数据启动真实 Electron（AGENTFORGE_UPDATES_APP 可指定安装包），通过注入控制器适配器覆盖正式版/Beta/无正式版/离线、下载进度与真实文件校验、后台发现更新及下载完成均不创建通知卡、返回更新区域仍可操作、原生安装繁忙/空闲和两主题宽窄布局。假DMG不执行、原生安装适配器不退出测试客户端，不冒充真实签名升级。
+
+test-dsh-real.mjs（AGENTFORGE_DSH_REAL=1）使用隔离 Electron、真实 DeepSeek Harness/模型，核验 Runtime/CLI、原生 Skill/MCP/平台历史、角色冻结和完整任务到可见人类确认；仅为测试实例创建数据，不碰操作者实例。DeepSeek Harness 命令可由 AGENTFORGE_DSH_COMMAND 指定，模型可由 AGENTFORGE_DSH_MODEL 指定；原 DSH_HOME 仅交给原生凭据服务读取。
+
+`AGENTFORGE_SETTINGS_MISSING=1 node scripts/test-runtime-settings.mjs` 使用隔离 HOME/PATH 验证未安装 Runtime 的关闭/锁定、API/CLI 拒绝、可执行文件安装/移除后的重新读取及两主题宽窄布局。可结合 AGENTFORGE_SETTINGS_APP 指向安装候选，不调用模型。
+
+test-collaboration-flow 核对精简后的协作顶部/答复正文，以及两主题宽窄控制台提示词和会话 ID 的真实左边缘；test-dsh-real 另以真实模型验证完成后 UI 未 @ 与 CLI 未指定接收人的经理答疑及不重开业务流程。
+
+`test-dsh-real.mjs` 增加源插件真实独立 reviewer 与 command Hook；`AGENTFORGE_DSH_SOURCE_DIALECT=claude-code|codex` 选择源方言，仍须 `AGENTFORGE_DSH_REAL=1`。调用真实模型、隔离数据，完整任务直到可见人类确认/归档，不以夹具代替。
+
+`test-console-layout.mjs` 使用隔离暂停任务，实际检查两个主题与 1320/760px 的长 Markdown、编号缩进、单一纵向滚动；可用 AGENTFORGE_CONSOLE_LAYOUT_APP 指定待验收安装包。
+
+`AGENTFORGE_PLUGIN_RUNTIMES_REAL=1 node scripts/test-plugin-runtimes-real.mjs`：两种源格式 × Claude Code/Codex/DeepSeek Harness，六个真实模型组合。每项实际读取 Skill、调用独立子代理和 command Hook、调用 stdio/HTTP/SSE 三种 MCP，核对随机输出与本地工具证据。所有素材与模型工作目录隔离；不等于逐一完成已安装业务插件的生成/翻译/配音业务流程。失败逐项保留，不将静态支持标签当验收。

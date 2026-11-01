@@ -88,3 +88,7 @@ CLI 员工 systemPrompt、任务消息与精确澄清命令继续生效，不新
 不再自动向每个员工广播最近 24 条 Artifact 的 ID/版本/哈希；相关交付路径由原始交接消息提供，完整不可变产物目录与证据仍可经历史工具按需查询。目标、职责、验收标准、待答问题、开放缺陷及 Decision 变化仍按会话确认摘要增量送达。只精简新的应用调用，旧快照、游标和领域记录不改写。CLI 消息、配置和查询协议不变。
 
 经理每轮必须给出 managerDecision 或 consultation。只有文字“等待验收”不会改变领域状态；缺少协调决定时复用协调纠错投递请经理补齐，经理明确的 null/null 决定才提交验收。经理作用限于协调与依据成员报告汇总，不重复专业核验或修改员工交付。经理全流程调用的当前投递不带约定性首节点 ID，避免误称其仍在最初阶段。
+
+DeepSeek Harness 调用把同一份应用/角色系统文本保存于 Trace 私有指令文件，由原生 Cordis bridge 注册 systemPrompt.section（interpolate=false），不会塞进 session/prompt 用户消息。输出 schema 以独立系统段说明；SDK 无原生 response_format，返回值须由现有入口解析校验，非法 JSON 不猜测修补。每次调用重载最新/冻结上下文，原生会话仍保留历史；不声称抹除了既有指令影响。
+
+DeepSeek Harness 根据原生 system/message 中的完整应用指令匹配保存布尔验证事实，不倾倒系统正文；该事实证明传入，不保证模型逐条遵循。

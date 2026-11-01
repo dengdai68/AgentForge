@@ -57,3 +57,5 @@ npm run package:mac:check
 数字员工以当前系统用户权限执行本机操作。当前是本机单管理员 Beta，Runtime bypass 不等于沙箱；运行中的任务依赖本机服务，不具备云端高可用或多租户能力。
 
 应用更新：安装支持更新功能的客户端后，启动及运行期间自动检查正式版，更新信息及按钮仅在“设置 → 更新 → 应用更新”区域显示，不弹通知卡，Beta/预发布不参与。也可在“设置 → 更新 → 应用更新”手动检查、查看 Release 并下载。Developer ID 签名版本支持任务结束后重启安装；当前临时签名版本下载 DMG 后手动安装。首次从旧客户端升级到支持更新的版本仍需手动安装。详见 [应用更新](docs/24-desktop-updates.md)。
+
+DeepSeek Harness为第三个固定 Runtime，使用本机 `dsh sdk`，当前实测 0.2.1-rc.2。先在 DeepSeek Harness 配置 DeepSeek API Key/账号授权，再在设置 Runtime 选择模型/思考等级。应用不安装或替代 DeepSeek Harness。接入边界见 [DeepSeek Harness Runtime](docs/25-dsh-runtime.md)。

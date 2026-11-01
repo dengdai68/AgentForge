@@ -26,7 +26,7 @@ Codex 平台历史 MCP 使用 Bridge 提供的完整子进程环境；打包版�
 
 扩展以完整插件版本和独立 MCP 版本冻结；员工仅选择 pluginIds/mcpIds。来源中全部 Claude/Codex 插件整批发布，自带 MCP 独立安装另选。Claude 显式插件目录加载；Codex 用原生 Subagent 配置及共同命令型 Hook 投影，专有事件明确不兼容。Skill 显式提供，Markdown Command 派生为可复用 Skill 说明，不执行斜杠预处理；MCP 支持 stdio/SSE/Streamable HTTP，远程桥接复用现有官方 SDK，不把鉴权或 Hook 原命令放进 Provider 参数、不写全局配置。不是沙箱，Provider 生命周期差异仍存在。完整契约见 [配置](15-employee-runtime-configuration.md)。
 
-Claude/Codex 市场中的本地与 HTTPS Git 条目整批解析，按 ref/sha 检出并保留来源；npm/archive/command 尚不支持。两套 Runtime 清单和组件分别解析，Codex 显式空 Hook 不继承 Claude 默认 Hook；目录提供静态兼容性及具体原因，员工不能保存不兼容选择。Codex stdio MCP 的 cwd/env_vars 保留且只标记 Codex 支持。配置根的正常祖先别名先归一实际路径，根/受管目录本身仍拒绝链接。
+Claude/Codex 市场中的本地与 HTTPS Git 条目整批解析，按 ref/sha 检出并保留来源；npm/archive/command 尚不支持。两套 Runtime 清单和组件分别解析，Codex 显式空 Hook 不继承 Claude 默认 Hook；目录提供静态兼容性及具体原因，员工不能保存不兼容选择。stdio MCP 的 cwd/env_vars 经共用私有启动器在三种 Runtime 保留。配置根的正常祖先别名先归一实际路径，根/受管目录本身仍拒绝链接。
 
 - 使用已安装并登录的本机 CLI，真实执行命令。
 - 员工从 Run 工作根或绑定仓库启动；以本机用户权限运行，目录不是沙箱。
@@ -61,3 +61,9 @@ Provider 最终错误保留原始措辞、退出码、路径和可用 stderr，�
 ### Claude 后台等待与平台空闲计时
 
 Claude Code print/stream-json 可以在 result 之后等待后台命令、子代理、Monitor 或计划唤醒，再执行后续轮次。平台按原生后台任务生命周期区分等待与活动执行：有已知后台工作或成功轮次等待时，停止无进展计时；后续执行重新启用。仅活动轮次既无后台工作也无可审计进展时才报空闲超时。不能把首个 result 当最终交付，也不能因十分钟后台安静就取消 TTS。等待由原生 CLI 的后台生命周期和等待上限管理；保留人类暂停/终止、API 重试计时、非零退出与结构化失败。参见 [Claude 官方说明](https://code.claude.com/docs/en/headless#background-tasks-at-exit)。
+
+DeepSeek Harness 接入使用本机 dsh sdk（实测 0.2.1-rc.2），系统/角色提示词通过原生 systemPrompt.section 注入，字面模板不插值；用户消息只承载当前输入。通过 session/prompt 入队并以 session/wait 等待原生托管后续执行，检查完成原因和进程退出，不在第一条 turn/end 提前结算。取消终止调用进程组；会话缺失、非 JSON、token 上限和 SDK 不兼容均如实失败。仅助手公开正文/思考及工具事件进入脱敏内容，system/user/request header 不倾倒。详见 docs/25。
+
+Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+
+跨 Runtime 扩展按 docs/26 的源标准计划执行。私有 Trace 物化 DeepSeek 原生子代理/官方 Hook 桥，peer 解析锚定实际 dsh CLI，版本不匹配拒绝含这些组件的调用。纯 Skill 不依赖 Hook 桥版本。原始安装源与历史冻结引用不重写。

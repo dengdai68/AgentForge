@@ -1,5 +1,22 @@
 import { dirname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
+import { accessSync, statSync, constants } from 'node:fs';
+import { delimiter, resolve } from 'node:path';
+
+// Presence only: use the same executable search environment as actual calls.
+// Never start a CLI, load credentials or equate installation with login/health.
+export function runtimeInstalled(provider, options = {}) {
+  const command = { 'claude-code': 'claude', codex: 'codex', dsh: 'dsh' }[provider];
+  if (!command) return false;
+  const environment = cliEnvironment(command, {}, options);
+  return (environment.PATH || '').split(delimiter).filter(Boolean).some(directory => {
+    try {
+      const path = resolve(directory, command);
+      accessSync(path, constants.X_OK);
+      return statSync(path).isFile();
+    } catch { return false; }
+  });
+}
 
 // GUI apps do not inherit interactive shell profiles. Preserve the operator's
 // existing precedence; only append documented, deterministic fallback paths.

@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-02
+
+- 新增固定 DeepSeek Harness Runtime，接入原生模型/思考等级、角色指令、沟通与任务、会话续接、Skill/MCP 及平台历史；设置、员工入口、HTTP 与 CLI 同步。
+- Runtime 未安装或客户端找不到可执行文件时，开关关闭且锁定，拒绝启用及新调用；完整展示名称统一为 DeepSeek Harness。
+- Claude Code/Codex 插件导入保留源副本，按源标准适配三个 Runtime 的 Skill、独立子代理、command Hook 与 stdio/HTTP/SSE MCP；新绑定冻结执行计划，历史 Task/Run 不更换配置，不支持的专有语义明确拒绝。
+- 插件/MCP 卡片移除 Runtime 标签，详情和员工选择器保留兼容信息；两种来源 × 三种 Runtime 的真实加载/调用验证通过。
+- 协作移除记录总数、强制 @ 提示与重复的“回复的问题”；未指定接收人的新消息默认交给当前 Run 经理，CLI 同步。
+- 控制台会话 ID 与提示词内容对齐，Markdown 使用时间线滚动并保留列表编号。
+- 更新 Tab 不重复展示标题，GitHub 链接并入当前版本旁。
+- 本次发行与 v0.1.1 一样采用 ad-hoc 签名，未进行 Developer ID 签名或 Apple 公证；支持检测、下载及校验后手动安装。
+
 ## [0.1.1] - 2026-11-01
 
 - 首个正式发布版本；更新入口统一为“更新”Tab，下设应用更新与插件更新；移除发布说明按钮，直接展示 GitHub 地址。

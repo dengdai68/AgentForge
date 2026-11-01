@@ -62,7 +62,13 @@ function extensionBinding(value) {
     if(new Set(ids).size!==ids.length || manifest.length!==ids.length || ids.some(id=>typeof id!=='string' || !/^[0-9a-f-]{36}$/.test(id))) throw new Error('插件/MCP 版本无效');
     if(manifest.some(ref=>!['plugin','mcp'].includes(ref.kind) || !selection[ref.kind==='plugin'?'pluginIds':'mcpIds'].includes(ref.id) || typeof ref.name!=='string' || !isAbsolute(ref.path || '') || !/^[a-f0-9]{64}$/.test(ref.sha256 || '') || (ref.kind==='plugin' && (!/^[a-f0-9]{64}$/.test(ref.treeSha256 || '') || !Array.isArray(ref.skills) || ref.skills.some(path=>typeof path!=='string' || isAbsolute(path) || path.split('/').includes('..'))))) || new Set(manifest.map(ref=>ref.id)).size!==ids.length) throw new Error('插件/MCP 引用无效');
     const plugins=manifest.filter(ref=>ref.kind==='plugin');
-    if(value.pluginSources?.length || JSON.stringify(value.skillPaths || [])!==JSON.stringify(plugins.flatMap(ref=>ref.skills.map(path=>resolve(dirname(dirname(ref.path)),path)))) || JSON.stringify(value.pluginPaths || [])!==JSON.stringify(value.provider==='codex'?[]:plugins.map(ref=>dirname(dirname(ref.path)))) || JSON.stringify(value.mcpConfigPaths || [])!==JSON.stringify(manifest.filter(ref=>ref.kind==='mcp').map(ref=>ref.path))) throw new Error('市场模式只能使用所选插件/MCP');
+    for(const ref of manifest) {
+      if(ref.adapterVersion!==undefined && ![1,2].includes(ref.adapterVersion)) throw new Error('插件执行计划版本无效');
+      if(ref.adapterVersion===2 && (ref.kind!=='plugin' || ref.planTarget!==(value.provider || 'claude-code') || !['claude-code','codex'].includes(ref.sourceDialect) || !/^[a-f0-9]{64}$/.test(ref.planSha256 || ''))) throw new Error('插件冻结执行计划无效');
+      if((ref.sourceRoot!==undefined || ref.sourceSha256!==undefined) && (ref.kind!=='plugin' || !isAbsolute(ref.sourceRoot || '') || !/^[a-f0-9]{64}$/.test(ref.sourceSha256 || ''))) throw new Error('插件原始源引用无效');
+      if(ref.mcpAdapterVersion!==undefined && (ref.kind!=='mcp' || ref.mcpAdapterVersion!==2)) throw new Error('MCP 执行适配版本无效');
+    }
+    if(value.pluginSources?.length || JSON.stringify(value.skillPaths || [])!==JSON.stringify(plugins.flatMap(ref=>ref.skills.map(path=>resolve(dirname(dirname(ref.path)),path)))) || JSON.stringify(value.pluginPaths || [])!==JSON.stringify((value.provider || 'claude-code')==='claude-code'?plugins.map(ref=>dirname(dirname(ref.path))):[]) || JSON.stringify(value.mcpConfigPaths || [])!==JSON.stringify(manifest.filter(ref=>ref.kind==='mcp').map(ref=>ref.path))) throw new Error('市场模式只能使用所选插件/MCP');
     return {extensionSelection:clone(selection),extensionManifest:clone(manifest)};
   }
   if (!selection || !Array.isArray(selection.skillIds) || !Array.isArray(selection.mcpIds) || !Array.isArray(manifest)) throw new Error("市场扩展绑定无效");
@@ -75,7 +81,7 @@ function extensionBinding(value) {
   if(manifest.some(ref=>(ref.resourceRoot !== undefined || ref.resourceSha256 !== undefined) && (ref.kind !== 'mcp' || !isAbsolute(ref.resourceRoot || '') || !/^[a-f0-9]{64}$/.test(ref.resourceSha256 || '')))) throw new Error('插件资源摘要无效');
   return { extensionSelection: { skillIds: [...selection.skillIds], mcpIds: [...selection.mcpIds], ...(selection.pluginIds === undefined ? {} : {pluginIds:[...selection.pluginIds]}) }, extensionManifest: manifest.map(({id,kind,name,path,sha256,treeSha256,resourceRoot,resourceSha256}) => ({id,kind,name,path,sha256,...(treeSha256 ? {treeSha256} : {}),...(resourceRoot ? {resourceRoot,resourceSha256} : {})})) };
 }
-const runtime = (value = {}) => { const provider = value.provider || "claude-code"; if (!["claude-code", "codex"].includes(provider)) throw new Error("运行时必须选择 Claude Code 或 Codex"); return { ...(value.profileId ? { profileId: String(value.profileId) } : {}), ...extensionBinding(value), pluginSources: pluginSources(value.pluginSources), provider, executable: value.executable?.trim() || null, model: value.model?.trim() || "", effort: effortLevel(provider, value.effort), profile: value.profile?.trim() || "", skillPaths: Array.isArray(value.skillPaths) ? value.skillPaths.map((path) => resolve(path)) : [], pluginPaths: Array.isArray(value.pluginPaths) ? value.pluginPaths.map((path) => resolve(path)) : [], mcpConfigPaths: Array.isArray(value.mcpConfigPaths) ? value.mcpConfigPaths.map((path) => resolve(path)) : [] } };
+const runtime = (value = {}) => { const provider = value.provider || "claude-code"; if (!["claude-code", "codex", "dsh"].includes(provider)) throw new Error("运行时必须选择 Claude Code、Codex 或 DeepSeek Harness"); return { ...(value.profileId ? { profileId: String(value.profileId) } : {}), ...extensionBinding(value), pluginSources: pluginSources(value.pluginSources), provider, executable: value.executable?.trim() || null, model: value.model?.trim() || "", effort: effortLevel(provider, value.effort), profile: value.profile?.trim() || "", skillPaths: Array.isArray(value.skillPaths) ? value.skillPaths.map((path) => resolve(path)) : [], pluginPaths: Array.isArray(value.pluginPaths) ? value.pluginPaths.map((path) => resolve(path)) : [], mcpConfigPaths: Array.isArray(value.mcpConfigPaths) ? value.mcpConfigPaths.map((path) => resolve(path)) : [] } };
 function documentPaths(value = []) {
   if(!Array.isArray(value))throw new Error('节点交付位置必须是相对路径数组');
   return [...new Set(value.map(item=>{
@@ -185,7 +191,7 @@ function employeeRepositories(members) {
 // codex debug models supported_reasoning_levels, codex-cli 0.160.0). Codex does
 // not locally reject unknown effort values, so the platform must reject values
 // outside the known vocabulary instead of inventing per-model tables here.
-const EFFORT_LEVELS = { "claude-code": ["low", "medium", "high", "xhigh", "max"], codex: ["low", "medium", "high", "xhigh", "max", "ultra"] };
+const EFFORT_LEVELS = { "claude-code": ["low", "medium", "high", "xhigh", "max"], codex: ["low", "medium", "high", "xhigh", "max", "ultra"], dsh: ["off", "low", "high", "max"] };
 function effortLevel(provider, value) {
   const item = value ?? "";
   if (typeof item !== "string" || item.length > 64 || /[\0\r\n]/.test(item)) throw new Error("Runtime 配置必须为单行文本");
@@ -195,7 +201,7 @@ function effortLevel(provider, value) {
 }
 function runtimeConnection(value = {}) {
   const provider = value.provider || "claude-code";
-  if (!["claude-code", "codex"].includes(provider)) throw new Error("运行时必须选择 Claude Code 或 Codex");
+  if (!["claude-code", "codex", "dsh"].includes(provider)) throw new Error("运行时必须选择 Claude Code、Codex 或 DeepSeek Harness");
   const result = { provider };
   for (const key of ["model", "executable", "profile"]) {
     const item = value[key] ?? "";
@@ -206,7 +212,7 @@ function runtimeConnection(value = {}) {
   return result;
 }
 
-export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || ":memory:", workspaceRoot = null, onSaveDiagnostic } = {}) {
+export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || ":memory:", workspaceRoot = null, onSaveDiagnostic, runtimeInstalled = () => true } = {}) {
   if (workspaceRoot !== null && (!isAbsolute(workspaceRoot) || resolve(workspaceRoot) === "/")) throw new Error("系统工作根目录必须是非根绝对目录");
   const persistence = createSqlitePersistence(databasePath, { onSaveDiagnostic }), loaded = persistence.load(); const state = migrate(loaded) || { agents: clone(agents), teams: [], tasks: [], workflowTemplates: [workflow(exampleWorkflow, { templateId: exampleWorkflow.id, current: true })], runs: [], traces: [], artifacts: [], messages: [], decisions: [], defects: [], roles: [], events: [{ id: "evt_welcome", type: "workspace.ready", runId: null, timestamp: now(), actor: { type: "system", name: "AgentForge" }, message: "工作区已就绪。", data: {} }] };
   state.roles ||= [];
@@ -228,13 +234,14 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     if (!item) { item = { id: `runtime_${connection.provider}`, provider: connection.provider, model: "", effort: "", enabled: true }; profiles().push(item); }
     return item;
   };
-  for (const provider of ["claude-code", "codex"]) {
+  for (const provider of ["claude-code", "codex", "dsh"]) {
     if (profiles().filter(item => item.provider === provider).length > 1) throw new Error(`Runtime ${provider} 存在多项旧配置，请先合并为每种 Provider 一项；不会自动迁移或重置数据`);
     ensureProfile({ provider });
   }
   const assertRuntimeEnabled = (value) => {
+    if (!runtimeInstalled(value?.provider)) throw new Error("Runtime 未安装或当前客户端找不到可执行文件，无法启用或执行");
     const item = profiles().find(item => item.provider === value?.provider);
-    if (!item || item.enabled === false) throw new Error(`${value?.provider === "codex" ? "Codex" : "Claude Code"} Runtime 已停用，请在设置中启用后重试`);
+    if (!item || item.enabled === false) throw new Error(`${({codex:"Codex", "claude-code":"Claude Code", dsh:"DeepSeek Harness"})[value?.provider] || value?.provider} Runtime 已停用，请在设置中启用后重试`);
   };
   const resolveAgentRuntime = (value = {}) => {
     if (!value.profileId) return runtime(value);
@@ -354,14 +361,15 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return result;
     },
     getWorkspaceSettings() { return { workspaceRoot: state.settings?.workspaceRoot || workspaceRoot, source: state.settings?.workspaceRoot ? "saved" : "startup" }; },
-    listRuntimeProfiles() { return clone(profiles().map(item => ({ id: item.id, provider: item.provider, enabled: item.enabled !== false, model: item.model || "", effort: item.effort || "", employeeCount: state.agents.filter(agent => agent.runtime.profileId === item.id).length }))); },
+    listRuntimeProfiles() { return clone(profiles().map(item => { const installed = runtimeInstalled(item.provider); return { id: item.id, provider: item.provider, installed, enabled: installed && item.enabled !== false, model: item.model || "", effort: item.effort || "", employeeCount: state.agents.filter(agent => agent.runtime.profileId === item.id).length }; })); },
     resolveAgentRuntime(value) { return clone(resolveAgentRuntime(value)); },
     assertRuntimeEnabled(value) { assertRuntimeEnabled(value); },
     saveRuntimeProfile(input, profileId) {
       if (!input || typeof input !== "object" || Array.isArray(input) || !Object.keys(input).length || Object.keys(input).some(key => !["model", "effort", "enabled"].includes(key))) throw new Error("Runtime 仅接受 model、effort、enabled 的非空部分更新；不再支持具名连接");
       const previous = profiles().find(item => item.id === profileId);
-      if (!previous) throw new Error("Runtime 配置不存在；仅可更新固定的 Claude Code/Codex");
+      if (!previous) throw new Error("Runtime 配置不存在；仅可更新固定的 Claude Code/Codex/DeepSeek Harness");
       if (Object.hasOwn(input, "enabled") && typeof input.enabled !== "boolean") throw new Error("Runtime enabled 必须为布尔值");
+      if (Object.hasOwn(input, "enabled") && !runtimeInstalled(previous.provider)) throw new Error("Runtime 未安装或当前客户端找不到可执行文件，不能改变可用开关");
       for (const key of ["model", "effort"]) if (Object.hasOwn(input, key) && typeof input[key] !== "string") throw new Error(`Runtime ${key} 必须为单行文本`);
       const connection = runtimeConnection({ provider: previous.provider, model: input.model ?? previous.model, effort: input.effort ?? previous.effort });
       return this.transaction(() => {
@@ -391,21 +399,21 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (delivery.status !== "claimed" || trace?.dispatchId !== dispatchId || trace.status !== "running" || !isAbsolute(cwd)) throw new Error("会话必须绑定已领取的成员执行");
       current.memberSessions ||= {};
       let session = current.memberSessions[delivery.recipientAgentId];
-      const isCodex = runAgent(current, trace.agentId).runtime.provider === "codex";
-      const resume = Boolean(session?.sessionId && (!isCodex || session.nativeConfirmed));
+      const needsNativeConfirmation = ["codex", "dsh"].includes(runAgent(current, trace.agentId).runtime.provider);
+      const resume = Boolean(session?.sessionId && (!needsNativeConfirmation || session.nativeConfirmed));
       if (session && session.cwd !== cwd) throw new Error("同一成员会话的工作目录不能改变");
       if (!session?.sessionId) {
         session = { ...session, sessionId: randomUUID(), cwd, createdAt: now(), lastTraceId: traceId };
         current.memberSessions[delivery.recipientAgentId] = session;
       }
       session.lastTraceId = traceId;
-      trace.providerSessionId = isCodex && !session.nativeConfirmed ? null : session.sessionId; trace.sessionMode = resume ? "resume" : "new";
+      trace.providerSessionId = needsNativeConfirmation && !session.nativeConfirmed ? null : session.sessionId; trace.sessionMode = resume ? "resume" : "new";
       addEvent({ type: resume ? "session.resumed" : "session.created", runId: current.id, actor: { type: "agent", id: trace.agentId, name: runAgent(current, trace.agentId).name }, message: resume ? "续接该成员的既有会话。" : "为该成员建立独立会话。", data: { traceId, dispatchId, sessionId: session.sessionId } });
       save(); return { ...clone(session), resume };
     },
     bindProviderSession(traceId, providerSessionId) {
       const trace = getTrace(traceId), current = getRun(trace?.runId), session = current?.memberSessions?.[trace?.agentId];
-      if (!session || session.lastTraceId !== traceId || trace.status !== "running" || runAgent(current, trace.agentId).runtime.provider !== "codex" || !/^[a-zA-Z0-9-]{16,80}$/.test(providerSessionId)) throw new Error("Provider 会话绑定无效");
+      if (!session || session.lastTraceId !== traceId || trace.status !== "running" || !["codex", "dsh"].includes(runAgent(current, trace.agentId).runtime.provider) || !/^[a-zA-Z0-9-]{16,80}$/.test(providerSessionId)) throw new Error("Provider 会话绑定无效");
       if (session.nativeConfirmed && session.sessionId !== providerSessionId) throw new Error("Provider 会话与成员绑定不一致");
       session.sessionId = providerSessionId; session.nativeConfirmed = true; trace.providerSessionId = providerSessionId;
       save();
@@ -604,8 +612,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
           addEvent({ type: "run.acceptance_reopened", runId, actor: humanMember, message: "人类追加消息，重新进入团队协作并等待新的验收结论。", data: {} });
         }
         if (input.replyToMessageId) return { message: this.answerQuestion(runId, input.replyToMessageId, input.content, { type: "human", id: humanMember.id, name: humanMember.name }), resumed: current.status !== "paused", queued: true };
-        const recipientId = input.recipientAgentId;
-        if (!recipientId) throw new Error("新消息必须明确指定一位当前 Run 成员；请使用 @ 选择接收人");
+        const recipientId = input.recipientAgentId ?? current.manager.id;
         const recipient = runAgent(current, recipientId);
         if (!recipient) throw new Error("消息接收者不属于当前 Run");
         const message = this.addMessage({ runId, recipientAgentId: recipientId, content: input.content, kind: interactionOnly ? "inquiry" : "instruction" });

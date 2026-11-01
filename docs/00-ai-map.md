@@ -114,3 +114,15 @@ Runtime 设置入口：固定两项与 Store enabled 门禁见 docs/15，宿主�
 - 应用图标按用途派生：build-app-icon.cjs 保留用户原始 PNG，生成干净 UI 图、824/1024 比例 Dock 图及同尺度 ICNS、18pt/2x 菜单栏模板；主进程启用原生模板适配明暗，不将彩色底板作为模板。资源与复现见 web/icons/README.md，无 CLI/API/任务协议影响。
 
 应用更新：apps/electron/updates.mjs 拥有正式版发现/下载状态，主进程封闭 IPC 与原生 MacUpdater；更新状态和按钮仅在设置/updates 区域展示，复用 renderer 样式，不创建通知卡。server/index.mjs 仅通过父子私有 IPC 原子预留空闲重启，锁期间拒绝新写入并暂停调度。发布/签名边界见 docs/24-desktop-updates.md；不改变 CLI 配置命令或任务决定。
+
+更新页的两个配置区直接使用设置 h3 标题，不重复 Tab 名称；settings.mjs 将动态版本 span 与 GitHub 文字链接并列，状态刷新不覆盖链接。styles.css 复用设置间距并支持换行，test-application-updates 覆盖标题层级与版本旁链接。无版本号、CLI/API 或更新机制变化。
+
+DeepSeek Harness：dsh.mjs 驱动独立 SDK，dsh-plugin.mjs 在原生 Runtime 注入字面系统段和模型目录；local-cli 负责统一诊断/错误类型。Store 提供固定 dsh 槽位、effort 和原生身份确认，Orchestrator/communication/probe 路由同一实现。marketplace 声明原生 Skill/MCP 的 DeepSeek Harness 兼容性并拒绝专有 Hook/Subagent，UI/CLI 同步；dsh.test 与 test-dsh-real 分别验证协议和真实任务。决策见 docs/25。
+
+Runtime 安装状态：cli-environment.runtimeInstalled 按实际执行 PATH 只读检查，index 注入 Store；Store 的 installed/有效 enabled 同步 UI 和 CLI，缺失时开关关闭锁定，拒绝 enabled 修改及新调用。完整展示名称 DeepSeek Harness 不改变 dsh 标识。
+
+协作简化：app.js 不展示总条数、强制 @ 说明和回复问题副本；Store 的 submitHumanMessage 对未指定接收者路由给冻结 Run 经理，CLI message schema/help/example 同步可选接收方。精确澄清与归档/终态规则不变；styles.css 将提示词会话 ID 与内容框左边缘对齐。
+
+跨 Runtime 插件源标准与冻结执行计划见 [docs/26](26-runtime-plugin-compatibility.md)；入口 `server/runtime/plugin-compatibility.mjs`，DeepSeek 原生组件物化 `dsh-extensions.mjs`。已有安装兼容性由当前适配器派生，不能依赖历史 providers。
+
+市场卡片在 web/marketplace.mjs 只保留版本/ID 与详情；Runtime 兼容信息保留在详情和员工选择器。三 Runtime、两源格式与三种 MCP 传输的真实兼容验证入口为 scripts/test-plugin-runtimes-real.mjs。

@@ -1,3 +1,4 @@
+import { dshModelCatalog } from "./dsh.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
@@ -164,9 +165,10 @@ async function codexCatalog(executable, { run }) {
 // Read-only catalog for the Runtime settings surfaces. Profile field changes do
 // not reach frozen Task/Run snapshots; this query never mutates CLI state.
 export async function runtimeModelCatalog({ provider, executable = null }, { environment = process.env, homeDirectory = homedir(), run = exec } = {}) {
+  if (provider === "dsh") return dshModelCatalog();
   if (provider === "claude-code") return claudeCatalog({ environment, homeDirectory });
   if (provider === "codex") return codexCatalog(executable, { run });
-  throw new Error("provider 必须是 claude-code 或 codex");
+  throw new Error("provider 必须是 claude-code、codex 或 dsh");
 }
 
 // Server-side per-model effort check for profile saves. Only models actually

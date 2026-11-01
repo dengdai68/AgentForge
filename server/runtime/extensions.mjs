@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { readExtensionFile, selectionIds } from './marketplace.mjs';
+import { readExtensionFile, readPluginExecutionPlan, selectionIds } from './marketplace.mjs';
 import { parseMcpJson } from './configuration.mjs';
 import { diagnostic } from '../diagnostics.mjs';
 import { cliEnvironment } from './cli-environment.mjs';
@@ -22,6 +22,7 @@ export async function claudeMarketEnvironment(path = join(process.env.CLAUDE_CON
   return Object.fromEntries(keys.filter(key => process.env[key] === undefined && typeof settings?.env?.[key] === 'string').map(key => [key, settings.env[key]]));
 }
 export const tomlValue = value => Array.isArray(value) ? `[${value.map(tomlValue).join(',')}]` : value && typeof value === 'object' ? `{${Object.entries(value).map(([key,item]) => `${JSON.stringify(key)}=${tomlValue(item)}`).join(',')}}` : JSON.stringify(value);
+export const codexAgentKey=(ref,index,name)=>`af_${ref.id.replaceAll('-','')}_${index}_${name.replace(/[^a-zA-Z0-9_]/g,'_').toLowerCase().slice(0,24)}`;
 
 export async function selectedExtensions(runtime) {
   // An omitted selection means no market extensions, never ambient discovery.
@@ -50,7 +51,7 @@ export async function selectedExtensions(runtime) {
   if (!Array.isArray(manifest) || manifest.length !== ids.length || new Set(manifest.map(r => r.id)).size !== ids.length || runtime.pluginSources?.length) throw new Error('市场扩展绑定无效');
   const pluginRefs = manifest.filter(ref=>ref.kind==='plugin');
   const skillPaths = pluginRefs.flatMap(ref=>(ref.skills || []).map(path=>join(dirname(dirname(ref.path)),path)));
-  const pluginPaths = runtime.provider==='codex' ? [] : pluginRefs.map(ref=>dirname(dirname(ref.path)));
+  const pluginPaths = (runtime.provider || 'claude-code')==='claude-code' ? pluginRefs.map(ref=>dirname(dirname(ref.path))) : [];
   if(JSON.stringify(runtime.skillPaths || [])!==JSON.stringify(skillPaths) || JSON.stringify(runtime.pluginPaths || [])!==JSON.stringify(pluginPaths)) throw new Error('插件绑定与执行路径不一致');
   const servers = Object.create(null);
   for (const kind of ['plugin', 'mcp']) {
@@ -58,6 +59,10 @@ export async function selectedExtensions(runtime) {
     if (JSON.stringify(refs.map(ref => ref.id)) !== JSON.stringify(selection[kind === 'plugin' ? 'pluginIds' : 'mcpIds']) || (kind==='mcp' && JSON.stringify(refs.map(ref => ref.path)) !== JSON.stringify(runtime.mcpConfigPaths || []))) throw new Error('市场扩展绑定与执行路径不一致');
     for (const ref of refs) {
       const content = await readExtensionFile(ref);
+      if(kind==='plugin' && ref.adapterVersion===2) {
+        if(ref.planTarget!==(runtime.provider || 'claude-code'))throw new Error('冻结插件执行计划与 Runtime 不一致');
+        await readPluginExecutionPlan(ref);
+      }
       if (kind !== 'mcp') continue;
       for (const [name, service] of Object.entries(parseMcpJson(content).mcpServers)) {
         if (['agentforge_history','__proto__','prototype','constructor'].includes(name) || Object.hasOwn(servers, name)) throw new Error('MCP 服务名称重复或使用了平台保留名称');
@@ -92,28 +97,33 @@ export async function codexMarketArgs(runtime, servers, workspacePath, traceDire
   const disabled = configured.flatMap(item=>['-c',`mcp_servers.${item.name}.enabled=false`]);
   const mcp = {};
   for (const [name, {service, ref}] of Object.entries(servers)) {
-    mcp[`agentforge_market_${ref.id.replaceAll('-','')}`] = { command: process.execPath, args: [fileURLToPath(new URL('./mcp-launcher.mjs', import.meta.url)), ref.path, ref.sha256, name], enabled: true, required: true,
+    const key=ref.mcpAdapterVersion===2 ? name : `agentforge_market_${ref.id.replaceAll('-','')}`;
+    mcp[key] = { command: process.execPath, args: [fileURLToPath(new URL('./mcp-launcher.mjs', import.meta.url)), ref.path, ref.sha256, name], enabled: true, required: true,
       ...(process.versions.electron ? {env: {ELECTRON_RUN_AS_NODE: '1'}} : {}) };
   }
   // Never override the parent table: that erases earlier enabled=false overrides.
+  // Codex -c splits the key on dots; quoted segments become literal quotes.
+  // MCP names are already restricted to letters, digits, underscore and '-'.
   const selected = Object.entries(mcp).flatMap(([name,service]) => ['-c', `mcp_servers.${name}=${tomlValue(service)}`]);
   const pluginArgs=[];
   const hookEvents=['SessionStart','SessionEnd','UserPromptSubmit','PreToolUse','PostToolUse','PermissionRequest','Stop','SubagentStart','SubagentStop','PreCompact','PostCompact','PreModelRequest','PostModelRequest','Interrupt'];
-  const hooks=Object.fromEntries(hookEvents.map(name=>[name,[]]));let hookCount=0;
+  const hooks=Object.fromEntries(hookEvents.map(name=>[name,[]])),agentTools={};let hookCount=0;
   for(const ref of (runtime.extensionManifest || []).filter(item=>item.kind==='plugin')) {
     await readExtensionFile(ref);
     // Frozen Skill-only invocations predate native projections; their recorded
     // paths remain executable without rewriting history or installation files.
-    if(ref.adapterVersion!==1) continue;
-    const root=dirname(dirname(ref.path)), plan=JSON.parse(await readFile(join(root,'.agentforge/codex.json'),'utf8'));
+    if(![1,2].includes(ref.adapterVersion)) continue;
+    const root=dirname(dirname(ref.path)), plan=ref.adapterVersion===2 ? await readPluginExecutionPlan(ref) : JSON.parse(await readFile(join(root,'.agentforge/codex.json'),'utf8'));
+    const namespace=ref.adapterVersion===2 ? JSON.parse(await readFile(ref.path,'utf8')).name : '';
     if(!traceDirectory && (plan.agents.length || plan.hooks.length)) throw new Error('插件原生组件需要执行记录目录');
     for(const [agentIndex,agent] of plan.agents.entries()) {
       const content=await readFile(join(root,agent.path),'utf8');
-      const key=`af_${ref.id.replaceAll('-','')}_${agentIndex}_${agent.name.replace(/[^a-zA-Z0-9_]/g,'_').slice(0,24)}`;
-      const configFile=join(traceDirectory,`${key}.toml`);
+      const key=ref.adapterVersion===2 ? codexAgentKey(ref,agentIndex,agent.name) : `af_${ref.id.replaceAll('-','')}_${agentIndex}_${agent.name.replace(/[^a-zA-Z0-9_]/g,'_').slice(0,24)}`;
+      const configFile=join(traceDirectory,ref.adapterVersion===2?`agent-${ref.id}-${agentIndex}.toml`:`${key}.toml`);
       await mkdir(traceDirectory,{recursive:true,mode:0o700});
-      await writeFile(configFile,`developer_instructions=${tomlValue(content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/,''))}\n`,{mode:0o600});
-      pluginArgs.push('-c',`agents.${key}=${tomlValue({description:agent.description || agent.name,config_file:configFile})}`);
+      await writeFile(configFile,`${agent.model && agent.model!=='inherit'?`model=${tomlValue(agent.model)}\n`:''}developer_instructions=${tomlValue(content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/,''))}\n`,{mode:0o600});
+      pluginArgs.push('-c',`agents.${key}=${tomlValue({description:ref.adapterVersion===2?`[${namespace}:${agent.name}] ${agent.description || agent.name}`:agent.description || agent.name,config_file:configFile})}`);
+      if(ref.adapterVersion===2)agentTools[key]={tools:agent.tools,deniedTools:agent.deniedTools};
     }
     for(const [eventIndex,item] of plan.hooks.entries()) for(const [groupIndex,group] of item.matchers.entries()) {
       if(!hooks[item.event]) throw new Error('插件 Hook 与当前 Codex 不兼容');
@@ -121,11 +131,21 @@ export async function codexMarketArgs(runtime, servers, workspacePath, traceDire
       for(const [hookIndex,hook] of group.hooks.entries()) {
         if(hook.type!=='command') throw new Error('Codex 插件只支持可映射的 command Hook');
         const quote=value=>`'${String(value).replaceAll("'","'\\''")}'`;
-        const command=[process.execPath,fileURLToPath(new URL('./plugin-hooks.mjs',import.meta.url)),ref.path,ref.sha256,ref.treeSha256,eventIndex,groupIndex,hookIndex].map(quote).join(' ');
+        const frozenRef=join(traceDirectory,`plugin-${ref.id}.json`);
+        if(ref.adapterVersion===2)await writeFile(frozenRef,JSON.stringify(ref),{mode:0o600});
+        const command=[process.execPath,fileURLToPath(new URL('./plugin-hooks.mjs',import.meta.url)),ref.path,ref.sha256,ref.treeSha256,eventIndex,groupIndex,hookIndex,...(ref.adapterVersion===2?[frozenRef]:[])].map(quote).join(' ');
         projected.push({...hook,command:(process.versions.electron?'ELECTRON_RUN_AS_NODE=1 ':'')+command});hookCount++;
       }
       hooks[item.event].push({...group,hooks:projected});
     }
+  }
+  if(Object.keys(agentTools).length) {
+    const path=join(traceDirectory,'codex-agent-tools.json');
+    await writeFile(path,JSON.stringify({agents:agentTools,stateDirectory:join(traceDirectory,'codex-child-tools')}),{mode:0o600});
+    const quote=value=>"'"+String(value).replaceAll("'","'\\''")+"'";
+    const command=(process.versions.electron?'ELECTRON_RUN_AS_NODE=1 ':'')+[process.execPath,fileURLToPath(new URL('./plugin-agent-tools.mjs',import.meta.url)),path].map(quote).join(' ');
+    for(const event of ['SubagentStart','PreToolUse'])hooks[event].unshift({hooks:[{type:'command',command}]});
+    hookCount++;
   }
   // Replace each event array rather than merging ambient user command hooks.
   for(const [event,groups] of Object.entries(hooks)) pluginArgs.push('-c',`hooks.${event}=${tomlValue(groups)}`);

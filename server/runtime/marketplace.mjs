@@ -3,6 +3,7 @@ import { join, resolve, dirname, basename, relative } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { parseMcpJson, createRuntimeConfiguration } from './configuration.mjs';
 import { diagnosticRedactor,diagnostic } from '../diagnostics.mjs';
+import { pluginExecutionPlan, parsePluginMarkdown, COMPATIBILITY_VERSION } from './plugin-compatibility.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value);
@@ -53,7 +54,7 @@ const exists = path => lstat(path).then(()=>true,error=>{if(error.code==='ENOENT
 async function pluginInfo(plugin,provider) {
   if(plugin.disabled) throw new Error('外部插件引用暂不支持，请直接读取该插件仓库');
   let manifest={};
-  const order=provider==='claude-code'?['.claude-plugin/plugin.json','plugin.json','.codex-plugin/plugin.json']:['plugin.json','.codex-plugin/plugin.json','.claude-plugin/plugin.json'];
+  const order=provider!=='codex'?['.claude-plugin/plugin.json','plugin.json','.codex-plugin/plugin.json']:['plugin.json','.codex-plugin/plugin.json','.claude-plugin/plugin.json'];
   const manifestFile=(await Promise.all(order.map(async path=>await exists(join(plugin.path,path))?path:null))).find(Boolean) || '.claude-plugin/plugin.json';
   const manifestPath=join(plugin.path,manifestFile);
   if(await exists(manifestPath)) {
@@ -61,8 +62,9 @@ async function pluginInfo(plugin,provider) {
     manifest=pluginJson(await readFile(await contained(plugin.path,'./'+manifestFile),'utf8'));
     if(!manifest || typeof manifest!=='object' || Array.isArray(manifest)) throw new Error('插件清单无效');
   }
+  const sourceDialect = plugin.sourceDialect || (manifestFile === '.claude-plugin/plugin.json' ? 'claude-code' : 'codex');
   const overlay=manifest.extensions?.['com.openai'];
-  if(provider==='codex' && overlay && typeof overlay==='object') manifest={...manifest,...overlay};
+  if(sourceDialect==='codex' && overlay && typeof overlay==='object') manifest={...manifest,...overlay};
   else if(provider==='codex' && manifestFile==='plugin.json' && await exists(join(plugin.path,'.codex-plugin/plugin.json'))) manifest={...manifest,...pluginJson(await readFile(await contained(plugin.path,'./.codex-plugin/plugin.json'),'utf8')),name:manifest.name};
   const componentKeys=['skills','agents','hooks','commands','mcpServers'];
   if(plugin.strict===false && Object.keys(manifest).length && componentKeys.some(key=>plugin[key]!==undefined)) throw new Error('插件 strict:false 与独立清单组件冲突');
@@ -71,7 +73,7 @@ async function pluginInfo(plugin,provider) {
     else manifest[key]=plugin[key];
   }
   const mcpServers=Object.create(null);
-  const nativeCodex=provider==='codex' && manifestFile!=='.claude-plugin/plugin.json';
+  const nativeCodex=sourceDialect==='codex';
   const declarations=manifest.mcpServers===undefined ? [] : [manifest.mcpServers].flat();
   if(!nativeCodex || manifest.mcpServers===undefined) for(const path of ['.mcp.json','mcp.json']) if(await exists(join(plugin.path,path))) declarations.unshift('./'+path);
   for(const declaration of declarations) {
@@ -95,8 +97,9 @@ async function pluginInfo(plugin,provider) {
     if(!info.isFile() || !directory.endsWith('.md') || (kind==='skill' && basename(directory)!=='SKILL.md')) return;
     const content=await readFile(directory,'utf8');
     if(Buffer.byteLength(content)>128*1024) throw new Error('插件 Markdown 组件超过 128 KB');
-    const name=content.match(/^name:\s*(.+)$/m)?.[1]?.replace(/^['"]|['"]$/g,'') || (kind==='skill'?basename(dirname(directory)):basename(directory,'.md'));
-    const description=content.match(/^description:\s*(.+)$/m)?.[1]?.replace(/^['"]|['"]$/g,'') || '';
+    const {attributes}=parsePluginMarkdown(content);
+    const name=typeof attributes.name==='string'?attributes.name:(kind==='skill'?basename(dirname(directory)):basename(directory,'.md'));
+    const description=typeof attributes.description==='string'?attributes.description:'';
     const result={name,description,path:relative(plugin.path,directory)};
     const list=kind==='skill'?skills:kind==='agent'?agents:commands;
     if(!list.some(item=>item.path===result.path)) list.push(result);
@@ -121,14 +124,17 @@ async function pluginInfo(plugin,provider) {
     }
   }
   const reasons=[];
+  if(provider==='dsh') {
+    for(const key of ['lspServers','settings','outputStyles']) if(manifest[key]) reasons.push(`DeepSeek Harness 适配器不支持 ${key}`);
+  }
   if(provider==='codex') for(const key of ['lspServers','settings','outputStyles']) if(manifest[key]) reasons.push(`Codex 适配器不支持 ${key}`);
   for(const item of hooks) {
-    if(!(provider==='codex'?codexHookEvents:claudeHookEvents).has(item.event)) reasons.push(`不支持 Hook 事件 ${item.event}`);
+    if(provider!=='dsh' && !(provider==='codex'?codexHookEvents:claudeHookEvents).has(item.event)) reasons.push(`不支持 Hook 事件 ${item.event}`);
     if(provider==='codex' && item.matchers.some(group=>!Array.isArray(group.hooks) || group.hooks.some(hook=>hook.type!=='command' || typeof hook.command!=='string'))) reasons.push(`Hook ${item.event} 仅支持 command 类型`);
   }
   if(manifest.apps) reasons.push('当前本机 Runtime 不支持托管 App 映射');
   const normalized=Object.fromEntries(Object.entries(manifest).filter(([key])=>['name','description','version','author','homepage','repository','license','keywords','skills','agents','commands','hooks','outputStyles','lspServers','settings'].includes(key)));
-  return {manifest:normalized,mcpServers,components:{skills,agents,hooks,commands},supported:reasons.length===0,reasons};
+  return {manifest:normalized,mcpServers,sourceDialect,components:{skills,agents,hooks,commands},supported:reasons.length===0,reasons};
 }
 export function selectionIds(value) {
   if(!value || typeof value!=='object' || Array.isArray(value) || Object.keys(value).some(key=>!['pluginIds','mcpIds'].includes(key))) throw new Error('扩展选择仅接受 pluginIds 和 mcpIds；不再接受 Skill 选择');
@@ -151,11 +157,21 @@ export async function readExtensionFile(ref) {
       const actual=await tree(ref.resourceRoot);
       if(actual!==ref.resourceSha256) throw new Error(`扩展资源 SHA256 不匹配：${ref.resourceRoot}；expected=${ref.resourceSha256}；actual=${actual}`);
     }
+    if(ref.sourceRoot && await tree(ref.sourceRoot)!==ref.sourceSha256) throw new Error('插件原始源副本完整性校验失败');
     return content;
   } catch (error) {
     error.code='EXTENSION_INTEGRITY_FAILED'; error.retryable=false;
     throw error;
   }
+}
+export async function readPluginExecutionPlan(ref) {
+  await readExtensionFile(ref);
+  if(ref.adapterVersion!==COMPATIBILITY_VERSION) throw new Error('插件执行计划版本不支持');
+  const root=dirname(dirname(ref.path));
+  const info=await pluginInfo({path:root,name:ref.name,sourceDialect:ref.sourceDialect},ref.planTarget);
+  const result=await pluginExecutionPlan(info,root,ref.planTarget);
+  if(!result.supported || result.digest!==ref.planSha256) throw new Error(`插件执行计划校验失败：${result.reasons.join('；') || '冻结计划不一致'}`);
+  return result.plan;
 }
 export function createMarketplace(root) {
   const configuredRoot=resolve(root);
@@ -195,12 +211,37 @@ export function createMarketplace(root) {
       return {...entry,directory:location};
     } catch { throw new Error('已安装版本不可读取；请重新安装，不自动转换旧扩展协议'); }
   }
-  const reference = entry => ({id:entry.id,kind:entry.kind,name:entry.name,path:join(entry.directory || join(entry.kind==='plugin'?pluginDirectory:directory,entry.id),entry.kind==='plugin'?'plugin/.claude-plugin/plugin.json':'mcp.json'),sha256:entry.sha256,...(entry.protocol===3?{adapterVersion:1}:{}),...(entry.treeSha256?{treeSha256:entry.treeSha256,skills:entry.components.skills.map(item=>item.path)}:{})});
+  const reference = (entry,provider) => ({id:entry.id,kind:entry.kind,name:entry.name,path:join(entry.directory || join(entry.kind==='plugin'?pluginDirectory:directory,entry.id),entry.kind==='plugin'?'plugin/.claude-plugin/plugin.json':'mcp.json'),sha256:entry.sha256,...(entry.protocol===3?{adapterVersion:1}:{}),...(entry.treeSha256?{treeSha256:entry.treeSha256,skills:entry.components.skills.map(item=>item.path)}:{}),...(entry.originalTreeSha256?{sourceRoot:join(entry.directory,'source'),sourceSha256:entry.originalTreeSha256}:{}),...(provider && entry.kind==='mcp'?{mcpAdapterVersion:2}:{}),...(provider && entry.plans?.[provider]?{adapterVersion:COMPATIBILITY_VERSION,planTarget:provider,sourceDialect:entry.plans[provider].plan.sourceDialect,planSha256:entry.plans[provider].digest}:{})});
+  async function currentCompatibility(entry) {
+    if(entry.kind==='mcp') {
+      parseMcpJson(await readFile(reference(entry).path,'utf8'));
+      return {...entry,providers:['claude-code','codex','dsh']};
+    }
+    const location=dirname(dirname(reference(entry).path)),plans={},runtimeComponents={},components=Object.fromEntries(['skills','agents','hooks','commands'].map(key=>[key,new Map()]));
+    for(const provider of ['claude-code','codex','dsh']) {
+      const info=await pluginInfo({path:location,name:entry.name,sourceDialect:entry.sourceDialects?.[provider]},provider);
+      // The installed inventory preserves an explicit marketplace root selection
+      // and generated Command instruction files. Reparse their actual bytes;
+      // do not rediscover neighbouring plugins as implicit default Skills.
+      const selected=entry.runtimeComponents?.[provider]?.skills;
+      if(selected) info.components.skills=await Promise.all(selected.map(async path=>{
+        const {attributes}=parsePluginMarkdown(await readFile(await contained(location,'./'+path),'utf8'));
+        return {name:attributes.name || basename(dirname(path)),description:attributes.description || '',path};
+      }));
+      plans[provider]=await pluginExecutionPlan(info,location,provider);
+      runtimeComponents[provider]={skills:info.components.skills.map(item=>item.path)};
+      if(plans[provider].supported) for(const [key,list] of Object.entries(info.components)) for(const item of list) {
+        const signature=JSON.stringify(item),record=components[key].get(signature) || {...item,providers:[]};record.providers.push(provider);components[key].set(signature,record);
+      }
+    }
+    const compatibility=Object.fromEntries(Object.entries(plans).map(([provider,result])=>[provider,{supported:result.supported,reasons:result.reasons}]));
+    return {...entry,plans,runtimeComponents,components:Object.fromEntries(Object.entries(components).map(([key,list])=>[key,[...list.values()]])),compatibility,providers:Object.keys(compatibility).filter(provider=>compatibility[provider].supported)};
+  }
   return {
     async catalog() {
       await ensure(); const plugins=[];
-      for(const item of await batches()) if(item.kind==='plugin') plugins.push(summary(await read(item.id,'plugin',item.directory)));
-      for(const id of (await readdir(pluginDirectory)).filter(uuid).sort()) if(await exists(join(pluginDirectory,id,'entry.json'))) plugins.push(summary(await read(id,'plugin',join(pluginDirectory,id))));
+      for(const item of await batches()) if(item.kind==='plugin') plugins.push(summary(await currentCompatibility(await read(item.id,'plugin',item.directory))));
+      for(const id of (await readdir(pluginDirectory)).filter(uuid).sort()) if(await exists(join(pluginDirectory,id,'entry.json'))) plugins.push(summary(await currentCompatibility(await read(id,'plugin',join(pluginDirectory,id)))));
       return {plugins:plugins.sort((a,b)=>b.createdAt.localeCompare(a.createdAt))};
     },
     async mcpCatalog() {
@@ -214,14 +255,14 @@ export function createMarketplace(root) {
           metadata=JSON.parse(await readFile(file,'utf8'));
         } catch {throw new Error('已安装 MCP 元信息不可读取，请重新安装');}
         if(metadata.kind!=='mcp' || metadata.visibility!=='market' || metadata.protocol!==2) continue;
-        entries.push(summary(await read(id,'mcp',join(directory,id))));
+        entries.push(summary(await currentCompatibility(await read(id,'mcp',join(directory,id)))));
       }
-      for(const item of await batches()) if(item.kind==='mcp') entries.push(summary(await read(item.id,'mcp',item.directory)));
+      for(const item of await batches()) if(item.kind==='mcp') entries.push(summary(await currentCompatibility(await read(item.id,'mcp',item.directory))));
       return {entries:entries.sort((a,b)=>b.createdAt.localeCompare(a.createdAt))};
     },
     async list() {return [...(await this.catalog()).plugins,...(await this.mcpCatalog()).entries];},
     async detail(id,kind) {
-      const entry=await read(id,kind), content=await readExtensionFile(reference(entry));
+      const entry=await currentCompatibility(await read(id,kind)), content=await readExtensionFile(reference(entry));
       if(kind==='plugin') return diagnosticRedactor()({...summary(entry),components:entry.components,manifest:JSON.parse(content)});
       const configuration=parseMcpJson(content), secrets=Object.values(configuration.mcpServers).flatMap(server=>[...Object.values(server.env||{}),...Object.values(server.headers||{})]);
       const redact=diagnosticRedactor({secrets});
@@ -270,8 +311,10 @@ export function createMarketplace(root) {
         await mkdir(target,{recursive:true,mode:0o700});
         try { await tree(plugin.path,target,plugin.sourceRoot || plugin.path); }
         catch(cause) { throw new Error(`插件「${plugin.name}」无法安装：${cause.message}；本批次未安装`,{cause}); }
-        const variants=Object.fromEntries(await Promise.all(['claude-code','codex'].map(async provider=>[provider,await pluginInfo({...plugin,path:target},provider)])));
+        const originalTreeSha256=await tree(plugin.path,join(staging,'plugins',id,'source'),plugin.sourceRoot || plugin.path);
+        const variants=Object.fromEntries(await Promise.all(['claude-code','codex','dsh'].map(async provider=>[provider,await pluginInfo({...plugin,path:target},provider)])));
         for(const [provider,info] of Object.entries(variants)) {
+        Object.assign(info,await pluginExecutionPlan(info,target,provider));
         const commandSkills=[];
         for(const [index,command] of info.components.commands.entries()) {
           const path=`.agentforge/command-skills/${digest(command.path).slice(0,16)}/SKILL.md`,name=`command-${command.name}`.slice(0,64);
@@ -284,7 +327,7 @@ export function createMarketplace(root) {
         }
         const info=variants['claude-code'],codex=variants.codex;
         const components=Object.fromEntries(['skills','agents','hooks','commands'].map(key=>{
-          const merged=new Map();for(const [provider,variant] of Object.entries(variants))for(const item of variant.components[key]){const signature=JSON.stringify(item),record=merged.get(signature)||{...item,providers:[]};record.providers.push(provider);merged.set(signature,record);}return [key,[...merged.values()]];
+          const merged=new Map();for(const [provider,variant] of Object.entries(variants))for(const item of variant.components[key]){if(!variant.supported)continue;const signature=JSON.stringify(item),record=merged.get(signature)||{...item,providers:[]};record.providers.push(provider);merged.set(signature,record);}return [key,[...merged.values()]];
         }));
         const compatibility=Object.fromEntries(Object.entries(variants).map(([provider,variant])=>[provider,{supported:variant.supported,reasons:variant.reasons}]));
         const mcpVariants=[];
@@ -298,7 +341,7 @@ export function createMarketplace(root) {
         await writeFile(join(target,'.claude-plugin/plugin.json'),JSON.stringify(info.manifest),{mode:0o600});
         await mkdir(join(target,'.agentforge'),{recursive:true,mode:0o700});
         await writeFile(join(target,'.agentforge/codex.json'),JSON.stringify({hooks:codex.components.hooks,agents:codex.components.agents}),{mode:0o600});
-        const entry={protocol:3,id,kind:'plugin',name:plugin.name,description:String(plugin.description || info.manifest.description || '').slice(0,500),version:info.manifest.version || '',createdAt:new Date().toISOString(),source:{...(plugin.source || {url:catalog.url,revision:catalog.revision}),origin:{url:catalog.url,revision:catalog.revision}},components,compatibility,runtimeComponents:Object.fromEntries(Object.entries(variants).map(([provider,variant])=>[provider,{skills:variant.components.skills.map(item=>item.path)}])),providers:Object.keys(variants).filter(provider=>compatibility[provider].supported),sha256:digest(await readFile(join(target,'.claude-plugin/plugin.json'))),treeSha256:await tree(target)};
+        const entry={protocol:3,originalTreeSha256,sourceDialects:Object.fromEntries(Object.entries(variants).map(([provider,info])=>[provider,info.sourceDialect])),id,kind:'plugin',name:plugin.name,description:String(plugin.description || info.manifest.description || '').slice(0,500),version:info.manifest.version || '',createdAt:new Date().toISOString(),source:{...(plugin.source || {url:catalog.url,revision:catalog.revision}),origin:{url:catalog.url,revision:catalog.revision}},components,compatibility,runtimeComponents:Object.fromEntries(Object.entries(variants).map(([provider,variant])=>[provider,{skills:variant.components.skills.map(item=>item.path)}])),providers:Object.keys(variants).filter(provider=>compatibility[provider].supported),sha256:digest(await readFile(join(target,'.claude-plugin/plugin.json'))),treeSha256:await tree(target)};
         await writeFile(join(dirname(target),'entry.json'),JSON.stringify(entry),{flag:'wx',mode:0o600}); entries.push(entry);
         for(const {name,service,providers} of includeMcps?mcpVariants:[]) {
           const expand=value=>typeof value==='string'?value.replaceAll('${CLAUDE_PLUGIN_ROOT}',join(final,'plugins',id,'plugin')).replaceAll('${PLUGIN_ROOT}',join(final,'plugins',id,'plugin')):Array.isArray(value)?value.map(expand):value && typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,item])=>[key,expand(item)])):value;
@@ -309,7 +352,7 @@ export function createMarketplace(root) {
           await mkdir(location,{recursive:true,mode:0o700});
           const separate=mcpVariants.filter(item=>item.name===name).length>1;
           const mcp=await this.add({kind:'mcp',name:`${entry.name} · ${name}${separate?' · '+providers.join('/') : ''}`.slice(0,80),description:`来自插件 ${entry.name}；需员工单独选择`,content:expanded},location,mcpId);
-          if(separate || resolvedService.cwd || resolvedService.env_vars){mcp.providers=providers.filter(provider=>provider==='codex' || (!resolvedService.cwd && !resolvedService.env_vars));await writeFile(join(location,'entry.json'),JSON.stringify(mcp),{mode:0o600});}
+          if(separate || resolvedService.cwd || resolvedService.env_vars){mcp.providers=providers;await writeFile(join(location,'entry.json'),JSON.stringify(mcp),{mode:0o600});}
           entries.push(mcp);
         }
         }
@@ -324,15 +367,15 @@ export function createMarketplace(root) {
       const service=configuration.mcpServers[names[0]], remote=['http','sse'].includes(service.type), allowed=remote?['type','url','headers']:['type','command','args','env','cwd','env_vars'];
       if(Object.keys(service).some(key=>!allowed.includes(key))) throw new Error('MCP 包含不支持的字段');
       if(service.cwd && !service.cwd.startsWith('/'))throw new Error('MCP cwd 必须为绝对目录');
-      const content=JSON.stringify(configuration,null,2), id=entryId || randomUUID(), entry={protocol:location?3:2,id,kind:'mcp',name:input.name.trim(),description:input.description.trim(),createdAt:new Date().toISOString(),providers:service.cwd || service.env_vars?['codex']:['claude-code','codex'],sha256:digest(content),visibility:'market'};
+      const content=JSON.stringify(configuration,null,2), id=entryId || randomUUID(), entry={protocol:location?3:2,id,kind:'mcp',name:input.name.trim(),description:input.description.trim(),createdAt:new Date().toISOString(),providers:['claude-code','codex','dsh'],sha256:digest(content),visibility:'market'};
       await ensure();const target=location || join(directory,id);await mkdir(target,{recursive:true,mode:0o700});await writeFile(join(target,'mcp.json'),content,{flag:'wx',mode:0o600});await writeFile(join(target,'entry.json'),JSON.stringify(entry),{flag:'wx',mode:0o600});return location?entry:summary(entry);
     },
     async resolve(selection,provider) {
       const selected=selectionIds(selection), extensionManifest=[], names=new Set();
       for(const kind of ['plugin','mcp']) for(const id of selected[kind==='plugin'?'pluginIds':'mcpIds']) {
-        const entry=await read(id,kind);
-        if(!entry.providers.includes(provider)) throw new Error(`${kind==='plugin'?'插件':'MCP'}「${entry.name}」与 ${provider==='codex'?'Codex':'Claude Code'} 不兼容：${entry.compatibility?.[provider]?.reasons?.join('；') || (kind==='mcp'?'当前 MCP 配置包含此 Runtime 不支持的字段':'当前 Runtime 不支持此插件组件')}`);
-        const ref=reference(entry);
+        const entry=await currentCompatibility(await read(id,kind));
+        if(!entry.providers.includes(provider)) throw new Error(`${kind==='plugin'?'插件':'MCP'}「${entry.name}」与 ${provider==='dsh'?'DeepSeek Harness':provider==='codex'?'Codex':'Claude Code'} 不兼容：${entry.compatibility?.[provider]?.reasons?.join('；') || (kind==='mcp'?'当前 MCP 配置包含此 Runtime 不支持的字段':'当前 Runtime 不支持此插件组件')}`);
+        const ref=reference(entry,provider);
         if(kind==='plugin' && entry.runtimeComponents) ref.skills=entry.runtimeComponents[provider].skills;
         const content=await readExtensionFile(ref);
         if(kind==='mcp') {const name=Object.keys(parseMcpJson(content).mcpServers)[0];if(names.has(name)) throw new Error('MCP 服务名称重复，请只选择一个版本');names.add(name);}

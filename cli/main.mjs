@@ -38,8 +38,8 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (operation === 'login') allowed.push('username', 'password-stdin');
   } else {
     if (!Object.hasOwn(resources, group) || !resources[group].operations.includes(operation)) throw usage('不存在此配置命令');
-    if (['get', 'update', 'delete', 'test', 'start', 'terminate', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts'].includes(operation)) { if (args.length !== 3 || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw usage('需要精确资源ID，不能使用名称或路径'); }
-    else if (operation === 'models') { if (args.length !== 3 || !['claude-code', 'codex'].includes(id)) throw usage('models 需要 Provider 参数：claude-code 或 codex'); }
+    if (['get', 'update', 'delete', 'test', 'start', 'terminate', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts'].includes(operation)) { if (args.length !== 3 || !(group === 'runtimes' && ['Claude Code', 'Codex', 'DeepSeek Harness'].includes(id)) && !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw usage('需要精确资源ID，不能使用名称或路径'); }
+    else if (operation === 'models') { if (args.length !== 3 || !['claude-code', 'codex', 'dsh'].includes(id)) throw usage('models 需要 Provider 参数：claude-code、codex 或 dsh'); }
     else if (args.length !== 2) throw usage('此命令不接受额外参数');
     if (['create', 'update', 'import', 'auto-update'].includes(operation)) allowed.push('file');
     if (operation === 'list') allowed.push('page', 'all', 'search');
@@ -84,7 +84,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     return result;
   };
   const get = async () => {
-    const result = await readList(), item = result[resource.key].find(item => item.id === id || group === 'runtimes' && (item.provider === id || (item.provider === 'codex' ? 'Codex' : 'Claude Code') === id));
+    const result = await readList(), item = result[resource.key].find(item => item.id === id || group === 'runtimes' && (item.provider === id || ({codex: 'Codex', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness'})[item.provider] === id));
     if (!item) throw new CliError('NOT_FOUND', '配置ID不存在', '运行对应list，使用返回的精确ID，不猜名称。', 4);
     resourceId = item.id; return { item, result };
   };

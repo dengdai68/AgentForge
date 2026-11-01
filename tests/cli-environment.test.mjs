@@ -2,12 +2,34 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, mkdtemp, writeFile, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, symlink, chmod, rm, stat } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
-import { cliEnvironment } from '../server/runtime/cli-environment.mjs';
+import { tmpdir } from 'node:os';
+import { cliEnvironment, runtimeInstalled } from '../server/runtime/cli-environment.mjs';
 
 const exec = promisify(execFile);
 const thinPath = '/usr/bin:/bin:/usr/sbin:/sbin';
+
+test('Runtime installation uses executable PATH files without invoking them and observes removal', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agentforge-install-check-'));
+  const options = { environment: { PATH: root }, platform: 'linux' };
+  assert.equal(runtimeInstalled('dsh', options), false);
+  await mkdir(join(root, 'dsh'));
+  assert.equal(runtimeInstalled('dsh', options), false, 'a directory is not a CLI');
+  await rm(join(root, 'dsh'), { recursive: true });
+  const marker = join(root, 'should-not-execute');
+  await writeFile(join(root, 'dsh'), `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o600 });
+  assert.equal(runtimeInstalled('dsh', options), false, 'non-executable installation is unavailable');
+  await chmod(join(root, 'dsh'), 0o700);
+  assert.equal(runtimeInstalled('dsh', options), true);
+  await assert.rejects(stat(marker), { code: 'ENOENT' });
+  await symlink(join(root, 'dsh'), join(root, 'codex'));
+  assert.equal(runtimeInstalled('codex', options), true);
+  await rm(join(root, 'dsh'));
+  assert.equal(runtimeInstalled('codex', options), false, 'broken installation link is unavailable');
+  assert.equal(runtimeInstalled('unknown', options), false);
+  await rm(root, { recursive: true });
+});
 
 test('Mac CLI fallback preserves explicit PATH priority and private environment boundaries', () => {
   const environment = { PATH: '/custom/bin:/usr/bin', ELECTRON_RUN_AS_NODE: '1', AGENTFORGE_BOOTSTRAP_TOKEN: 'private', KEEP: 'yes' };

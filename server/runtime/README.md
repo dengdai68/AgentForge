@@ -16,10 +16,10 @@ promptSnapshot 完整保存脱敏系统指令/本轮输入，控制台如实展�
 
 来源内文件/目录链接仅在安装复制时展开（含同仓库共享资源），安装副本全为真实文件/目录；断链、循环、来源外链接和特殊文件按插件/相对路径明确失败，整批回滚。普通文件名的中文、空格保持不变，展开后仍计入大小/数量限制；执行期完整性校验仍拒绝受管副本中的链接。
 
-- `local-cli.mjs`：Claude Code/Codex 调用、事件投影、会话恢复和取消。
+- `local-cli.mjs`：Claude Code/Codex/DeepSeek Harness 调用、事件投影、会话恢复和取消。
 - `model-catalog.mjs`：真实模型目录及思考等级能力。
 - `configuration.mjs`：可信 Git/本地插件来源、私有仓库读取凭据。
-- 市场清单支持 Claude/Codex 相对目录及 HTTPS github/url/git-subdir 条目，整批检出并记录 ref/sha；不支持的 npm/archive/command 整批报错。两种 Runtime 分别解析清单，兼容性和原因传给目录/员工入口；支持是静态组件兼容，不等于账号或依赖已验证。
+- 市场清单支持 Claude/Codex 相对目录及 HTTPS github/url/git-subdir 条目，整批检出并记录 ref/sha；不支持的 npm/archive/command 整批报错。按 Runtime 分别解析清单，兼容性和原因传给目录/员工入口；支持是静态组件兼容，不等于账号或依赖已验证。
 - 市场配置根先解析祖先目录别名（如 macOS /tmp），受管根/子目录本身仍拒绝链接；执行引用使用真实路径并保持完整性校验。
 - `marketplace.mjs`、`extensions.mjs`：Claude/Codex/Agent Plugins 来源整批原子安装；自带 MCP 独立入市场，员工另选；完整性加载与原生 Subagent/共同 Hook 投影，Skill 不单选。
 - `plugin-hooks.mjs`：从私有完整性校验插件读取选中 Hook 命令，不将命令正文放入 Provider 参数；不写全局配置。
@@ -39,3 +39,13 @@ Runtime 适配 Provider，不评价业务结果，不写 Store 状态。员工�
 Runtime 可编辑项仅 model/effort，CLI 可执行文件按服务 PATH 发现；可用开关由 Store 和调用方校验，适配器不拥有开关状态。历史冻结 model/effort 继续传给 Provider。测试私有 CLI 用隔离 Shell PATH，不再创建具名连接或写自定义 executable。
 
 Claude stream-json 的 result 表示一轮结束，不表示整个进程结束。适配器跟踪原生 background_tasks_changed/task_started/task_notification：已知后台工作运行期间以及成功轮次等待原生后续工作时，不启动平台的无进展计时器；新正文/原生任务通知重新进入执行阶段，无后台工作时恢复计时。由 Claude 自身负责 print 后台等待上限，平台不增加另一套业务时限，也不在第一条成功 result 时提前结算。最终仍须进程正常退出且无结构化失败；取消、会话错误、API 重试上限与退出码校验不变。
+
+DeepSeek Harness 入口 dsh.mjs、私有原生 bridge dsh-plugin.mjs：独立 SDK JSON-RPC、模型目录、会话原生恢复、系统指令和所选 Skill/MCP；保留 session/wait 后续工作边界，取消进程组并等待退出。外部 DeepSeek Harness 不访问 ASAR；bridge 在 Trace 私有目录物化，仅用 Node 内置模块和原生 context。当前内置 DeepSeek 路由、off/low/high/max，不加载全局插件和默认 Skill，不解析 DeepSeek Harness 凭据。详见 docs/25。
+
+Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+
+`plugin-compatibility.mjs` 安全解析源 frontmatter 并生成无提示词的冻结计划；marketplace 从当前安装只读派生支持矩阵。`dsh-extensions.mjs` 在 Harness 中创建原生独立子代理与选中 Hook，版本固定的 MIT 原代码/许可在 `vendor/dsh-hooks/`。私有目录生成 peer import URL 与源工具名映射，不改全局配置。设计/边界见 docs/26。MCP 启动器在三种 Runtime 共用；新调用保留源名称，旧冻结引用保留旧投影。
+
+`plugin-agent-tools.mjs` 为 Codex 源子代理生成原生工具选择 Hook；按 child session 记录选择，不限制父员工/其他子代理，不改操作系统或领域权限。
+
+跨 Runtime 真实兼容门禁：scripts/test-plugin-runtimes-real.mjs，按源格式和 Provider 分列 Skill、独立子代理、Hook 与 stdio/HTTP/SSE MCP 实际调用；不把支持矩阵当实际执行证据。

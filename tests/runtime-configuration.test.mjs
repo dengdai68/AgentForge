@@ -407,6 +407,10 @@ test("execution content does not mistake whitespace normalization for sensitive-
 // snapshots and follow-up turns are real native protocol events.
 for (const mode of ['background', 'completed-wait', 'failure', 'silent-turn', 'cancel']) {
   test(`Claude native background lifecycle: ${mode}`, async t => {
+    // Measured cold Node startup on the test Mac can exceed two seconds. Keep
+    // the simulated native wait longer than the watchdog, without treating
+    // ordinary interpreter startup as the behavior this test is checking.
+    const idleTimeoutMs = 5000, nativeWaitMs = idleTimeoutMs + 500;
     const root = await mkdtemp(join(tmpdir(), 'af-claude-background-'));
     t.after(() => rm(root, {recursive:true,force:true}));
     const executable = join(root,'claude.mjs');
@@ -422,15 +426,15 @@ if (mode === 'background' || mode === 'cancel') {
   send({type:'assistant',message:{content:[{type:'text',text:'finished audio'}]}});
   send({type:'result',subtype:'success',is_error:false,result:'FINAL',queued_turn_count:0});
   process.exit(0);
- }, 2300);
+ }, ${nativeWaitMs});
 } else {
  send({type:'system',subtype:'background_tasks_changed',tasks:[]});
  if (mode !== 'silent-turn') send({type:'result',subtype:'success',is_error:false,result:'FINAL',queued_turn_count:0});
- setTimeout(() => process.exit(mode === 'failure' ? 1 : 0),2300);
+ setTimeout(() => process.exit(mode === 'failure' ? 1 : 0),${nativeWaitMs});
 }
 `, {mode:0o700});
     const runId = `background-${mode}-${randomUUID()}`, events=[];
-    const invocation = runClaudeCodeCli({runtime:{executable},workspacePath:root,traceDirectory:root,finalPath:join(root,'final.json'),runId,prompt:'work',idleTimeoutMs:2000,onEvent:async e=>{events.push(e);if(mode==='cancel' && events.length === 1){const {terminateExecution}=await import('../server/runtime/registry.mjs');setTimeout(()=>terminateExecution(runId,'human pause'),30);}}});
+    const invocation = runClaudeCodeCli({runtime:{executable},workspacePath:root,traceDirectory:root,finalPath:join(root,'final.json'),runId,prompt:'work',idleTimeoutMs,onEvent:async e=>{events.push(e);if(mode==='cancel' && events.length === 1){const {terminateExecution}=await import('../server/runtime/registry.mjs');setTimeout(()=>terminateExecution(runId,'human pause'),30);}}});
     if (mode === 'failure') await assert.rejects(invocation,/exit=1/);
     else if (mode === 'silent-turn') await assert.rejects(invocation,/未产生可审计进展/);
     else if (mode === 'cancel') await assert.rejects(invocation,/human pause/);

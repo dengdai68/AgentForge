@@ -218,7 +218,7 @@
     {
       "id": "cli.configuration",
       "collaborationReadability": "Causal Message/Dispatch grouping uses explicit sourceMessageId or unique saved references, never prose or timing. deliveries contains current state; history preserves invocation/retry facts. Known worker result envelopes project their recorded rawResponse Markdown report without mutating Messages. Renderer keeps summaries, communication, key human transitions and one console link; no delivery blocks, technical failure notices, automatic acceptance attachments or top console error banners. Full Markdown DOM is clipped to ten lines and expanded in place. Employee state follows its latest Trace through failure/retry/recovery; console failure log lines use danger red. CLI retains complete delivery/history and bounded acceptance file references. Installed-instance review uses the normal client, never cookies or domain-database extraction.",
-      "collaborationFlow": "tasks collaboration shares the complete Message/Dispatch/coordination-event projection; text/JSON expose reference IDs, actual delivery status, attempts/retry/error and source versus execution Trace references. Progressive help/schema describe processing targets, not privacy. UI tone/statusCode remain excluded.",
+      "collaborationFlow": "tasks collaboration shares the complete Message/Dispatch/coordination-event projection; text/JSON expose reference IDs, actual delivery status, attempts/retry/error and source versus execution Trace references. Progressive help/schema describe processing targets, not privacy. UI tone/statusCode remain excluded. tasks message accepts an omitted recipientAgentId and returns the actual manager recipient; UI omits record counts, forced-mention guidance and repeated quoted questions while provenance remains queryable.",
       "repeatImports": "Manual repeat imports replace plugins by exact origin URL plus plugin name and MCPs by trimmed case-sensitive display name; different plugin origins remain distinct. Serialized HTTP imports prepare immutable candidates; Store plans identity matches and deduplicates references, HTTP resolves compatibility, then Store commits current employee references in one transaction. Failed candidates are retired; frozen work/files remain unchanged. Receipts add reference-only replacements/employees/historyRetained, with CLI help/schema/text and shared UI matching.",
       "workspaceFiles": "Workflow artifactPaths schema/help validates arbitrary canonical relative delivery positions, with no docs default; Artifacts retain progressive reference output. No directory browser/download CLI authority is added.",
       "pluginUpdates": "plugins updates/check-updates/auto-update expose the shared service scheduler, progressive typed settings and reference-only update receipts; no direct Git or Provider access.",
@@ -720,7 +720,8 @@
       },
       "failureDelivery": "Store stops non-retryable or exhausted dispatches while preserving traces; input cursors and context hashes acknowledge actual model activity, not snapshots.",
       "taskIdentity": "New Task IDs use random UUIDs, preventing same-millisecond cross-process directory collisions under the shared default task root; historical Task/Run IDs and paths unchanged.",
-      "fixedRuntimes": "Exactly one slot per Claude Code/Codex provider. Only model/effort/enabled partial updates; no create/delete/name/executable/profile inputs. Stable employee profileId references and frozen snapshots; current enable gate blocks new invocations without killing in-flight processes."
+      "fixedRuntimes": "Exactly one slot per Claude Code/Codex provider. Only model/effort/enabled partial updates; no create/delete/name/executable/profile inputs. Stable employee profileId references and frozen snapshots; current enable gate blocks new invocations without killing in-flight processes.",
+      "humanMessageRouting": "submitHumanMessage defaults an omitted/null recipientAgentId to the frozen Run manager; explicit members are validated, exact question replies retain priority, terminal runs remain inquiry-only and archived tasks read-only."
     },
     {
       "id": "server.sqlite-persistence",
@@ -859,7 +860,9 @@
       "sourceOfTruth": [
         "docs/15-employee-runtime-configuration.md",
         "docs/08-real-local-agent-runtime.md",
-        "docs/02-system-architecture.md"
+        "docs/02-system-architecture.md",
+        "docs/25-dsh-runtime.md",
+        "docs/26-runtime-plugin-compatibility.md"
       ],
       "tests": [
         "tests/cli-environment.test.mjs",
@@ -871,7 +874,12 @@
         "tests/marketplace.test.mjs",
         "tests/history.test.mjs",
         "scripts/test-prompt-e2e.mjs",
-        "scripts/test-packaged-electron.mjs"
+        "scripts/test-packaged-electron.mjs",
+        "tests/dsh.test.mjs",
+        "scripts/test-dsh-real.mjs",
+        "scripts/test-plugin-runtimes-real.mjs",
+        "scripts/test-console-layout.mjs",
+        "tests/plugin-compatibility.test.mjs"
       ],
       "allowedDependencies": [
         "node:crypto",
@@ -881,7 +889,9 @@
         "node:fs",
         "node:readline",
         "node:os",
-        "server/runtime/registry.mjs"
+        "server/runtime/registry.mjs",
+        "js-yaml (safe frontmatter parsing)",
+        "vendored MIT DeepSeek Harness 0.2.1-rc.2 hook bridges and native peer APIs"
       ],
       "forbiddenDependencies": [
         "server/store.mjs",
@@ -904,12 +914,18 @@
           "security"
         ]
       },
-      "extensionContract": "Atomic source-wide Claude/Codex/Agent Plugins installation resolves relative/local and HTTPS github/url/git-subdir marketplace entries with pinned revisions; unsupported source types fail the whole batch. Canonical ancestor aliases are accepted without allowing linked managed roots. Per-provider manifests/components and compatibility/reasons prevent incompatible employee bindings. Distinct bundled MCP variants split independently, with Codex cwd/env_vars retained and applied by the private launcher. Selected-only agent/hook projections and SDK stdio/SSE/Streamable HTTP bridges never write global CLI configuration. Installation materializes file/directory links within each repository/local sourceRoot, preserving names, bytes and executable mode; dangling/cyclic/external links and special files fail atomically with plugin/path context. Installed snapshots remain link-free and integrity checked. Codex invocations explicitly disable account Apps alongside ambient MCP/plugin discovery; selected MCPs and platform history remain enabled. This is tool-source isolation, not an OS sandbox.",
+      "extensionContract": "Atomic source-wide Claude/Codex/Agent Plugins installation resolves relative/local and HTTPS github/url/git-subdir marketplace entries with pinned revisions; unsupported source types fail the whole batch. Canonical ancestor aliases are accepted without allowing linked managed roots. Per-provider manifests/components and compatibility/reasons prevent incompatible employee bindings. Distinct bundled MCP variants split independently, with Codex cwd/env_vars retained and applied by the private launcher. Selected-only agent/hook projections and SDK stdio/SSE/Streamable HTTP bridges never write global CLI configuration. Installation materializes file/directory links within each repository/local sourceRoot, preserving names, bytes and executable mode; dangling/cyclic/external links and special files fail atomically with plugin/path context. Installed snapshots remain link-free and integrity checked. Codex invocations explicitly disable account Apps alongside ambient MCP/plugin discovery; selected MCPs and platform history remain enabled. This is tool-source isolation, not an OS sandbox. Source-standard execution plans are derived from integrity-checked installed files and frozen on new bindings; no per-plugin manual downgrade. Official version-pinned DeepSeek hook bridges and independent native child Sessions preserve selected source components.",
       "extensionAdapters": [
         "server/runtime/plugin-hooks.mjs",
-        "server/runtime/codex-app-server.mjs"
+        "server/runtime/plugin-agent-tools.mjs",
+        "server/runtime/codex-app-server.mjs",
+        "server/runtime/plugin-compatibility.mjs",
+        "server/runtime/dsh-extensions.mjs",
+        "server/runtime/vendor/dsh-hooks/"
       ],
-      "backgroundLifecycle": "Claude native background tasks and successful completed-turn waits suspend the platform idle watchdog; later active turns rearm it. Native process exit and failure/cancel/API retry gates remain authoritative."
+      "backgroundLifecycle": "Claude native background tasks and successful completed-turn waits suspend the platform idle watchdog; later active turns rearm it. Native process exit and failure/cancel/API retry gates remain authoritative.",
+      "dshTransport": "dsh.mjs adapts installed DeepSeek Harness 0.2.1-rc.2 SDK over JSON-RPC; dsh-plugin.mjs is materialized as a private native Cordis plugin for literal system-role instructions and the real model catalog. Per-session AgentForge-owned DeepSeek Harness homes retain native history while the native credentials service references the operator DeepSeek Harness credential file. No global plugin/config writes; selected Skills/MCP only; session/wait owns descendant completion. Native rendered system messages contribute only a boolean instruction-delivery audit; no system body is persisted.",
+      "installationState": "cli-environment.runtimeInstalled checks executable presence through the invocation PATH without starting a CLI or reading credentials. HTTP injects the fact into Store; installed=false forces effective enabled=false, locks UI switches and rejects enabled writes/new invocations. No stored preference/frozen snapshot rewrite; DeepSeek Harness is the display name, dsh remains the protocol ID."
     },
     {
       "id": "server.orchestrator",
@@ -1073,7 +1089,7 @@
       "cliPresentation": "CLI category always belongs to the client; unavailable host methods report a client error rather than selecting a browser product mode. Task workspace text does not select a Web/Desktop target.",
       "rolePresentation": "The BUILD group has a standalone Roles directory with the shared search toolbar, 20-per-page pagination and employee-card styling; role create/edit uses name plus plain-text prompt only; empty/no-match messages reuse the full-width MCP/plugin region outside the grid with only the toolbar create action; all three directories share theme surface-soft backgrounds and 6px corners, deletion shows reference errors in place, and the employee form offers an optional single role select including unbound. Cards use the avatar column so titles keep full width and show the role ID; same-name roles are distinguished by ID in the employee selector. Roles is registered in NAVIGATION for persisted visibility, empty-group hiding and default restore. Its currentColor SVG identity-badge icon remains legible across themes and narrow navigation without font glyphs; no CLI change.",
       "incrementalReading": "Stable event/Trace rows append or update in place; workspace summary reconciliation preserves the current console subtree, hydrated content, selection and scroll. History pagination preserves the reading anchor.",
-      "applicationUpdates": "One Settings/updates tab contains separate application and plugin update modules. Application state/progress/actions are inline only; a plain GitHub repository address replaces the release/download button. Plugin settings preserve drafts and pause hidden-page polling. No notification cards, renderer URL/path arguments or CLI expansion."
+      "applicationUpdates": "One Settings/updates tab directly contains application and plugin configuration sections using the standard settings heading level, without a repeated Updates title. Application state/progress/actions are inline only; a compact GitHub text link follows the current version and survives status refreshes. Plugin settings preserve drafts and pause hidden-page polling. No notification cards, renderer URL/path arguments or CLI expansion."
     },
     {
       "id": "web.manual-graphs",

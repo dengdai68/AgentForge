@@ -214,9 +214,11 @@ test("HTTP save diagnostic injection logs errors and inclusive slow saves withou
   let options;
   const calls = [];
   const databasePath = "PRIVATE_DATABASE_SENTINEL", workspaceRoot = "PRIVATE_WORKSPACE_SENTINEL";
-  const evaluate = new Function("createStore", "databasePath", "workspaceRoot", "diagnostic", `${source.slice(start, end)}; return store;`);
+  const evaluate = new Function("createStore", "databasePath", "workspaceRoot", "diagnostic", "runtimeInstalled", `${source.slice(start, end)}; return store;`);
   const sentinelStore = {};
-  assert.equal(evaluate(input => { options = input; return sentinelStore; }, databasePath, workspaceRoot, (...args) => calls.push(args)), sentinelStore);
+  const installation = () => true;
+  assert.equal(evaluate(input => { options = input; return sentinelStore; }, databasePath, workspaceRoot, (...args) => calls.push(args), installation), sentinelStore);
+  assert.equal(options.runtimeInstalled, installation);
   assert.equal(options.databasePath, databasePath); assert.equal(options.workspaceRoot, workspaceRoot);
   const record = (outcome, elapsedMs) => ({ operation: "save", outcome, elapsedMs, transactionOutcome: outcome === "success" ? "committed" : "not_started", phases: [] });
   const fast = record("success", 249.999), boundary = record("success", 250), slow = record("success", 251), failure = record("error", 0);
@@ -974,7 +976,7 @@ test("durable dispatch deduplicates, retries, preserves queue on pause, and roll
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
   store.initializeDispatches(run.id);
   const beforeUntargeted = store.snapshot();
-  assert.throws(() => store.submitHumanMessage(run.id, { content: "没有收件人的消息" }), /明确指定一位/);
+  assert.throws(() => store.submitHumanMessage(run.id, { content: "错误收件人的消息", recipientAgentId: "foreign-member" }), /不属于当前 Run/);
   assert.deepEqual(store.snapshot(), beforeUntargeted);
   const claimed = store.claimDispatch(run.id);
   assert.equal(store.claimDispatch(run.id), null);
@@ -1908,7 +1910,7 @@ test("collaboration is chronological without pinned acceptance duplicates and un
     assert.equal((html.match(/最终交接结论/g) || []).length, 1);
     assert.ok(html.indexOf('最终交接结论') < html.indexOf('新的提问'));
     assert.equal(select('#instruction-text').disabled, false);
-    assert.doesNotMatch(html, /collaboration-review|经理交接说明|停止答疑/);
+    assert.doesNotMatch(html, /collaboration-review|经理交接说明|停止答疑|共 \d+ 条协作记录|发送新消息时|回复的问题|collaboration-reference/);
     assert.equal((html.match(/等待人类确认/g) || []).length, 1, "acceptance transition stays in its chronological position");
     assert.ok(html.indexOf("等待人类确认") < html.indexOf("新的提问"));
     assert.doesNotMatch(html, /data-open-completion-confirm|workspace-acceptance/);
@@ -1954,12 +1956,12 @@ test("clarification submission preserves another Run or a newly edited draft, in
   }
 });
 
-test("task composer requires exactly one @ recipient for new messages and accepts exact replies", async () => {
+test("task composer sends unmentioned messages to the manager, preserves explicit recipients and exact replies", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const submitSource = source.slice(source.indexOf("async function sendInstruction("), source.indexOf("function openTerminateModal("));
   for (const [content, replyToMessageId, recipientAgentId, notice] of [
-    ["请处理", "", null, "新消息必须 @ 一位当前任务成员"],
-    ["@经理 @研发 请处理", "", null, "新消息必须 @ 一位当前任务成员"],
+    ["请处理", "", null, null],
+    ["@经理 @研发 请处理", "", null, "一条消息只能 @ 一位当前任务成员"],
     ["@研发 请处理", "", "developer", null],
     ["已确认", "question-1", null, null],
   ]) {

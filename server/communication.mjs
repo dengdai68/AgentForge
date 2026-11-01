@@ -3,7 +3,7 @@ import { join, resolve, sep } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
 import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
 import { communicationPrompt } from "./prompts.mjs";
-import { runClaudeCodeCli, runCodexCli, RuntimeSessionMissingError, redactExternalText, separateRuntimeSession, promptSnapshot } from "./runtime/local-cli.mjs";
+import { runClaudeCodeCli, runCodexCli, runDshCli, RuntimeSessionMissingError, redactExternalText, separateRuntimeSession, promptSnapshot } from "./runtime/local-cli.mjs";
 
 // Strict Providers (Codex response_format) require every property in
 // `required`; the nullable handoff key satisfies that while null still means
@@ -37,7 +37,7 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
             store.appendCommunicationEvent(key, item.id, { providerEventType: 'prompt.snapshot', data: { contentRef } });
           } catch (error) { diagnostic('communication.prompt_snapshot_failed', { error }); }
         };
-        const provider = invoke || (agent.runtime.provider === "codex" ? runCodexCli : runClaudeCodeCli);
+        const provider = invoke || (agent.runtime.provider === "dsh" ? runDshCli : agent.runtime.provider === "codex" ? runCodexCli : runClaudeCodeCli);
         const result = await withHistoryTools(store, agent, {
           runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, schemaPath, finalPath, outputSchema: schema,
           ...input, onPrompt, runId: key, executionKey: `communication:${key}:${agent.id}`, session,

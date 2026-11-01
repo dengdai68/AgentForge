@@ -253,7 +253,7 @@ const asArray = (value) => Array.isArray(value) ? value : [];
 const escapeRegExp = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function providerLabel(agent) {
-  return agent?.runtime?.provider === "codex" ? "Codex" : "Claude Code";
+  return agent?.runtime?.provider === "dsh" ? "DeepSeek Harness" : agent?.runtime?.provider === "codex" ? "Codex" : "Claude Code";
 }
 
 export function formatRelativeTime(iso, now = Date.now()) {

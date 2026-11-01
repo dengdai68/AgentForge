@@ -57,9 +57,9 @@ TTY 隐藏输入密码；脚本使用显式 `--password-stdin`。没有密码命
 
 员工通过 `runtime.profileId` 引用连接，扩展只接受完整 `extensionSelection:{pluginIds:[],mcpIds:[]}`。拒绝单 Skill、员工 `mcpJson`、手工路径及派生字段。工作流用 `staffingGuidance` 表达人员需求；仓库绑定研发员工。`pluginSources`、工作流 `ownerRole/repositoryPath/reuseOwnerFrom` 不属于当前写入协议。
 
-插件：`plugins list` 只列已装摘要；`plugins get ID` 按需返回 Skill/Subagent/Hook 详情。`plugins import --file source.json` 接受 `{"url":"https://…git"}` 或 `{"path":"/absolute/plugins"}`，一次原子安装来源全部 Claude/Codex 插件，返回插件摘要与拆分 MCP 摘要；任何条目失败则整批不发布。不再接受 discover/sourceId/pluginName 或安装信任参数。自带 MCP 另入 MCP 市场，员工单独选择，不随插件启用。`mcps create --file mcp.json` 安装单服务 JSON，支持 stdio/SSE/Streamable HTTP，两种 Runtime 均可用；`mcps get ID` 返回脱敏 JSON。安装不执行 Hook/依赖、不自动绑定。员工 create/update 可指定 status 为 active/inactive。详细字段用操作后的 `--help` 查看，在线市场暂不提供。
+插件：`plugins list` 只列已装摘要；`plugins get ID` 按需返回 Skill/Subagent/Hook 详情。`plugins import --file source.json` 接受 `{"url":"https://…git"}` 或 `{"path":"/absolute/plugins"}`，一次原子安装来源全部 Claude/Codex 插件，返回插件摘要与拆分 MCP 摘要；任何条目失败则整批不发布。不再接受 discover/sourceId/pluginName 或安装信任参数。自带 MCP 另入 MCP 市场，员工单独选择，不随插件启用。`mcps create --file mcp.json` 安装单服务 JSON，支持 stdio/SSE/Streamable HTTP，三种 Runtime 均可用；`mcps get ID` 返回脱敏 JSON。安装不执行 Hook/依赖、不自动绑定。员工 create/update 可指定 status 为 active/inactive。详细字段用操作后的 `--help` 查看，在线市场暂不提供。
 
-市场来源遵循 Claude/Codex 的 Git/本地部分规范：相对目录、local/path、HTTPS github/url/git-subdir，支持 ref 和完整 sha（sha 优先），安装所有条目并保留真实提交。不执行 npm/archive/command 来源，遇到时整批失败。`plugins list` 的 Runtime 列只列支持项；`plugins get ID` 的 compatibility 给出两种 Runtime 的 supported/reasons，组件注明 providers。静态支持不代表依赖、CLI 或账号已实测。不兼容的员工选择由 HTTP 拒绝。stdio MCP 额外提供 cwd（绝对路径）/env_vars（变量名数组）时仅支持 Codex；普通 stdio/远程传输的两 Runtime 支持不变。
+市场来源遵循 Claude/Codex 的 Git/本地部分规范：相对目录、local/path、HTTPS github/url/git-subdir，支持 ref 和完整 sha（sha 优先），安装所有条目并保留真实提交。不执行 npm/archive/command 来源，遇到时整批失败。`plugins list` 的 Runtime 列只列支持项；`plugins get ID` 的 compatibility 给出三种 Runtime 的 supported/reasons，组件注明 providers。静态支持不代表依赖、CLI 或账号已实测。不兼容的员工选择由 HTTP 拒绝。stdio MCP 额外提供 cwd（绝对路径）/env_vars（变量名数组）时由三种 Runtime 共用私有启动器处理。
 
 `runtimes models PROVIDER` 返回真实模型/思考等级目录；`effort` 空值使用 CLI 默认。详细参数以当前命令帮助为准。
 
@@ -68,7 +68,7 @@ TTY 隐藏输入密码；脚本使用显式 `--password-stdin`。没有密码命
 - `tasks create/start`：创建与启动分开。
 - `tasks list/get/progress`：摘要、任务事实和当前进展。
 - `tasks collaboration/questions/artifacts`：协作、未答问题与交付元数据。
-- `tasks message/reply`：给指定成员发消息，或精确回复待答人类问题。
+- `tasks message/reply`：发消息（recipientAgentId 可选，省略默认给当前 Run 项目经理；显式指定则发给该成员），或精确回复待答人类问题。
 - `tasks terminate/delete`：终止后保留历史，删除须显式 `--yes` 且任务已停止。
 
 历史执行可用 `--run RUN_ID` 指定，Run 须属于任务。写消息需要已启动的 Run；回复必须匹配当前未答问题。最终任务完成由 客户端的人类确认。
@@ -88,3 +88,9 @@ TTY 隐藏输入密码；脚本使用显式 `--password-stdin`。没有密码命
 `runtimes` 仅有 list/get/update/test/models；固定 Claude Code 和 Codex，不能 create/delete/命名。update ID --file patch.json 接受 model、effort、enabled 的非空部分对象；ID 或固定 Provider 名称可引用。models PROVIDER 不再支持 --executable。停用阻止新的 Provider 调用，不取消已运行调用；历史快照不变。
 
 安装版默认安装 Shell 命令，无需手动点击。CLI 默认复用已登录客户端的正式委托授权，客户端未登录且无独立 CLI 会话时才需 `auth login`。显式 --session-file 使用独立会话；auth logout 只撤销独立会话，共享授权请在客户端退出。实例重启自动更新共享凭证，CLI 不跟随旧端口、不读取浏览器 Cookie/数据库。
+
+DeepSeek Harness 的 CLI 入口为 runtimes list/get/update/test/models，按 dsh 或固定 ID 引用；runtimes models dsh 返回本机 SDK 的 Provider/模型ID 和逐模型档位。update --file 支持 model、effort、enabled，DeepSeek Harness effort 接受空/off/low/high/max，其他 Provider 不接受 off。员工仍只绑定 profileId 和选择扩展版本，不新增 Token/Base URL/可执行路径参数。help/schema/默认文本/显式 JSON 均同步第三个 Provider；test --yes 真实调用 DeepSeek Harness。当前仅内置 DeepSeek 路由；Subagent/command Hook 按 docs/26 原生映射，未映射字段明确拒绝。
+
+Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+
+插件兼容性由统一的源标准执行计划计算（docs/26）。`plugins list/get` 与员工选择共用当前结果；已有插件不需重装，旧 providers 不作为新 Runtime 的能力门禁。`mcps create/get` 的 cwd/env_vars 在三种 Runtime 中经统一私有启动器保留；无新增导入开关或手工降级字段，命令/输入 schema 不变。新增绑定的执行计划摘要为服务生成，CLI 不接受用户伪造引用。

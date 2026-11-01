@@ -72,8 +72,9 @@ try{
   await page.goto(origin+'/settings/updates');await page.locator('[data-app-version]').filter({hasText:'1.0.0-beta.1'}).waitFor();
   assert.equal(await page.locator('[data-settings-page="updates"]').innerText(),'更新');
   assert.equal(await page.locator('[data-settings-page="plugins"]').count(),0);
-  await page.getByRole('heading',{name:'应用更新',exact:true}).waitFor();
-  await page.getByRole('heading',{name:'插件更新',exact:true}).waitFor();
+  await page.getByRole('heading',{name:'应用更新',level:3,exact:true}).waitFor();
+  assert.equal(await page.locator('[data-settings-panel=updates]').getByRole('heading',{name:'更新',exact:true}).count(),0);
+  await page.getByRole('heading',{name:'插件更新',level:3,exact:true}).waitFor();
   await page.locator('[data-plugin-update-form] [name=intervalMinutes]:not(:disabled)').waitFor();
   await page.locator('[data-plugin-update-form] [name=intervalMinutes]').fill('7');
   await page.locator('[data-plugin-update-form] [type=submit]').click();
@@ -83,7 +84,8 @@ try{
   await page.locator('[data-plugin-update-form] [type=submit]').click();
   await page.locator('[data-plugin-update-note]').filter({hasText:'已保存'}).waitFor();
   assert.equal(await page.locator('[data-app-release]').count(),0);
-  assert.equal(await page.locator('[data-app-github]').innerText(),'https://github.com/dengdai68/AgentForge-App');
+  assert.equal(await page.locator('[data-app-github]').innerText(),'GitHub');
+  assert.equal(await page.locator('[data-app-version]').evaluate(el=>el.parentElement.querySelector('[data-app-github]')?.textContent),'GitHub');
   assert.equal(await page.locator('[data-app-github]').getAttribute('href'),'https://github.com/dengdai68/AgentForge-App');
   assert.equal(await page.locator('[data-app-github].small-button').count(),0);
   const check=()=>page.getByRole('button',{name:'检查更新',exact:true}).click();

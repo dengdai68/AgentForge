@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from 'node:url';
+import { runDshSdk } from "./dsh.mjs";
 import { runCodexAppServer } from "./codex-app-server.mjs";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline";
@@ -139,7 +141,7 @@ export function runtimeFailureSummary(value) {
     [/市场扩展|所选 MCP|未选择的 MCP|Codex 市场|不支持市场技能加载隔离/, "市场扩展不可用：检查所选版本完整性、MCP 连接及 CLI 兼容性，修复后重试。"],
     [/CLI 不可启动|ENOENT|command not found/i, "CLI 不可启动：按运行日志检查本机 CLI 安装与登录 Shell PATH，修复后重新打开客户端并测试 Runtime。"],
     [/CLI 无执行权限|EACCES|EPERM/i, "CLI 无执行权限：检查可执行文件及任务目录权限。"],
-    [/登录已失效|not logged in|login required|invalid api key|401|403/i, "CLI 登录已失效或请求未授权：请在本机终端检查登录与模型访问权限。"],
+    [/登录已失效|not logged in|login required|invalid api key|MISSING_CREDENTIAL|INVALID_CREDENTIAL|401|403/i, "CLI 登录已失效或请求未授权：请在本机终端检查登录与模型访问权限。"],
     [/网络连接失败|ENOTFOUND|ECONNREFUSED|ECONNRESET|fetch failed|network error/i, "网络连接失败：检查本机网络、代理和 Provider 服务地址。"],
     [/CLI 参数不兼容|unknown option|unrecognized (?:option|argument)/i, "CLI 参数不兼容：检查本机 CLI 版本与数字员工运行配置。"],
     [/未返回可验证的最终结构化结果/, "CLI 未返回可验证的最终结构化结果：检查模型与 CLI 配置后重试。"],
@@ -404,7 +406,11 @@ async function invokeClaudeCodeCli(input) {
     args.push("--effort", runtime.effort);
   }
   for (const pluginPath of runtime.pluginPaths || []) args.push("--plugin-dir", pluginPath);
-  for (const mcpPath of runtime.mcpConfigPaths || []) args.push("--mcp-config", mcpPath);
+  if(Object.keys(extensions).length) {
+    const mcpServers=Object.fromEntries(Object.entries(extensions).map(([name,{ref}])=>[name,{command:process.execPath,args:[fileURLToPath(new URL('./mcp-launcher.mjs',import.meta.url)),ref.path,ref.sha256,name],...(process.versions.electron?{env:{ELECTRON_RUN_AS_NODE:'1'}}:{})}]));
+    const selectedMcp=join(traceDirectory,'agentforge-market-mcp.json');
+    await writeFile(selectedMcp,JSON.stringify({mcpServers}),{mode:0o600});args.push('--mcp-config',selectedMcp);
+  }
   if (input.historyMcp) args.push("--mcp-config",input.historyMcp.configPath);
   // --mcp-config/--plugin-dir are variadic; separate the positional prompt.
   args.push("--", prompt);
@@ -566,3 +572,5 @@ async function loggedInvocation(input, invoke) {
 
 export function runClaudeCodeCli(input) { return loggedInvocation(input, invokeClaudeCodeCli); }
 export function runCodexCli(input) { return loggedInvocation(input, invokeCodexCli); }
+
+export function runDshCli(input) { return loggedInvocation(input, value => runDshSdk(value, { content: executionContent, cancelledError: message => new RuntimeCancelledError(message), missingSessionError: message => new RuntimeSessionMissingError(message) })); }

@@ -1053,7 +1053,7 @@ function renderWorkspace() {
 function tracePromptMarkup(trace, runId, agent = null) {
   const label = `本次提示词 · ${trace.workflowNodeId || trace.type || "调用"}`;
   const provider = trace.agent?.runtime?.provider || agent?.runtime?.provider;
-  const sessionLabel = `${provider === "codex" ? "Codex" : provider === "claude-code" ? "Claude Code" : "Runtime"} 会话 ID`;
+  const sessionLabel = `${provider === "dsh" ? "DeepSeek Harness" : provider === "codex" ? "Codex" : provider === "claude-code" ? "Claude Code" : "Runtime"} 会话 ID`;
   const session = `<div class="console-session-id"><span>${esc(sessionLabel)}</span><code>${esc(trace.providerSessionId || "未记录")}</code></div>`;
   const body = trace.promptRef
     ? `<div class="prompt-snapshot-body" data-prompt-snapshot="${esc(trace.id)}" data-content-run="${esc(runId)}"${trace.contentBase ? ` data-content-url="${esc(trace.contentBase)}/traces/${esc(trace.id)}/prompt"` : ""}><span class="muted">正在读取提示词快照…</span></div>${session}`
@@ -1188,8 +1188,8 @@ function consoleSessionMarkup(event, trace, agent) {
   if (!created && !resumed && !initialized) return '';
   if (trace && (trace.id !== event.data?.traceId || trace.agentId !== event.actor?.id)) return '';
   const provider = trace?.agent?.runtime?.provider || agent?.runtime?.provider;
-  if (!['claude-code','codex'].includes(provider)) return '';
-  const label = provider === 'codex' ? 'Codex' : 'Claude Code';
+  if (!['claude-code','codex','dsh'].includes(provider)) return '';
+  const label = provider === 'dsh' ? 'DeepSeek Harness' : provider === 'codex' ? 'Codex' : 'Claude Code';
   let id = trace?.providerSessionId || (provider === 'claude-code' || resumed ? event.data?.sessionId : null);
   // Codex allocates its native thread ID only on thread.started. Its initial
   // platform placeholder must never be presented as a resumable provider ID.
@@ -1754,14 +1754,13 @@ function renderCollaboration(workspace, agents) {
   const runtimeNoticeIds = new Set((workspace.messages || []).filter(message => message.sender?.type === "system" && ["automatic_retry", "escalation"].includes(message.kind)).map(message => message.id));
   const records = collaborationRecords(workspace).filter(item => item.category !== "dispatch" && !runtimeNoticeIds.has(item.id) && !["run.failed", "session.reset", "dispatch.retry_scheduled", "dispatch.retry_stopped", "dispatch.escalated"].includes(item.eventType)).filter(item => view.collaborationFilter === "human" ? item.human : true);
   const visibleRecords = records.slice(-(view.collaborationLimit || 30));
-  const disclosure = key => `data-workspace-disclosure="${esc(key)}" ${view.disclosures[key] ? "open" : ""}`;
   const body = (content, key) => {
     const expanded = Boolean(view.disclosures["body:" + key]), id = "collaboration-body-" + encodeURIComponent(key);
     return `<div class="collaboration-body ${expanded ? "is-expanded" : ""}" data-collaboration-body="${esc(key)}"><div class="collaboration-body-content" id="${esc(id)}">${collaborationMessageMarkup(content, agents.map(agent => agent.name))}</div><button type="button" class="text-action collaboration-expand" data-expand-collaboration-body aria-expanded="${expanded}" aria-controls="${esc(id)}" hidden>${expanded ? "收起" : "展开全文"}</button></div>`;
   };
   dock.innerHTML = `
-    <div class="collaboration-toolbar"><div><strong>团队协作</strong><small>共 ${records.length} 条协作记录</small></div><div class="collaboration-filters">${[["all", "全部"], ["human", "涉及人类"]].map(([value, label]) => `<button class="small-button ${view.collaborationFilter === value ? "primary" : ""}" data-collaboration-filter="${value}" aria-pressed="${view.collaborationFilter === value}">${label}</button>`).join("")}<button class="small-button" data-collaboration-latest>↓ 最新</button></div></div>
-    ${questions.length ? `<div class="await-banner"><strong>${questions.length} 个问题待你回答</strong>回答后恢复对应成员的协作；也可以选择追加新指令。${run.status === "paused" ? "任务已暂停，回复不会启动执行。" : ""}</div>` : `<p class="human-guide">发送新消息时，请 @ 一位当前任务成员。</p>`}
+    <div class="collaboration-toolbar"><div><strong>团队协作</strong></div><div class="collaboration-filters">${[["all", "全部"], ["human", "涉及人类"]].map(([value, label]) => `<button class="small-button ${view.collaborationFilter === value ? "primary" : ""}" data-collaboration-filter="${value}" aria-pressed="${view.collaborationFilter === value}">${label}</button>`).join("")}<button class="small-button" data-collaboration-latest>↓ 最新</button></div></div>
+    ${questions.length ? `<div class="await-banner"><strong>${questions.length} 个问题待你回答</strong>回答后恢复对应成员的协作；也可以选择追加新指令。${run.status === "paused" ? "任务已暂停，回复不会启动执行。" : ""}</div>` : ""}
     <div class="human-message-list">
       ${records.length > visibleRecords.length ? '<button class="small-button" data-collaboration-older>加载更早协作记录</button>' : ""}
       ${records.length ? visibleRecords.map(item => `<article class="collaboration-row ${item.senderType === "human" ? "from-human" : ""} ${item.canReply ? "needs-answer" : ""}" data-collaboration-record="${esc(item.id)}" data-tone="${esc(item.tone)}" data-record-status="${esc(item.statusCode)}"><time>${exactTime(item.timestamp)}</time><div>
@@ -1770,7 +1769,6 @@ function renderCollaboration(workspace, agents) {
           ${item.routingNote ? `<p class="collaboration-source-note">${esc(item.routingNote)}</p>` : ""}
           ${item.sourceNotice ? `<p class="collaboration-source-note">${esc(item.sourceNotice)}</p>` : ""}
           ${item.questionType ? `<small>问题类型：${esc(item.questionType)} · 路由依据：${esc(item.routingReason)}</small>` : ""}
-          ${item.reply ? `<details class="collaboration-reference" ${disclosure("reply:" + item.id)}><summary>回复的问题</summary><p>${esc(item.reply)}</p></details>` : ""}
           ${body(item.content, item.id)}
           ${item.reason ? `<p>${esc(item.reason)}</p>` : ""}
           ${item.canReply ? `<button class="small-button primary" data-answer-message="${esc(item.replyId)}">回复此问题</button>` : ""}
@@ -1779,7 +1777,7 @@ function renderCollaboration(workspace, agents) {
     </div>
     <form class="instruction-form" id="instruction-form">
       ${questions.length ? `<label for="reply-question">消息用途</label><select id="reply-question" name="replyToMessageId"><option value="">追加新指令（排队）</option>${questions.map(item => `<option value="${item.id}" ${view.replyToMessageId === item.id ? "selected" : ""}>回复 ${esc(item.sender.name)}：${esc(item.content.slice(0, 70))}</option>`).join("")}</select>` : ""}
-      <label for="instruction-text">消息内容</label><div class="mention-wrap"><textarea id="instruction-text" name="content" required placeholder="输入回答；新消息请 @ 一位任务成员…"></textarea><div class="mention-list" id="mention-list"></div></div>
+      <label for="instruction-text">消息内容</label><div class="mention-wrap"><textarea id="instruction-text" name="content" required placeholder="输入消息…"></textarea><div class="mention-list" id="mention-list"></div></div>
       <button class="primary-button compact" type="submit" data-send-instruction ${run.task.archivedAt ? "disabled" : ""}>发送</button>
       <p class="directive-note">${run.task.archivedAt ? "任务已归档，协作记录只读。" : ["completed", "cancelled", "failed", "paused"].includes(run.status) ? "可继续咨询；仅答疑，不恢复业务流程。Enter 发送，Shift / Cmd / Alt + Enter 换行。" : "新指令入队，不打断当前成员。Enter 发送，Shift / Cmd / Alt + Enter 换行。"}</p>
     </form>`;
@@ -1901,11 +1899,11 @@ async function sendInstruction(event) {
   const form = new FormData(event.currentTarget);
   const content = String(form.get("content") || "").trim();
   if (!content) return;
-  /* 新消息须明确 @ 一位成员；精确回复由问题 ID 决定接收人。 */
+  /* 未 @ 成员交由 Store 路由给经理；精确回复由问题 ID 决定接收人。 */
   const agents = state.workspace ? workspaceAgents(state.workspace, state.agents) : [];
   const replyToMessageId = form.get("replyToMessageId") || null;
   const targets = agents.filter((agent) => new RegExp(`@${agent.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|\\s|[，,。.!！?？:：;；])`).test(content));
-  if (!replyToMessageId && targets.length !== 1) { toast("新消息必须 @ 一位当前任务成员", true); return; }
+  if (!replyToMessageId && targets.length > 1) { toast("一条消息只能 @ 一位当前任务成员", true); return; }
   const target = targets[0];
   const runId = state.selectedRunId;
   const view = workspaceView(runId);
@@ -1915,7 +1913,7 @@ async function sendInstruction(event) {
   try {
     const result = await api(`/api/runs/${runId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ recipientAgentId: replyToMessageId ? null : target.id, replyToMessageId, content }),
+      body: JSON.stringify({ recipientAgentId: replyToMessageId ? null : target?.id ?? null, replyToMessageId, content }),
     });
     toast(result.interactionOnly ? "问题已发送，仅答疑，不恢复业务流程" : result.resumed ? "澄清已发送，对应协作将继续" : "消息已入队，不打断正在执行的成员");
     if (workspaceView(runId).draft === draft) workspaceView(runId).draft = "";
@@ -2203,7 +2201,7 @@ async function agentModal(existing = null) {
     <p class="modal-intro">数字员工可加入团队并承担工作流节点；修改仅影响后续新任务和沟通。</p>
     <form id="agent-form" novalidate>
       <div class="employee-identity-row"><div class="form-field"><label>名称 <b>*</b></label><input name="name" value="${esc(existing?.name || "")}" placeholder="例如：周航" /><div class="field-error"></div></div><fieldset class="employee-status-choice"><legend>状态</legend><label><input type="radio" name="status" value="active" ${!existing || existing.status==='active'?'checked':''}>可用</label><label><input type="radio" name="status" value="inactive" ${existing?.status==='inactive'?'checked':''}>停用</label></fieldset></div>
-      <div class="employee-properties-row"><div class="form-field"><label>员工类型</label><select name="kind"><option value="business">其他</option><option value="manager" ${existing?.kind === "manager" ? "selected" : ""}>项目经理</option><option value="developer" ${existing?.kind === "developer" ? "selected" : ""}>研发工程师</option></select></div><div class="form-field"><label for="employee-runtime-profile">Runtime 配置 <b>*</b></label><select id="employee-runtime-profile" name="runtimeProfileId">${profiles.map(item => `<option value="${esc(item.id)}" ${!item.enabled && item.id !== runtime.profileId ? 'disabled' : ''} ${item.id === runtime.profileId ? 'selected' : ''}>${item.provider === 'codex' ? 'Codex' : 'Claude Code'}${item.enabled ? '' : '（已停用）'}</option>`).join('')}</select></div></div>
+      <div class="employee-properties-row"><div class="form-field"><label>员工类型</label><select name="kind"><option value="business">其他</option><option value="manager" ${existing?.kind === "manager" ? "selected" : ""}>项目经理</option><option value="developer" ${existing?.kind === "developer" ? "selected" : ""}>研发工程师</option></select></div><div class="form-field"><label for="employee-runtime-profile">Runtime 配置 <b>*</b></label><select id="employee-runtime-profile" name="runtimeProfileId">${profiles.map(item => `<option value="${esc(item.id)}" ${!item.enabled && item.id !== runtime.profileId ? 'disabled' : ''} ${item.id === runtime.profileId ? 'selected' : ''}>${item.provider === 'dsh' ? 'DeepSeek Harness' : item.provider === 'codex' ? 'Codex' : 'Claude Code'}${item.enabled ? '' : '（已停用）'}</option>`).join('')}</select></div></div>
       <p class="field-hint">Runtime 在设置中管理和测试；停用不改写冻结任务与沟通。插件和 MCP 按员工独立选择。</p>
       <div id="employee-repository-fields" ${existing?.kind === "developer" ? "" : "hidden"}>
         <div class="form-field full"><label for="employee-repository-url">绑定 Git 仓库 <b>*</b></label><input id="employee-repository-url" name="repositoryUrl" value="${esc(existing?.repository?.url || "")}" placeholder="https://github.com/owner/repository.git" /><div class="field-error"></div></div>
@@ -2258,7 +2256,7 @@ async function agentModal(existing = null) {
     try {
       await api(existing ? `/api/agents/${existing.id}` : "/api/agents", { method: existing ? "PUT" : "POST", body: JSON.stringify(input) });
       closeModal();
-      toast(`数字员工「${input.name}」${existing ? "已更新" : "已创建"}并绑定 ${provider === "codex" ? "Codex" : "Claude Code"} Runtime。`);
+      toast(`数字员工「${input.name}」${existing ? "已更新" : "已创建"}并绑定 ${provider === "dsh" ? "DeepSeek Harness" : provider === "codex" ? "Codex" : "Claude Code"} Runtime。`);
       await refresh();
     } catch (error) { toast(error.message, true); }
   });

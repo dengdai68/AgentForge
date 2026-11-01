@@ -74,3 +74,7 @@ Runtime 固定目录和当前可用门禁归 Store，HTTP/CLI 只接受模型、
 经理协调调用缺少 managerDecision 或缺少 nextNodeId 时，保留原报告并复用真实 routing: 协调纠错投递，要求经理明确派工/咨询/提交验收；不静默耗尽队列、不从自然语言推断验收。普通员工文字交接及 inquiry 答复规则不变。
 
 桌面应用更新采用现有 electron-builder 配套的 electron-updater 与显式 semver 依赖，不自建应用替换服务。更新生命周期只属于宿主，Store/CLI不拥有更新状态；正式发现、临时签名手动安装及签名原生安装、原子空闲锁与CI交付契约见 [架构决策：应用更新](24-desktop-updates.md)。
+
+DeepSeek Harness 使用独立 SDK JSON-RPC 适配器 dsh.mjs；dsh-plugin.mjs 作为每次调用的私有原生 Cordis 插件提供 system-role 指令与模型元数据，不进入 renderer/HTTP 控制器。会话目录归 AgentForge Runtime 配置根，凭据由 DeepSeek Harness 原生服务从原 DSH_HOME 读取，不解析/复制密钥。SDK session/wait 结束全部托管后续工作后才结算；Store 仍拥有身份/任务状态。决策见 docs/25。
+
+Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。

@@ -11,6 +11,32 @@ import { createSqlitePersistence } from "../server/persistence.mjs";
 import { createRunFiles } from "../server/run-files.mjs";
 import { dispatchBlocksHandoff, executeRun, requestHumanIntervention, scheduleManagerFollowup } from "../server/orchestrator.mjs";
 
+test('unaddressed task messages route to the frozen manager while terminal runs remain inquiry-only', () => {
+  for (const status of ['running', 'paused', 'completed', 'failed', 'cancelled', 'awaiting_acceptance']) {
+    const store = createFixtureStore();
+    try {
+      const run = store.createRun(store.listTasks()[0].id);
+      if (['completed', 'awaiting_acceptance'].includes(status)) {
+        store.updateRun(run.id, { status: 'running' }); store.updateRun(run.id, { status: 'review' }); store.updateRun(run.id, { status: 'awaiting_acceptance' });
+        if (status === 'completed') store.confirmRunCompletion(run.id);
+      } else store.updateRun(run.id, { status });
+      for (const extra of [{}, { recipientAgentId: null }]) {
+        const sent = store.submitHumanMessage(run.id, { content: '请说明当前结果', ...extra });
+        assert.equal(sent.message.recipient.id, run.manager.id);
+        const delivery = store.listDispatches(run.id).find(item => item.sourceMessageId === sent.message.id);
+        const inquiry = ['paused', 'completed', 'failed', 'cancelled'].includes(status);
+        assert.equal(sent.interactionOnly, inquiry);
+        assert.equal(delivery.recipientAgentId, run.manager.id);
+        assert.equal(delivery.purpose, inquiry ? 'inquiry' : 'manager');
+        assert.equal(store.getRun(run.id).status, status === 'awaiting_acceptance' ? 'running' : status);
+      }
+      const before = store.snapshot();
+      assert.throws(() => store.submitHumanMessage(run.id, { content: '错误接收人', recipientAgentId: 'foreign-member' }), /不属于当前 Run/);
+      assert.deepEqual(store.snapshot(), before);
+    } finally { store.close(); }
+  }
+});
+
 test('dispatch provenance is same-Run metadata and does not deliver or consume the source message', () => {
   const store = createFixtureStore();
   try {
@@ -77,7 +103,8 @@ test("an unanswered human question blocks every queued dispatch through messages
   assert.equal(store.claimDispatch(run.id).id, parent.id);
   const question = store.askQuestion(parent.id, { audience: "human", question: "请确认范围", questionType: "scope", routingReason: "需人类决定", consideredMemberIds: ["agent_analyst"] }, "trace_fixture");
   assert.equal(store.getRun(run.id).status, "awaiting_human");
-  const ordinary = store.submitHumanMessage(run.id, { content: "这是新指令，不是答复", recipientAgentId: run.manager.id });
+  const ordinary = store.submitHumanMessage(run.id, { content: "这是新指令，不是答复" });
+  assert.equal(ordinary.message.recipient.id, run.manager.id);
   const directed = store.submitHumanMessage(run.id, { recipientAgentId: "agent_tester", content: "请先测试" });
   assert.equal(ordinary.resumed, false);
   assert.equal(directed.resumed, false);

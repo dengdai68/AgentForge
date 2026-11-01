@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
 import { desktopServiceDataRoot } from "./data-home.mjs";
 import { createRunFiles } from "./run-files.mjs";
-import { runClaudeCodeCli, runCodexCli, promptSnapshot, RuntimeCancelledError, RuntimeSessionMissingError, runtimeFailureDetail, retryableRuntimeFailure, separateRuntimeSession } from "./runtime/local-cli.mjs";
+import { runClaudeCodeCli, runCodexCli, runDshCli, promptSnapshot, RuntimeCancelledError, RuntimeSessionMissingError, runtimeFailureDetail, retryableRuntimeFailure, separateRuntimeSession } from "./runtime/local-cli.mjs";
 import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
 import { terminateExecution } from "./runtime/registry.mjs";
 import { taskPrompt } from "./prompts.mjs";
@@ -52,7 +52,7 @@ export function parseEmployeeResponse(value) {
   return readNodeResult({ summary: raw });
 }
 function nodeInfo(task, nodeId) { return task.workflowSnapshot.nodes.find((node) => node.id === nodeId); }
-async function provider(input) { if (input.runtime.provider === "codex") return runCodexCli(input); if (input.runtime.provider !== "claude-code") throw new Error(`不支持的真实运行时：${input.runtime.provider}`); return runClaudeCodeCli(input); }
+async function provider(input) { if (input.runtime.provider === "dsh") return runDshCli(input); if (input.runtime.provider === "codex") return runCodexCli(input); if (input.runtime.provider !== "claude-code") throw new Error(`不支持的真实运行时：${input.runtime.provider}`); return runClaudeCodeCli(input); }
 
 // Keep redacted original wording separate from automatic retry eligibility.
 class RuntimeInvocationError extends Error {
@@ -230,7 +230,7 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
       // content/tool activity is; preserve this receipt even if the turn fails.
       if (content && ['text', 'thinking', 'input', 'output'].some(key => content.fields?.[key]?.text)) acknowledgeInput();
       if (content) auditEvent.data.contentRef = await files.writeConsoleContent(runId, trace.id, content);
-      if (agent.runtime.provider === "codex" && auditEvent.providerEventType === "thread.started" && sessionId) store.bindProviderSession(trace.id, sessionId);
+      if (["codex", "dsh"].includes(agent.runtime.provider) && auditEvent.providerEventType === "thread.started" && sessionId) store.bindProviderSession(trace.id, sessionId);
       await files.appendTrace(runId, trace.id, { occurredAt: new Date().toISOString(), runId, traceId: trace.id, workflowNodeId: node.id, agentId: agent.id, provider: agent.runtime.provider, type: auditEvent.providerEventType, message: auditEvent.message, data: auditEvent.data });
       store.addEvent({ type: "runtime.event", runId, actor: { type: "agent", id: agent.id, name: agent.name }, message: auditEvent.providerEventType + ": " + (auditEvent.message || "收到运行时事件"), data: { traceId: trace.id, workflowNodeId: node.id, providerEventType: auditEvent.providerEventType, ...auditEvent.data } });
     };

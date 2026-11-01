@@ -44,3 +44,11 @@ CLI 仅连接运行中的客户端；源码/安装版统一通过私有 endpoint
 重复 plugins import 按同来源地址＋插件名称覆盖；mcps create（含插件拆分 MCP）按安装名称覆盖，去首尾空格并区分大小写。当前员工引用原子切换，冻结历史不变，不兼容时整批拒绝。输入参数保持；help/schema、文本覆盖计数及 JSON replacements/employees/historyRetained 回执同步。
 
 Runtime 命令固定为 list/get/update/test/models，按 ID 或固定 Provider 引用，model/effort/enabled 为非空部分更新，旧 create/delete/名称/自定义 CLI 路径明确拒绝。默认优先验证并使用宿主发布的父会话关联凭证；显式 --session-file 隔离独立 CLI 登录。logout 只撤销独立会话，共享授权在客户端退出。见 docs/14、15、21。
+
+DeepSeek Harness 是第三个固定 Runtime；runtimes list/get/update/test/models 均支持 dsh 引用，schema 含 DeepSeek Harness off/low/high/max 和模型 Provider/ID 说明。员工通过 profileId 绑定；不新增凭据或可执行路径输入。模型目录真实启动本机 SDK 但不调用模型生成；test --yes 才调用模型。
+
+Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+
+tasks message 的 recipientAgentId 可省略，默认发给当前 Run 的项目经理；显式提供需为当前 Run 成员 ID。tasks reply 仍必须指定待答问题 ID，普通消息不会被猜成澄清回答；回执保留实际接收方。
+
+插件/MCP 跨 Runtime 支持按源标准计划统一查询；既有安装无需重装，`plugins get` 可核对每种 Runtime 的当前原因。输入命令不新增兼容转换开关，MCP cwd/env_vars 在三种 Runtime 共用私有启动器，详见 docs/26。

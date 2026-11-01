@@ -717,7 +717,7 @@ try {
   const cliProfiles = await packagedCli(['runtimes', 'list', '--all']);
   const humanProfiles = await packagedCli(['runtimes', 'list'], '', undefined, false);
   assert.match(humanProfiles, /Runtime列表/); assert.match(humanProfiles, /Runtime/); assert.match(humanProfiles, /模型/); assert.ok(!humanProfiles.startsWith('{'));
-  assert.equal(cliProfiles.items.length, 2);
+  assert.deepEqual(cliProfiles.items.map(item => item.provider).sort(), ['claude-code','codex','dsh']);
   for (const runtime of [{profileId:null},{profileId:cliProfiles.items[0].id,extensionSelection:null},{skillPaths:[]}]) {
     const rejected=await page.evaluate(async body=>{
       const response=await fetch('/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -732,7 +732,7 @@ try {
     const status=await page.evaluate(async body=>(await fetch('/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).status,input);
     assert.equal(status,400,'packaged HTTP rejects retired extension input');
   }
-  assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,2);
+  assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,3);
   await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({enabled:false}));
   assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.find(item=>item.provider==='codex').enabled,false);
   await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({enabled:true}));
@@ -779,7 +779,7 @@ try {
   // diagnostics are covered by Runtime tests; inspect the actual fixed inline editor.
   await page.goto(urlFor(page,'/settings/runtime'));
   await page.locator('.runtime-provider-row').first().waitFor();
-  assert.equal(await page.locator('.runtime-provider-row').count(),2);
+  assert.equal(await page.locator('.runtime-provider-row').count(),3);
   await page.locator('.runtime-provider-row').first().locator('summary').click();
   const runtimeDrawer=page.locator('.runtime-inline-editor');
   await runtimeDrawer.waitFor();
@@ -841,7 +841,7 @@ try {
       assert.match(await packagedCli(['runtimes', 'list'], '', shell, false), /Runtime/);
       const configured = await packagedCli(['runtimes','get','codex'],'',shell);
       await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({model:'',effort:''}),shell);
-      assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,2);
+      assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,3);
       await packagedCli(['auth', 'logout'], '', shell);
       await page.screenshot({ path: join(evidenceRoot, 'packaged-cli-installed.png'), animations: 'disabled' });
       console.log('PASS General styled host consent cancellation/installation and fresh-shell progressive help/login/configuration/HTTP readback/logout, fixture home only');

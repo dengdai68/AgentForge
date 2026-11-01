@@ -72,3 +72,11 @@ Task、Run、Trace、Artifact 和历史消息保留关联。删除配置时保�
 `GET /api/bootstrap` 返回目录摘要；`GET /api/runs/:id/workspace?view=summary` 排除 Runtime 日志；`GET /api/runs/:id/console` 按成员、Trace 与游标分页。完整执行正文与提示词使用各自按需读取接口。
 
 Runtime 当前目录每种 Provider 恰好一项，ID 保持稳定；saveRuntimeProfile 仅允许 model/effort/enabled 非空部分更新并原子投影当前员工。Task/Run/已排队调用的模型档位仍冻结；enabled 为当前调用可用门禁，不属于冻结的业务事实。停用不取消正在执行的进程，但拒绝新任务启动、沟通发送及后续调用；重启后保存的开关仍生效。创建、删除、名称、CLI 路径和命名 profile 写入协议废弃，详见 docs/15。
+
+Runtime Provider 新增 dsh，固定槽位 runtime_dsh；与现有两个 Provider 同样由 Store 拥有 enabled/model/effort 及员工绑定。DeepSeek Harness effort 为 off/low/high/max，空为原生默认。已有任务/排队投递保持冻结配置，开关只约束后续调用。DeepSeek Harness 和 Codex 一样须确认原生会话存在后再标记为可恢复；未知会话错误经原恢复入口处理，Runtime 不自建替代会话。新增 Provider 不重置操作者实例或改写旧市场/任务版本；旧市场版本需重新导入/编辑以获得当前 DeepSeek Harness 兼容声明。
+
+Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+
+任务协作的人类新消息未提供 recipientAgentId（省略或 null）时，由 Store 路由给该 Run 的冻结项目经理；显式指定仍校验当前 Run 成员。精确澄清回复继续由 replyToMessageId 决定接收人，普通消息不能隐式回答待答问题。已完成/暂停/失败/终止 Run 的无指定消息仍为经理答疑，不恢复业务执行；已归档继续只读。
+
+插件新绑定的 `adapterVersion:2` 引用冻结 `planTarget`、`sourceDialect`、`planSha256`，只含元数据与摘要，不存原始提示词或 Hook 命令。新安装另外保留 `sourceRoot/sourceSha256` 完整性引用。执行计划按源标准解析；已有 Task/Run 的旧引用继续按旧适配语义执行，不自动换计划。MCP 新绑定 `mcpAdapterVersion:2` 保留源服务名，历史调用保留其记录的命名方式。详见 docs/26。
