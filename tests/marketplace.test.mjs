@@ -377,7 +377,7 @@ test('selection is plugin/MCP only, complete and duplicate-free',async t=>{
 test('malformed Hook reports a useful error without echoing source contents',async t=>{
   const {root,market}=await fixture(t),source=await plugin(root,'malformed',0,{hooks:'./private-hook.json'});
   await writeFile(join(source,'private-hook.json'),'PRIVATE_HOOK_SENTINEL invalid');
-  await assert.rejects(market.import({path:source}),error=>/JSON/.test(error.message) && !error.message.includes('SENTINEL'));
+  const result=await market.import({path:source});assert.equal(result.plugins.length,0);assert.equal(result.warnings.length,1);assert.match(result.warnings[0].message,/JSON/);assert.doesNotMatch(JSON.stringify(result),/SENTINEL/);
 });
 test('MCP details redact credentials; unsupported fields and multi-server input reject',async t=>{
   const {market}=await fixture(t),entry=await market.add(mcp),detail=await market.detail(entry.id,'mcp');
@@ -563,4 +563,40 @@ test('communication applies extension removal without rebuilding native memory',
   assert.equal(next.resume,true); assert.equal(next.sessionId,session.sessionId);
   assert.deepEqual(second.agentSnapshot.runtime.extensionSelection, { pluginIds: [], mcpIds: [] });
   assert.ok(store.getCommunication(chat.id).messages.some(message=>message.content==='first reply'));
+});
+
+
+test('malformed components are isolated; normalized native trees retain only valid components for every Runtime',async t=>{
+  const {root,market}=await fixture(t),source=await plugin(root,'partial',2);
+  await writeFile(join(source,'skills/proof-1/SKILL.md'),'---\nname: [broken\n---\nPRIVATE_SENTINEL');
+  await mkdir(join(source,'agents'));await mkdir(join(source,'hooks'));
+  await writeFile(join(source,'agents/good.md'),'---\nname: good\nmodel: inherit\ntools: Bash\n---\nAnalyze');
+  await writeFile(join(source,'agents/bad.md'),'---\nname: broken\ntools: 123\n---\nPRIVATE_SENTINEL');
+  await writeFile(join(source,'hooks/hooks.json'),JSON.stringify({hooks:{PreToolUse:[{hooks:[{type:'command',command:'true'},{type:'command',command:123}]},{matcher:'[',hooks:[{type:'command',command:'false'}]}],Stop:'invalid'}}));
+  const result=await market.import({path:source});assert.equal(result.plugins.length,1);assert.equal(result.warnings.length,5);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_SENTINEL/);
+  const entry=result.plugins[0],detail=await market.detail(entry.id,'plugin');assert.equal(detail.warnings.length,5);assert.equal(detail.components.skills.length,1);assert.equal(detail.components.agents.length,1);
+  const {readPluginExecutionPlan}=await import('../server/runtime/marketplace.mjs');
+  for(const provider of ['claude-code','codex','dsh']){
+    const runtime=await market.resolve({pluginIds:[entry.id],mcpIds:[]},provider),ref=runtime.extensionManifest[0],plan=await readPluginExecutionPlan(ref);
+    assert.equal(ref.skills.length,1);assert.equal(plan.agents.length,1);assert.equal(plan.hooks.length,1);assert.equal(plan.hooks[0].matchers.length,1);assert.equal(plan.hooks[0].matchers[0].hooks.length,1);
+    await assert.rejects(stat(join(ref.path,'../../skills/proof-1/SKILL.md')));
+    assert.match(await readFile(join(ref.sourceRoot,'skills/proof-1/SKILL.md'),'utf8'),/PRIVATE_SENTINEL/);
+  }
+});
+
+
+test('a source-wide import publishes healthy siblings when another plugin has only broken components',async t=>{
+  const {root,market}=await fixture(t),good=await plugin(root,'good',1),bad=await plugin(root,'bad',1);
+  await writeFile(join(bad,'skills/proof-0/SKILL.md'),'---\nname: [broken\n---\nprivate source');
+  await mkdir(join(root,'.claude-plugin'));await writeFile(join(root,'.claude-plugin/marketplace.json'),JSON.stringify({name:'mixed',plugins:[{name:'good',source:'./good'},{name:'bad',source:'./bad'}]}));
+  const result=await market.import({path:root});assert.deepEqual(result.plugins.map(item=>item.name),['good']);assert.equal(result.warnings.length,1);assert.equal(result.warnings[0].plugin,'bad');
+  assert.deepEqual((await market.catalog()).plugins.map(item=>item.name),['good']);
+});
+
+
+test('the source Hook wildcard is valid and retained rather than mistaken for malformed regex',async t=>{
+  const {root,market}=await fixture(t),source=await plugin(root,'wildcard',1,{hooks:{PreToolUse:[{matcher:'*',hooks:[{type:'command',command:'true'}]}]}});
+  const result=await market.import({path:source});assert.deepEqual(result.warnings,[]);
+  for(const provider of ['claude-code','codex','dsh'])assert.equal((await market.resolve({pluginIds:[result.plugins[0].id],mcpIds:[]},provider)).extensionManifest.length,1);
+  assert.equal((await market.detail(result.plugins[0].id,'plugin')).components.hooks[0].matchers[0].matcher,'*');
 });

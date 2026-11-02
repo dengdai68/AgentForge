@@ -16,7 +16,7 @@ function persona(agent) {
   // The bound role arrives as data on the (frozen or refreshed) agent snapshot;
   // this module never resolves it. Role text joins the application system
   // instructions alongside the employee's own working rules — never the input.
-  return [`你是「${agent.name}」。`, `角色工作法：${agent.systemPrompt || agent.description || "根据本次输入完成职责。"}`, agent.roleSnapshot?.prompt && `绑定角色「${agent.roleSnapshot.name}」的共用系统提示词：${agent.roleSnapshot.prompt}`, agent.description && agent.description !== (agent.systemPrompt || agent.description) && `说明：${agent.description}`, agent.capabilities?.length && `成员能力：${JSON.stringify(agent.capabilities)}`].filter(Boolean).join("\n");
+  return [`你是「${agent.name}」。`, `角色工作法：${agent.systemPrompt || agent.description || "根据本次输入完成职责。"}`, ...(agent.roleSnapshots ?? (agent.roleSnapshot ? [agent.roleSnapshot] : [])).filter(role=>role.prompt).map(role=>`绑定角色「${role.name}」的共用系统提示词：${role.prompt}`), agent.description && agent.description !== (agent.systemPrompt || agent.description) && `说明：${agent.description}`, agent.capabilities?.length && `成员能力：${JSON.stringify(agent.capabilities)}`].filter(Boolean).join("\n");
 }
 
 export function taskPrompt({ task, run, node, trace, agent, directory, cwd, workspace, messages, roster, mode, delivery, session }) {

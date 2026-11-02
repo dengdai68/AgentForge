@@ -180,7 +180,7 @@
       "kind": "pure-composition",
       "owner": "orchestration",
       "purpose": "Compose separate application system instructions and current input for Task and communication calls. Full workflow belongs only to the manager; execution environment is system context. Native sessions own conversation history; Store supplies unacknowledged cross-member messages and content-hashed context deltas; actual model activity acknowledges input even if a turn later fails.",
-      "roleContract": "A bound role's shared prompt arrives as snapshot data (agent.roleSnapshot) and joins the persona system-instruction section for both Task and communication composition; it never enters the current input, and this module never resolves roles itself.",
+      "roleContract": "A bound role's shared prompt arrives as snapshot data (agent.roleSnapshots) and joins the persona system-instruction section for both Task and communication composition; it never enters the current input, and this module never resolves roles itself.",
       "sourceOfTruth": [
         "docs/22-prompt-assembly.md",
         "docs/03-domain-model.md"
@@ -224,7 +224,7 @@
       "pluginUpdates": "plugins updates/check-updates/auto-update expose the shared service scheduler, progressive typed settings and reference-only update receipts; no direct Git or Provider access.",
       "mcpEditing": "mcps update ID sends authenticated partial PUT, preserves unchanged redacted fields, returns new/previous IDs and employee references; frozen work remains unchanged.",
       "promptContract": "Employee systemPrompt help/schema explains native application system/developer instructions; configuration and Task commands/fields/auth remain unchanged.",
-      "roleContract": "The roles group offers list/get/create/update/delete with progressive help/schema and --yes deletion; list --search matches name and prompt like the UI; agents schema/example/notes document roleId (at most one role, explicit null unbinds). Output references roles by ID/name without dumping bound prompt text into other resources.",
+      "roleContract": "The roles group offers list/get/create/update/delete with progressive help/schema and --yes deletion; list --search matches name and prompt like the UI; agents schema/example/notes document ordered roleIds (multiple roles, [] unbinds). Output references roles by ID/name without dumping bound prompt text into other resources.",
       "recordPresentation": "Task collaboration text/JSON excludes client-only tone/statusCode metadata; progressive command and status contracts remain unchanged.",
       "path": "cli/",
       "kind": "authenticated-client",
@@ -513,7 +513,7 @@
     {
       "id": "server.communication-store",
       "promptContract": "Native member sessions retain their ID across persona and selected-extension edits; new configuration is reapplied on invocation. Actual Runtime connection/cwd changes reset native context while retaining stored history and confirmed external-message cursor.",
-      "roleContract": "Delivery agent snapshots embed the bound role's text (roleSnapshot) at send and explicit retry time, exactly like the employee systemPrompt; queued deliveries keep their send-time snapshot and role edits never rewrite history or rebuild sessions.",
+      "roleContract": "Delivery agent snapshots embed the bound role's text (ordered roleSnapshots) at send and explicit retry time, exactly like the employee systemPrompt; queued deliveries keep their send-time snapshot and role edits never rewrite history or rebuild sessions.",
       "workbenchContract": "Conversation-owned attachment metadata and immutable message references; per-attempt native session binding stays out of audit events. Member-scoped 50-event console projection groups actual deliveries/attempts in one pass and validates content references against the conversation.",
       "path": "server/communication-store.mjs",
       "kind": "domain",
@@ -629,7 +629,7 @@
       "repeatImports": "Manual repeat imports replace plugins by exact origin URL plus plugin name and MCPs by trimmed case-sensitive display name; different plugin origins remain distinct. Serialized HTTP imports prepare immutable candidates; Store plans identity matches and deduplicates references, HTTP resolves compatibility, then Store commits current employee references in one transaction. Failed candidates are retired; frozen work/files remain unchanged. Receipts add reference-only replacements/employees/historyRetained, with CLI help/schema/text and shared UI matching.",
       "mcpEditing": "Authenticated MCP PUT validates a new immutable candidate, resolves all current selectors then commits one Store transaction; failure hides unused candidates without rewriting history.",
       "staticIcon": "Application PNG icon is served as image/png through existing static-root containment and authentication policy; no new file bridge.",
-      "roleRoutes": "Authenticated /api/roles CRUD validates a name/prompt-only whitelist; employeeInput accepts roleId and the Store validates existence. Bootstrap carries the role summary for directory and employee-form rendering.",
+      "roleRoutes": "Authenticated /api/roles CRUD validates a name/prompt-only whitelist; employeeInput accepts ordered roleIds and the Store validates existence. Bootstrap carries the role summary for directory and employee-form rendering.",
       "communicationWorkbench": "Authenticated 20 MiB binary upload and integrity-bound attachment download; member/cursor console, execution-content and prompt endpoints check conversation ownership. No new host bridge or CLI commands.",
       "workspaceSettings": "Authenticated workspace save validates non-root absolute input, creates missing directories recursively and checks canonical directory permissions before Store persistence; failure preserves saved settings and logs original cause. No migration of existing tasks, deletion of files, or new CLI setting command.",
       "path": "server/index.mjs",
@@ -679,7 +679,7 @@
       "pluginUpdates": "Store persists default-enabled checks and a validated 1-1440 minute period (default two), and atomically compares/replaces current employee bindings by installation source with a system audit; frozen work and MCP references remain immutable.",
       "mcpEditing": "replaceMcpExtension atomically compares current employee runtime bindings, rebinds current selectors and retires the previous version with an audit; frozen tasks/deliveries remain unchanged.",
       "promptContract": "Member input cursors confirm only accepted calls. Trace.providerSessionId remains null for unconfirmed Codex placeholders and binds only the real thread ID. Responsibilities derive from actual Dispatches, not static Task nodeAssignments.",
-      "roleContract": "Roles are name plus plain-text prompt records; employees bind at most one via a validated nullable roleId (omitted keeps, explicit null clears). Task creation freezes roleSnapshot (id/name/prompt text) into member and manager snapshots; deletion rejects any current employee reference including inactive ones, listing their names, and frozen history stays verifiable. The retired legacy `role` field is never reused.",
+      "roleContract": "Roles are name plus plain-text prompt records; employees bind an ordered unique roleIds array (omitted keeps, [] clears; retired roleId writes reject). Task creation freezes ordered roleSnapshots (id/name/prompt text) into member and manager snapshots; deletion rejects any current employee reference including inactive ones, listing their names, and frozen history stays verifiable. The retired legacy `role` field is never reused.",
       "path": "server/store.mjs",
       "kind": "domain",
       "owner": "server",
@@ -721,7 +721,8 @@
       "failureDelivery": "Store stops non-retryable or exhausted dispatches while preserving traces; input cursors and context hashes acknowledge actual model activity, not snapshots.",
       "taskIdentity": "New Task IDs use random UUIDs, preventing same-millisecond cross-process directory collisions under the shared default task root; historical Task/Run IDs and paths unchanged.",
       "fixedRuntimes": "Exactly one slot per Claude Code/Codex provider. Only model/effort/enabled partial updates; no create/delete/name/executable/profile inputs. Stable employee profileId references and frozen snapshots; current enable gate blocks new invocations without killing in-flight processes.",
-      "humanMessageRouting": "submitHumanMessage defaults an omitted/null recipientAgentId to the frozen Run manager; explicit members are validated, exact question replies retain priority, terminal runs remain inquiry-only and archived tasks read-only."
+      "humanMessageRouting": "submitHumanMessage defaults an omitted/null recipientAgentId to the frozen Run manager; explicit members are validated, exact question replies retain priority, terminal runs remain inquiry-only and archived tasks read-only.",
+      "roleProtocol": "roleIds is ordered, unique, existence-validated; roleSnapshots freeze all text. Old roleId input rejects; loaded nonempty old bindings require explicit operator preparation, no migration/reset. Frozen historical roleSnapshot retains its original text."
     },
     {
       "id": "server.sqlite-persistence",
@@ -927,7 +928,8 @@
       ],
       "backgroundLifecycle": "Claude native background tasks and successful completed-turn waits suspend the platform idle watchdog; later active turns rearm it. Native process exit and failure/cancel/API retry gates remain authoritative.",
       "dshTransport": "dsh.mjs adapts installed DeepSeek Harness 0.2.1-rc.2 SDK over JSON-RPC; dsh-plugin.mjs is materialized as a private native Cordis plugin for literal system-role instructions and the real model catalog. Per-session AgentForge-owned DeepSeek Harness homes retain native history while the native credentials service references the operator DeepSeek Harness credential file. No global plugin/config writes; selected Skills/MCP only; session/wait owns descendant completion. Native rendered system messages contribute only a boolean instruction-delivery audit; no system body is persisted.",
-      "installationState": "cli-environment.runtimeInstalled checks executable presence through the invocation PATH without starting a CLI or reading credentials. HTTP injects the fact into Store; installed=false forces effective enabled=false, locks UI switches and rejects enabled writes/new invocations. No stored preference/frozen snapshot rewrite; DeepSeek Harness is the display name, dsh remains the protocol ID."
+      "installationState": "cli-environment.runtimeInstalled checks executable presence through the invocation PATH without starting a CLI or reading credentials. HTTP injects the fact into Store; installed=false forces effective enabled=false, locks UI switches and rejects enabled writes/new invocations. No stored preference/frozen snapshot rewrite; DeepSeek Harness is the display name, dsh remains the protocol ID.",
+      "componentImportIsolation": "Import skips only typed component-definition errors (Markdown schema/YAML, Hook JSON/events/groups/handlers); returns private-source-free warnings. Raw source retained, executable tree excludes invalid Markdown and materializes valid per-dialect manifests/hooks. Runtime plans/integrity stay strict; path/link/manifest/MCP failures abort batch."
     },
     {
       "id": "server.orchestrator",
@@ -1139,7 +1141,7 @@
       "collaborationReadability": "Causal Message/Dispatch grouping uses explicit sourceMessageId or unique saved references, never prose or timing. deliveries contains current state; history preserves invocation/retry facts. Known worker result envelopes project their recorded rawResponse Markdown report without mutating Messages. Renderer keeps summaries, communication, key human transitions and one console link; no delivery blocks, technical failure notices, automatic acceptance attachments or top console error banners. Full Markdown DOM is clipped to ten lines and expanded in place. Employee state follows its latest Trace through failure/retry/recovery; console failure log lines use danger red. CLI retains complete delivery/history and bounded acceptance file references. Installed-instance review uses the normal client, never cookies or domain-database extraction.",
       "collaborationFlow": "Regression covers same-Run provenance, unchanged input delivery, complete timeline and source/execution references; CLI output synchronizes without visual metadata.",
       "recordPresentation": "Regression coverage includes partial/running prompt history, interleaved calls, transport-page boundaries, truthful pending/answered colors, stable safe sender tones and exclusion of visual metadata from CLI JSON.",
-      "roleCoverage": "roles.test.mjs covers role CRUD validation and audit events, employee roleId bind/switch/clear with unknown-ID rejection, reference-listing delete rejection including inactive employees, frozen Task/Run roleSnapshot retention after role edit/deletion, communication snapshot embed/refresh semantics, system-instruction-only injection, legacy role-field non-revival and roles CLI help/schema/authenticated CRUD. settings.test.mjs also retains hidden roles across preference persistence; test-roles-ui.mjs verifies actual hide/reload/default restore, empty BUILD groups and SVG icons across themes and native wide/narrow windows.",
+      "roleCoverage": "roles.test.mjs covers role CRUD validation and audit events, employee ordered roleIds bind/reorder/clear with unknown-ID rejection, reference-listing delete rejection including inactive employees, frozen Task/Run roleSnapshots retention after role edit/deletion, communication snapshot embed/refresh semantics, system-instruction-only injection, legacy role-field non-revival and roles CLI help/schema/authenticated CRUD. settings.test.mjs also retains hidden roles across preference persistence; test-roles-ui.mjs verifies actual hide/reload/default restore, empty BUILD groups and SVG icons across themes and native wide/narrow windows.",
       "path": "tests/",
       "kind": "verification",
       "owner": "quality",

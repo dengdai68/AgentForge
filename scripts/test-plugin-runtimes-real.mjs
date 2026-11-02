@@ -11,6 +11,7 @@ import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {SSEServerTransport} from '@modelcontextprotocol/sdk/server/sse.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {ListToolsRequestSchema,CallToolRequestSchema} from '@modelcontextprotocol/sdk/types.js';
+import {taskPrompt} from '../server/prompts.mjs';
 import {createMarketplace} from '../server/runtime/marketplace.mjs';
 import {codexAgentKey} from '../server/runtime/extensions.mjs';
 import {runClaudeCodeCli,runCodexCli,runDshCli} from '../server/runtime/local-cli.mjs';
@@ -72,7 +73,12 @@ try {
     await writeFile(join(source,'agents/checksum-worker.md'),`---\nname: checksum-worker\ndescription: Compute a local verification checksum in an independent session\nmodel: inherit\ntools: Read, Bash\n---\nYour job is only a checksum computation. Read reviewer-input.json in the current working directory. Compute the SHA-256 hex digest of input.left + ':' + input.right using Node's crypto module. Write reviewer-proof.json containing {"digest":"the computed hex digest"}. Return only the computed digest. Do not use the parent runtime-proof Skill, call MCPs, delegate, or perform a qualitative review. Use Bash to compute and write the proof file.\n`);
     await writeFile(join(source,'record-hook.mjs'),`import {appendFile} from 'node:fs/promises';let text='';for await(const part of process.stdin)text+=part;const p=JSON.parse(text);await appendFile('hook-proof.jsonl',JSON.stringify({event:p.hook_event_name,tool:p.tool_name})+'\\n');`);
     await writeFile(join(source,'hooks/hooks.json'),JSON.stringify({hooks:{PreToolUse:[{matcher:'.*',hooks:[{type:'command',command:'node "${CLAUDE_PLUGIN_ROOT}/record-hook.mjs"'}]}]}}));
-    const installed=(await market.import({path:source})).plugins[0];
+    await mkdir(join(source,'skills/broken'));await writeFile(join(source,'skills/broken/SKILL.md'),'---\nname: [broken\n---\nDo not load');
+    await writeFile(join(source,'agents/broken.md'),'---\nname: broken\ntools: 42\n---\nDo not load');
+    await writeFile(join(source,'broken-hooks.json'),'invalid hook JSON');
+    const manifestPath=join(source,sourceDialect==='codex'?'.codex-plugin/plugin.json':'.claude-plugin/plugin.json');
+    const manifest=JSON.parse(await readFile(manifestPath,'utf8'));manifest.hooks=['./hooks/hooks.json','./broken-hooks.json'];await writeFile(manifestPath,JSON.stringify(manifest));
+    const imported=await market.import({path:source});assert.equal(imported.warnings.length,3);const installed=imported.plugins[0];
     for(const provider of ['claude-code','codex','dsh']) {
       const key=sourceDialect+'--'+provider,workspace=join(root,key),trace=join(workspace,'trace');await mkdir(trace,{recursive:true});
       const challenge={left:randomUUID(),right:randomUUID()};await writeFile(join(workspace,'reviewer-input.json'),JSON.stringify(challenge));
@@ -93,11 +99,14 @@ try {
       const events=[];
       try {
         const aliasInstruction=provider==='codex'?`Use spawn_agent with agent_type ${row.alias} and agent_name checksum_probe; use that exact installed role, no fallback/default agent, and wait for completion.`:`Use the installed ${row.alias} subagent through ${provider==='dsh'?'Task or Agent':'Agent or Task'} and wait for its independent result.`;
-        const input={runtime:row.runtime,workspacePath:row.workspace,traceDirectory:row.trace,finalPath:join(row.trace,'final.json'),runId:randomUUID(),systemPrompt:'You are verifying imported plugin capabilities with local synthetic data. Follow the selected Skill. Actually use the Skill, the installed independent checksum worker and each selected MCP. Do not inspect agent source files or invent values. Do not perform other work. Return one JSON object only.',prompt:`Activate the runtime-proof Skill (plugin runtime-proof). ${aliasInstruction} Actually call read_validation_code separately on matrix_stdio, matrix_http and matrix_sse. Follow the Skill to write proof.json in the working directory, then return the same JSON.`,onEvent:event=>events.push(event)};
+        const roleValues=['ROLE-FIRST-'+row.key,'ROLE-SECOND-'+row.key];
+        const composed=taskPrompt({agent:{id:'matrix',name:'matrix',kind:'business',systemPrompt:'Follow the selected native Skill.',roleSnapshots:roleValues.map((value,index)=>({id:'role_'+index,name:'Role '+index,prompt:`Include ${value} in the final JSON field roleProof as an array, preserving this role order.`}))},task:{title:'Compatibility proof',workspacePath:row.workspace,repositorySources:[],repositoryBindings:{},acceptanceCriteria:[],workflowSnapshot:{nodes:[]}},run:{id:'matrix'},node:{id:'verify',title:'Verify'},trace:{id:'matrix'},directory:row.trace,cwd:row.workspace,workspace:{traces:[],pendingQuestions:[],defects:[],decisions:[],artifacts:[]},messages:[],roster:[],mode:'node',delivery:{messageIds:[],attempts:1},session:{resume:false}});
+        const input={runtime:row.runtime,workspacePath:row.workspace,traceDirectory:row.trace,finalPath:join(row.trace,'final.json'),runId:randomUUID(),systemPrompt:composed.systemPrompt+'\nYou are verifying imported plugin capabilities with local synthetic data. Follow the selected Skill. Actually use the Skill, the installed independent checksum worker and each selected MCP. Do not inspect agent source files or invent values. Do not perform other work. Return one JSON object only.',prompt:`Activate the runtime-proof Skill (plugin runtime-proof). ${aliasInstruction} Actually call read_validation_code separately on matrix_stdio, matrix_http and matrix_sse. Follow the Skill to write proof.json in the working directory, then return the same JSON.`,onEvent:event=>events.push(event)};
         const result=await ({'claude-code':runClaudeCodeCli,codex:runCodexCli,dsh:runDshCli}[provider])(input);
         const proof=JSON.parse(await readFile(join(row.workspace,'proof.json'),'utf8'));
         for(const [field,value] of Object.entries(row.expected))assert.equal(proof[field],value,row.key+': '+field);
         assert.ok(result.finalText.includes(row.expected.agentProof));
+        for(const value of roleValues)assert.ok(result.finalText.includes(value),'both bound role prompts reached '+provider);row.multiRoleDelivered=true;
         assert.equal(JSON.parse(await readFile(join(row.workspace,'reviewer-proof.json'),'utf8')).digest,row.expected.agentProof,'actual child checksum file');
         assert.match(await readFile(join(row.workspace,'mcp-proof.log'),'utf8'),/called/);
         for(const transport of ['http','sse'])assert.ok(remoteCalls.some(call=>call.key===row.key && call.transport===transport),row.key+': actual '+transport+' call');

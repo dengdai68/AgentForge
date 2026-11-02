@@ -242,7 +242,7 @@ test('default CLI help progressively discloses root, groups and operation detail
   }
   const employee = await captured(['agents', 'create', '--help'], { columns: 160 });
   assert.match(employee.stdout, /runtime.extensionSelection.pluginIds/); assert.match(employee.stdout, /父项提供时必填/);
-  assert.match(employee.stdout, /完整替换/); assert.ok(!employee.stdout.includes('--username')); assert.match(employee.stdout, /roleId/); assert.ok(!/^ {2}role {2}/m.test(employee.stdout), 'the retired role label stays absent; only roleId references a shared role');
+  assert.match(employee.stdout, /完整替换/); assert.ok(!employee.stdout.includes('--username')); assert.match(employee.stdout, /roleIds/); assert.ok(!/^ {2}role {2}/m.test(employee.stdout), 'the retired role label stays absent; only roleId references a shared role');
   assert.match((await captured(['workflows', 'create', '--help'])).stdout, /staffingGuidance/);
   for (const operation of ['list', 'get', 'delete']) {
     const text = (await captured(['agents', operation, '--help'])).stdout;
@@ -665,4 +665,13 @@ test('default CLI uses the formal desktop delegation, validates instance and res
     await assert.rejects(executeCommand(['runtimes','list','--endpoint-file',endpoint],{fetcher,home:root}),error=>error.code==='AUTH_REQUIRED');
     assert.equal(calls.length,before+1);
   } finally { await rm(root,{recursive:true,force:true}); }
+});
+
+
+test('CLI role arrays validate duplicates/retired writes and format partial import warnings explicitly',async()=>{
+  const {validateInput}=await import('../cli/client.mjs');
+  validateInput({name:'worker',roleIds:['role_b','role_a']},resources.agents.schema);
+  for(const value of [{name:'worker',roleIds:null},{name:'worker',roleIds:['role_a','role_a']},{name:'worker',roleId:'role_a'}])assert.throws(()=>validateInput(value,resources.agents.schema));
+  const result={plugins:[{id:'plugin',name:'partial'}],mcps:[],warnings:[{plugin:'partial',component:'skill',path:'skills/bad/SKILL.md',message:'frontmatter YAML 无效'}]};
+  const output=formatOutput(['plugins','import'],result);assert.match(output,/⚠️/);assert.match(output,/skills\/bad\/SKILL.md/);assert.match(output,/YAML 无效/);
 });

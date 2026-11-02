@@ -85,7 +85,10 @@ try {
   const form=page.locator('#agent-form'); await form.waitFor();
   assert.deepEqual(await form.locator('[name=runtimeProfileId] option').allTextContents(), ['Claude Code','Codex','DeepSeek Harness']);
   await form.locator('[name=name]').fill('DeepSeek Harness worker'); await form.locator('[name=runtimeProfileId]').selectOption(slot.id);
-  await form.locator('[name=roleId]').selectOption(role.id);
+  await form.locator('#employee-role').selectOption(role.id);
+  const {role:secondRole}=await api('/api/roles',{name:'Additional verification role',prompt:'交接 summary 必须包含 MULTI_ROLE_SECOND。'});
+  // Reload the employee form so its role directory contains the additional role.
+  // The second role is set through the same authenticated employee command after creation.
   await form.locator('[name=systemPrompt]').fill('完成指定文件后简明交接，不作额外交付。');
   await form.locator('#employee-plugin-search').fill('dsh-evidence'); await form.locator(`[data-add-extension="${pluginId}"]`).click();
   await form.locator('#employee-mcp-search').fill('DeepSeek Harness verification'); await form.locator(`[data-add-extension="${mcpId}"]`).click();
@@ -93,7 +96,8 @@ try {
   const created=page.waitForResponse(response => response.url().endsWith('/api/agents') && response.request().method()==='POST');
   await form.getByRole('button',{name:'创建数字员工',exact:true}).click();
   const response=await created; assert.equal(response.status(),201); const {agent:worker}=await response.json();
-  assert.equal(worker.runtime.provider,'dsh'); assert.equal(worker.roleId,role.id);
+  assert.equal(worker.runtime.provider,'dsh'); assert.deepEqual(worker.roleIds,[role.id]);
+  await api('/api/agents/'+worker.id,{roleIds:[role.id,secondRole.id]},'PUT');
   evidence.cases.push('actual employee UI selects DeepSeek Harness, role, native Skill and MCP');
   const { agent: manager } = await api('/api/agents', { name: 'DeepSeek Harness manager', kind: 'manager', systemPrompt: '只安排唯一节点给 DeepSeek Harness worker，收到交接后提交人类验收。不要自行代做文件，不添加流程节点。', runtime: { profileId: slot.id, extensionSelection: { pluginIds: [], mcpIds: [] } } });
   const { conversation } = await api('/api/communications', { kind: 'agent', targetId: worker.id });
@@ -107,6 +111,7 @@ try {
   const answered = new Set();
   const workspace = await wait('real DeepSeek Harness task to human acceptance', async () => { const value = await api('/api/runs/' + run.id + '/workspace?view=summary', null, 'GET'); for (const question of value.pendingQuestions.filter(q => q.recipient.type === 'human')) { if (answered.has(question.id)) continue; await api('/api/runs/' + run.id + '/messages', { content: '确认采用 dsh-verification.txt，请继续既定验证任务。', replyToMessageId: question.id }); answered.add(question.id); } if (['failed', 'paused', 'terminated'].includes(value.run.status)) throw new Error('Run stopped: ' + JSON.stringify(value.run.failure)); return value.run.status === 'awaiting_acceptance' ? value : null; });
   assert.ok(answered.size, 'real model clarification required an exact human reply');
+  assert.ok(workspace.messages.some(message=>message.sender?.id===worker.id && message.content.includes('MULTI_ROLE_SECOND')),'second role governs the real worker handoff');
   evidence.cases.push('real clarification and exact human reply');
   const managerTraces = workspace.traces.filter(trace => trace.type === 'manager');
   assert.ok(managerTraces.some(trace => trace.sessionMode === 'resume'), 'manager native identity is confirmed before its next coordination');

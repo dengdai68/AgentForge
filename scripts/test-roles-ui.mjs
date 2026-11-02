@@ -1,10 +1,11 @@
 // Isolated real Electron UI acceptance for role management: directory CRUD,
-// search/pagination, employee single-role binding and reference-rejected
+// search/pagination, employee ordered multi-role binding and reference-rejected
 // deletion. No Provider calls; never touches the operator's data or session.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
-import { mkdtemp, mkdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join, dirname, basename } from 'node:path';
+import {spawn} from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createAuth } from '../server/auth.mjs';
 import { createStore } from '../server/store.mjs';
@@ -12,7 +13,8 @@ import { createStore } from '../server/store.mjs';
 await mkdir('.data', { recursive: true });
 const root = await mkdtemp(resolve('.data/roles-ui-'));
 assert.equal(dirname(root), resolve('.data')); assert.match(basename(root), /^roles-ui-[a-zA-Z0-9]+$/);
-const home = join(root, 'home'), data = join(root, 'client');
+const bundle=process.env.AGENTFORGE_ROLES_APP;
+const home = join(root, 'home'), data = bundle?join(home,'.agentforge','desktop'):join(root, 'client');
 await mkdir(home, { recursive: true, mode: 0o700 });
 const password = randomBytes(24).toString('hex');
 const auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
@@ -23,7 +25,7 @@ const employee = seeded.listAgents().find(item => item.kind === 'business');
 assert.ok(employee, 'default catalog provides a business employee');
 seeded.close();
 
-const app = await electron.launch({ args: ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 180000 });
+const app = await electron.launch({ ...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')}:{args:['apps/electron/main.mjs']}), env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 180000 });
 try {
   const page = await app.firstWindow({ timeout: 180000 });
   await page.waitForURL(/^http:\/\/127\.0\.0\.1:/, { timeout: 60000 });
@@ -121,8 +123,10 @@ try {
   await page.locator('#roles-search').fill('不存在的关键词');
   await page.getByText('没有匹配的角色', { exact: true }).waitFor();
   await page.locator('#roles-search').fill('UI_ROLE_MARK_V2');
+  await page.waitForFunction(()=>document.querySelectorAll('#roles-grid .agent-card').length===1);
   assert.equal(await page.locator('#roles-grid .agent-card').count(), 1);
   await page.locator('#roles-search').fill('');
+  await page.waitForFunction(()=>document.querySelectorAll('#roles-grid .agent-card').length===1);
   assert.equal(await page.locator('#roles-grid .agent-card').count(), 1);
 
   // Twenty-per-page pagination follows the shared directory rule.
@@ -134,20 +138,29 @@ try {
   await page.locator('[data-pagination="roles"] [data-page="2"]').click();
   assert.equal(await page.locator('#roles-grid .agent-card').count(), 2);
 
-  // Employee form binds at most one role; the card shows the binding.
+  // Employee form binds an ordered group of roles; the card shows the binding.
   await page.locator('.nav-item[data-view="agents"]').click();
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
   await page.locator('#employee-role').waitFor();
   const options = await page.locator('#employee-role option').allTextContents();
-  assert.ok(options.includes('不绑定角色') && options.some(text => text.startsWith('界面验收角色') && text.includes(role.id)));
+  assert.ok(options.includes('选择并添加角色') && options.some(text => text.startsWith('界面验收角色') && text.includes(role.id)));
   await page.locator('#employee-role').selectOption(role.id);
   await page.locator('#agent-form [type=submit]').click();
   await page.locator('#agent-form').waitFor({ state: 'detached' });
   await page.locator('#agents-grid .agent-card', { hasText: '界面验收角色' }).waitFor();
-  assert.equal((await api('/api/agents', null, 'GET')).agents.find(item => item.id === employee.id).roleId, role.id);
+  assert.deepEqual((await api('/api/agents', null, 'GET')).agents.find(item => item.id === employee.id).roleIds,[role.id]);
   // Persisted selection is shown when the form reopens.
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
-  assert.equal(await page.locator('#employee-role').inputValue(), role.id);
+  assert.ok((await page.locator('#employee-roles').textContent()).includes(role.name));
+  const another=roles.find(item=>item.id!==role.id) || (await api('/api/roles',null,'GET')).roles.find(item=>item.id!==role.id);
+  await page.locator('#employee-role').selectOption(another.id);
+  await page.locator('[data-role-up="1"]').click();
+  await page.locator('#agent-form [type=submit]').click();
+  await page.locator('#agent-form').waitFor({state:'detached'});
+  assert.deepEqual((await api('/api/agents',null,'GET')).agents.find(item=>item.id===employee.id).roleIds,[another.id,role.id]);
+  await page.locator(`[data-edit-agent="${employee.id}"]`).click();
+  await page.locator('#employee-roles .extension-chip').first().waitFor();
+  assert.equal(await page.locator('#employee-roles .extension-chip').count(),2);
   await page.locator('#agent-form [data-close-modal]').click();
 
   // A bound role cannot be deleted; the referencing employee is listed in place.
@@ -172,10 +185,12 @@ try {
   // Unbind, then deletion succeeds.
   await page.locator('.nav-item[data-view="agents"]').click();
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
-  await page.locator('#employee-role').selectOption('');
+  await page.locator('[data-role-remove]').first().waitFor();
+  await page.screenshot({path:join(root,'employee-multiple-roles-narrow.png')});
+  while(await page.locator('[data-role-remove]').count())await page.locator('[data-role-remove]').first().click();
   await page.locator('#agent-form [type=submit]').click();
   await page.locator('#agent-form').waitFor({ state: 'detached' });
-  assert.equal((await api('/api/agents', null, 'GET')).agents.find(item => item.id === employee.id).roleId, null);
+  assert.deepEqual((await api('/api/agents', null, 'GET')).agents.find(item => item.id === employee.id).roleIds, []);
   await page.locator('.nav-item[data-view="roles"]').click();
   await page.locator('#roles-search').fill('界面验收角色');
   await page.locator(`[data-delete-role="${role.id}"]`).click();
@@ -185,7 +200,40 @@ try {
   await page.getByText('没有匹配的角色', { exact: true }).waitFor();
 
   await page.screenshot({ path: join(root, 'roles-ui.png') });
-  console.log('PASS roles UI acceptance; evidence: ' + root);
+  const source=join(root,'partial-plugin');
+  await mkdir(join(source,'.claude-plugin'),{recursive:true});await mkdir(join(source,'skills/good'),{recursive:true});await mkdir(join(source,'skills/bad'),{recursive:true});await mkdir(join(source,'agents'));await mkdir(join(source,'hooks'));
+  await writeFile(join(source,'.claude-plugin/plugin.json'),'{"name":"partial-ui"}');
+  await writeFile(join(source,'skills/good/SKILL.md'),'---\nname: good\ndescription: Good skill\n---\nGood');
+  await writeFile(join(source,'skills/bad/SKILL.md'),'---\nname: [bad\n---\nPRIVATE_SENTINEL');
+  await writeFile(join(source,'agents/bad.md'),'---\nname: bad\ntools: 42\n---\nPRIVATE_SENTINEL');
+  await writeFile(join(source,'hooks/hooks.json'),'invalid PRIVATE_SENTINEL');
+  await page.goto(origin+'/marketplace');await page.locator('[data-install-plugin]').click();
+  await page.locator('[name=sourceType][value=local]').check();await page.locator('#market-source').fill(source);await page.locator('#market-entry-form [type=submit]').click();
+  await page.getByRole('heading',{name:'⚠️ 插件安装存在错误',exact:true}).waitFor();
+  const warning=page.locator('#modal-content [role=alert]');assert.equal(await warning.locator('li').count(),3);assert.doesNotMatch(await warning.textContent(),/PRIVATE_SENTINEL/);
+  for(const path of ['skills/bad/SKILL.md','agents/bad.md','hooks/hooks.json'])assert.ok((await warning.textContent()).includes(path));
+  await page.locator('#modal-backdrop.open').waitFor();
+  await page.waitForTimeout(250);
+  await page.screenshot({path:join(root,'partial-install-warning-narrow.png'),animations:'disabled'});
+  await page.getByRole('button',{name:'知道了',exact:true}).click();
+  await page.locator('[data-market-list] .agent-card').filter({hasText:'partial-ui'}).getByRole('button',{name:'详情',exact:true}).click();
+  await page.locator('[data-extension-detail-body] [role=alert]').waitFor();
+  assert.equal(await page.locator('[data-extension-detail-body] [role=alert] li').count(),3);
+  await page.waitForTimeout(250);
+  await page.screenshot({path:join(root,'partial-install-detail.png'),animations:'disabled'});
+  await page.locator('#modal-close').click();
+  // Current HTTP and actual CLI agree on role arrays and reject the retired field.
+  const old=await page.evaluate(async id=>{const r=await fetch('/api/agents/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({roleId:null})});return r.status;},employee.id);assert.equal(old,400);
+
+  const cli=(args,input='')=>new Promise((resolvePromise,reject)=>{
+    const child=spawn(process.execPath,['cli/main.mjs',...args,'--endpoint-file',join(data,'desktop-endpoint.json'),'--session-file',join(root,'cli-session.json'),'--json'],{env:{...process.env,HOME:home},stdio:['pipe','pipe','pipe']});let output='',error='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>error+=chunk);child.on('error',reject);child.on('close',code=>code===0?resolvePromise(JSON.parse(output).data):reject(new Error('CLI failed '+error)));child.stdin.end(input);
+  });
+  await cli(['auth','login','--username','roles-ui','--password-stdin'],password+'\n');
+  const remaining=(await api('/api/roles',null,'GET')).roles.slice(0,2).map(item=>item.id);
+  await cli(['agents','update',employee.id,'--file','-'],JSON.stringify({roleIds:remaining}));
+  assert.deepEqual((await api('/api/agents',null,'GET')).agents.find(item=>item.id===employee.id).roleIds,remaining);
+  await cli(['agents','update',employee.id,'--file','-'],JSON.stringify({roleIds:[]}));
+  console.log('PASS roles UI acceptance and authenticated CLI arrays; evidence: ' + root);
 } finally {
   await app.close();
 }

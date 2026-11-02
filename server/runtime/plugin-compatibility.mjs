@@ -14,6 +14,7 @@ const tokens = value => value === undefined ? undefined : Array.isArray(value) ?
 
 export function parsePluginMarkdown(content, {path = ''} = {}) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if(/^---\r?\n/.test(content) && !match){const error=new Error(`插件 Markdown${path?' '+path:''} frontmatter 缺少结束分隔符`);error.code='PLUGIN_MARKDOWN_INVALID';throw error;}
   let attributes = {}, nativeContent = content;
   if(match) {
     let header=match[1];
@@ -73,7 +74,7 @@ export async function pluginExecutionPlan(info, root, target, version = COMPATIB
     if (!bridgeEvents[sourceDialect].has(hook.event)) reasons.push(`DeepSeek Harness 的 ${sourceDialect} 桥尚无 Hook ${hook.event} 的等价映射`);
     for (const group of hook.matchers) {
       if(!group || !Array.isArray(group.hooks)) {reasons.push(`Hook ${hook.event} 处理器必须为数组`);continue;}
-      if (group.matcher) try { new RegExp(group.matcher); } catch { reasons.push(`Hook ${hook.event} matcher 不是有效表达式`); }
+      if (group.matcher && group.matcher!=='*') try { new RegExp(group.matcher); } catch { reasons.push(`Hook ${hook.event} matcher 不是有效表达式`); }
       for (const handler of group.hooks) {
         if (handler?.async || handler?.if) reasons.push(`Hook ${hook.event} 的 async/if 尚无等价映射`);
         if (!handler || handler.type !== 'command' || typeof handler.command !== 'string') {reasons.push(`DeepSeek Harness 的 ${sourceDialect} 桥仅支持 command Hook`);continue;}

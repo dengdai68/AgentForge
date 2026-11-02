@@ -51,3 +51,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 跨 Runtime 真实兼容门禁：scripts/test-plugin-runtimes-real.mjs，按源格式和 Provider 分列 Skill、独立子代理、Hook 与 stdio/HTTP/SSE MCP 实际调用；不把支持矩阵当实际执行证据。
 
 插件执行计划 v3 对已知 Claude 模型别名在非 Claude Runtime 继承目标模型并保留 sourceModel；DeepSeek 选择现有 Codex 清单时使用完整方言而不混合 Hook。单行 description 冒号仅在原生调用副本中编码，原文/正文/支持文件保留；解析错误只暴露组件相对路径和行列，格式错误不使其他已安装插件目录不可用。旧 v2 引用仍验原摘要。实际源验证为 test-ai-minions-real，机制验证仍为 test-plugin-runtimes-real。
+
+导入逐组件隔离定义错误：Skill/Command/Subagent Markdown 与 Hook JSON/事件/匹配组/处理器仅跳过失败单元。原始 source 不变，原生执行副本只含有效 Markdown 与规范化清单/Hook；warnings 由市场/HTTP/CLI/界面共享。越界/链接/完整性/清单错误仍阻断，执行期保持严格。详见 docs/26。

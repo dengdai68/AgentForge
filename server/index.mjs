@@ -100,7 +100,7 @@ let communications = createCommunicationService(store, { root: join(runFilesRoot
 const wakeCommunication = (id) => setImmediate(() => { if (!resettingData && !updateRestartLease) communications.kick(id).catch(error => diagnostic("communication.dispatch_error", { conversationId: id, error })); });
 async function employeeInput(request, agentId = null) {
   const input = await readJson(request);
-  const allowed = ['name', 'kind', 'description', 'systemPrompt', 'capabilities', 'status', 'repository', 'runtime', 'roleId'];
+  const allowed = ['name', 'kind', 'description', 'systemPrompt', 'capabilities', 'status', 'repository', 'runtime', 'roleIds'];
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !allowed.includes(key))) throw new Error('员工配置字段无效，请按当前配置协议提交');
   if (input.runtime !== undefined && (!input.runtime || typeof input.runtime !== 'object' || Array.isArray(input.runtime) || Object.keys(input.runtime).some(key => !['profileId', 'extensionSelection'].includes(key)))) throw new Error('员工Runtime仅接受profileId和extensionSelection；扩展只选择已安装插件和MCP');
   const previous = agentId ? store.listAgents().find(agent => agent.id === agentId)?.runtime : undefined;

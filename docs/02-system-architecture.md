@@ -78,3 +78,5 @@ Runtime 固定目录和当前可用门禁归 Store，HTTP/CLI 只接受模型、
 DeepSeek Harness 使用独立 SDK JSON-RPC 适配器 dsh.mjs；dsh-plugin.mjs 作为每次调用的私有原生 Cordis 插件提供 system-role 指令与模型元数据，不进入 renderer/HTTP 控制器。会话目录归 AgentForge Runtime 配置根，凭据由 DeepSeek Harness 原生服务从原 DSH_HOME 读取，不解析/复制密钥。SDK session/wait 结束全部托管后续工作后才结算；Store 仍拥有身份/任务状态。决策见 docs/25。
 
 Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+
+插件自动更新仍通过 Marketplace 准备不可变候选、Store 原子更新员工绑定；组件定义错误的 warnings 随候选结果进入检查状态，由更新区域提示并在插件详情查看。来源/完整性等致命错误保留当前版本，冻结任务与排队投递不改写。

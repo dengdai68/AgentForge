@@ -153,7 +153,7 @@ export function createPluginUpdateSettingsUI(panel, api) {
   function accept(value) {
     const preserve=dirty(); saved={enabled:value.enabled,intervalMinutes:value.intervalMinutes};observed=value;
     if(!preserve){enabled.checked=saved.enabled;interval.value=String(saved.intervalMinutes);}
-    status.textContent=value.running?'正在检查 Git 插件…':value.lastCheckedAt?`最近检查 ${new Date(value.lastCheckedAt).toLocaleString()} · 更新 ${value.lastResult?.updatedPlugins || 0} 个插件${value.lastResult?.errors?.length?` · ${value.lastResult.errors.length} 个来源未更新，详情见运行日志`:''}`:'尚未检查';
+    status.textContent=value.running?'正在检查 Git 插件…':value.lastCheckedAt?`最近检查 ${new Date(value.lastCheckedAt).toLocaleString()} · 更新 ${value.lastResult?.updatedPlugins || 0} 个插件${value.lastResult?.warnings?.length?` · ⚠️ ${value.lastResult.warnings.length} 项组件未安装（插件详情可查看）`:''}${value.lastResult?.errors?.length?` · ${value.lastResult.errors.length} 个来源未更新，详情见运行日志`:''}`:'尚未检查';
     if(value.nextCheckAt)status.textContent+=` · 下次 ${new Date(value.nextCheckAt).toLocaleTimeString()}`;
     else if(!value.enabled)status.textContent+=' · 自动更新已关闭';
   }

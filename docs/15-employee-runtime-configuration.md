@@ -1,6 +1,6 @@
 # 数字员工与扩展配置
 
-重复手动导入按同一来源地址＋插件名称匹配插件，按安装名称（去首尾空格、区分大小写）匹配 MCP；不同来源的同名插件保留。成功以新不可变版本覆盖当前目录项，原子更新所有当前员工（含停用）的选择并合并重复引用；Task/Run、排队投递和历史文件不变。失败整批保留原目录及绑定，候选从当前目录退役。首次安装不自动绑定员工；已存在的重复项在下次同标识导入时一并替换，不做全库清理。响应增加 replacements（kind/id/previousId/name）、employees（仅 ID/名称）、historyRetained；原 plugins/mcps 或 MCP 摘要字段不变。
+重复手动导入按同一来源地址＋插件名称匹配插件，按安装名称（去首尾空格、区分大小写）匹配 MCP；不同来源的同名插件保留。成功以新不可变版本覆盖当前目录项，原子更新所有当前员工（含停用）的选择并合并重复引用；Task/Run、排队投递和历史文件不变。致命失败整批保留原目录及绑定，候选从当前目录退役。首次安装不自动绑定员工；已存在的重复项在下次同标识导入时一并替换，不做全库清理。响应增加 replacements（kind/id/previousId/name）、employees（仅 ID/名称）、historyRetained；原 plugins/mcps 或 MCP 摘要字段不变。
 
 设置 → 插件更新提供自动更新开关、检查周期（整数分钟，1–1440，默认2分钟）、立即检查和最近结果；插件市场仅管理安装项。只更新已安装 Git 来源插件；本地目录不自动轮询，固定 sha 不追随 HEAD。以来源及依赖 Git 提交判断变化，版本号不变仍可更新。仅安装仍在当前列表中的名称，已删除项不重装；来源移除某已装插件、读取失败、格式/完整性/Runtime兼容或并发绑定冲突时保留该来源当前版本并记录诊断。其他来源仍检查。MCP 不随自动插件更新拆装或改变选择；Task/Run/排队投递不改写。服务运行时有效，退出后不运行，重启后重新计时；开关与周期持久化，最近结果不伪装为跨重启历史。GET/POST /api/runtime/marketplace/updates 查询/请求检查（POST返回202，之后查询结果）；PUT .../updates/settings 接受非空部分对象 {enabled?:boolean,intervalMinutes?:integer}，拒绝未知字段。上轮结束后按已保存周期再计时；保存设置重新计时，关闭不取消已开始检查，关闭时仍可立即检查。设置草稿不被状态刷新覆盖。
 
@@ -22,7 +22,7 @@ MCP 详情提供编辑名称、说明及 JSON；保存生成新版本并原子�
 
 安装入口仅输入 HTTPS Git 地址或本机目录，直接安装来源中全部插件，不再提供信任勾选、候选读取或单插件选择。识别 Claude `.claude-plugin`、Codex `.codex-plugin`/`.agents/plugins` 和 Agent Plugins 根 manifest；组件标准化后按 Runtime 生成加载投影，不改全局 CLI 配置。可共用 Skill；Subagent/Hook 使用本机 Provider 的真实能力，不能映射的事件明确报告兼容性，不用提示词冒充已执行。
 
-来源作为一次原子安装发布，失败时不暴露部分已安装版本。插件自带 MCP 拆为独立市场版本，仍须员工单独选择，不随插件加载。MCP 接受 stdio、sse、streamableHttp（及标准 http/streamable-http 拼写），复用已有 MCP SDK 的客户端传输，在私有 stdio 启动器中桥接，供三种 Runtime 统一加载；不自动配置 OAuth 或安装依赖。
+来源中有效组件作为一次原子安装发布；Skill/Hook/Subagent 定义格式错误独立跳过并返回 warnings，不影响有效兄弟组件。路径/完整性等致命错误仍不发布部分目录。详见 docs/26。插件自带 MCP 拆为独立市场版本，仍须员工单独选择，不随插件加载。MCP 接受 stdio、sse、streamableHttp（及标准 http/streamable-http 拼写），复用已有 MCP SDK 的客户端传输，在私有 stdio 启动器中桥接，供三种 Runtime 统一加载；不自动配置 OAuth 或安装依赖。
 
 员工新建和编辑均支持 active/inactive；插件与 MCP 搜索器分行排列。员工、插件和 MCP 改为响应式卡片，不改变既有信息或分页语义。插件详情顶部概要，下方 Skill/Subagent/Hook 标签页切换列表。旧的单插件安装/读取来源协议废弃，CLI 同轮同步；开发阶段不转换旧安装版本、不改冻结历史或真实实例。
 

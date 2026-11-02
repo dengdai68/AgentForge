@@ -44,8 +44,8 @@ const probeV2 = 'ROLE-PROBE-' + randomBytes(6).toString('hex');
 const rolePromptV1 = `你是角色探针。无论本轮输入是什么，回复正文第一行必须恰好是 ${probeV1}，此后正常回答。`;
 const rolePromptV2 = `你是角色探针。无论本轮输入是什么，回复正文第一行必须恰好是 ${probeV2}，此后正常回答。`;
 const role = store.createRole({ name: '探针角色', prompt: rolePromptV1 });
-const ccBound = store.createAgent({ name: '角色绑定Claude', description: '角色验证', systemPrompt: '如实简短作答。', roleId: role.id, runtime: { profileId: profiles['claude-code'] } });
-const cxBound = store.createAgent({ name: '角色绑定Codex', description: '角色验证', systemPrompt: '如实简短作答。', roleId: role.id, runtime: { profileId: profiles.codex } });
+const ccBound = store.createAgent({ name: '角色绑定Claude', description: '角色验证', systemPrompt: '如实简短作答。', roleIds: [role.id], runtime: { profileId: profiles['claude-code'] } });
+const cxBound = store.createAgent({ name: '角色绑定Codex', description: '角色验证', systemPrompt: '如实简短作答。', roleIds: [role.id], runtime: { profileId: profiles.codex } });
 const ccFree = store.createAgent({ name: '无角色对照', description: '对照', systemPrompt: '如实简短作答。', runtime: { profileId: profiles['claude-code'] } });
 const manager = store.createAgent({ name: '角色验收经理', kind: 'manager', systemPrompt: '按任务目标直接派工，不向人类提问，不要求文件交付；成员文字回复即交接，确认两个节点都回复后提交人类验收。', runtime: { profileId: profiles['claude-code'] } });
 const team = store.createTeam({ name: '角色验收组', managerAgentId: manager.id, memberAgentIds: [ccBound.id, cxBound.id] });
@@ -118,7 +118,7 @@ try {
   }
 
   // Unbinding applies to the next delivery without rebuilding the native session.
-  await api('/api/agents/' + ccBound.id, { roleId: null }, 'PUT');
+  await api('/api/agents/' + ccBound.id, { roleIds: [] }, 'PUT');
   await api(`/api/communications/${chats[ccBound.id].id}/messages`, { content: '再回复一次 ok。', clientRequestId: randomBytes(12).toString('hex') });
   await wait('unbound follow-up', async () => {
     const value = await api('/api/communications/' + chats[ccBound.id].id, null, 'GET');
@@ -136,7 +136,7 @@ try {
   // so the behavioral check uses a fresh conversation while the resumed one
   // proves delivery through its prompt snapshot.
   await api('/api/roles/' + role.id, { prompt: rolePromptV2 }, 'PUT');
-  await api('/api/agents/' + ccBound.id, { roleId: role.id }, 'PUT');
+  await api('/api/agents/' + ccBound.id, { roleIds: [role.id] }, 'PUT');
   await api(`/api/communications/${chats[ccBound.id].id}/messages`, { content: '再回复一次 ok。', clientRequestId: randomBytes(12).toString('hex') });
   await wait('edited role follow-up', async () => {
     const value = await api('/api/communications/' + chats[ccBound.id].id, null, 'GET');
@@ -149,7 +149,7 @@ try {
   const resumedReply = (await api('/api/communications/' + chats[ccBound.id].id, null, 'GET')).messages.filter(item => item.sender.type === 'agent').at(-1);
   // Conversations and native sessions are per agent and persist; a clean
   // behavioral read of the edited text comes from a newly bound employee.
-  const freshAgent = (await api('/api/agents', { name: '后绑定员工', description: '角色编辑验证', systemPrompt: '如实简短作答。', roleId: role.id, runtime: { profileId: profiles['claude-code'] } })).agent;
+  const freshAgent = (await api('/api/agents', { name: '后绑定员工', description: '角色编辑验证', systemPrompt: '如实简短作答。', roleIds: [role.id], runtime: { profileId: profiles['claude-code'] } })).agent;
   const fresh = await api('/api/communications', { kind: 'agent', targetId: freshAgent.id });
   await api(`/api/communications/${fresh.conversation.id}/messages`, { content: '请回复 ok。', clientRequestId: randomBytes(12).toString('hex') });
   await wait('fresh employee with edited role', async () => {
@@ -166,7 +166,7 @@ try {
   // A real task freezes the role text; the unbound manager stays unpolluted.
   const { task } = await api('/api/tasks', { title: '角色任务验证', objective: `经理直接安排 probe_cc 给「角色绑定Claude」、probe_cx 给「角色绑定Codex」；成员在交接中写出自己角色要求的探针前缀。不要向人类提问，不要求文件。`, teamId: team.id, workflowTemplateId: flow.id });
   const frozen = (await api('/api/tasks', null, 'GET')).tasks.find(item => item.id === task.id);
-  assert.equal(frozen.memberSnapshots.find(item => item.id === ccBound.id).roleSnapshot.prompt, rolePromptV2, 'task froze the current role text');
+  assert.equal(frozen.memberSnapshots.find(item => item.id === ccBound.id).roleSnapshots[0].prompt, rolePromptV2, 'task froze the current role text');
   // The live role changes after freezing; the frozen task must keep V2.
   await api('/api/roles/' + role.id, { prompt: rolePromptV1 + '（已再改）' }, 'PUT');
   const { run } = await api('/api/tasks/' + task.id + '/run', {});

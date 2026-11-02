@@ -52,6 +52,7 @@ export function validateInput(value, schema, path = 'input', partial = false) {
   if (schema.enum && !schema.enum.includes(value)) throw usage(`${path} 必须是 ${schema.enum.join(' / ')}`);
   if (typeof value === 'string' && (schema.maxLength && value.length > schema.maxLength || schema.pattern && !new RegExp(schema.pattern).test(value))) throw usage(`${path} 不符合长度或格式约束`);
   if (Array.isArray(value)) {
+    if(schema.uniqueItems && new Set(value.map(item=>JSON.stringify(item))).size!==value.length)throw usage(`${path} 不能包含重复项`);
     if (schema.minItems && value.length < schema.minItems) throw usage(`${path} 至少需要 ${schema.minItems} 项`);
     value.forEach((item, index) => validateInput(item, schema.items, `${path}[${index}]`));
   } else if (type === 'object') {

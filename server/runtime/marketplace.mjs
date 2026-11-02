@@ -12,7 +12,7 @@ const claudeHookEvents=new Set(['SessionStart','Setup','UserPromptSubmit','UserP
 function pluginJson(content) {
   try {return JSON.parse(content);} catch {throw new Error('插件清单或 Hook JSON 格式无效，请检查来源文件');}
 }
-const summary = ({id,kind,name,description,createdAt,providers,compatibility,source,version,components}) => ({id,kind,name,description,createdAt,providers,...(compatibility?{compatibility}:{}),...(source ? {source} : {}),...(version ? {version} : {}),...(components ? {components:Object.fromEntries(Object.entries(components).map(([key,items])=>[key,items.length]))} : {})});
+const summary = ({id,kind,name,description,createdAt,providers,compatibility,source,version,components,warnings}) => ({id,kind,name,description,createdAt,providers,...(compatibility?{compatibility}:{}),...(source ? {source} : {}),...(version ? {version} : {}),...(warnings?.length?{warnings}:{}),...(components ? {components:Object.fromEntries(Object.entries(components).map(([key,items])=>[key,items.length]))} : {})});
 async function tree(root, copyTo, sourceRoot = root) {
   const files = []; let bytes = 0;
   const boundary = copyTo ? await realpath(sourceRoot) : root;
@@ -51,7 +51,13 @@ async function contained(root, path) {
   return target;
 }
 const exists = path => lstat(path).then(()=>true,error=>{if(error.code==='ENOENT') return false; throw error;});
-async function pluginInfo(plugin,provider) {
+async function pluginInfo(plugin,provider,{tolerant=false}={}) {
+  const warnings=[],rejectedPaths=new Set();
+  const invalid=message=>Object.assign(new Error(message),{code:'PLUGIN_COMPONENT_INVALID'});
+  const skip=(error,component,path)=>{
+    if(!tolerant || !['PLUGIN_MARKDOWN_INVALID','PLUGIN_COMPONENT_INVALID'].includes(error.code))throw error;
+    warnings.push({plugin:plugin.name,component,path,message:error.message});
+  };
   if(plugin.disabled) throw new Error('外部插件引用暂不支持，请直接读取该插件仓库');
   let manifest={};
   const prefersCodex=plugin.sourceDialect ? plugin.sourceDialect==='codex' : provider==='codex' || provider==='dsh' && await exists(join(plugin.path,'.codex-plugin/plugin.json'));
@@ -96,33 +102,63 @@ async function pluginInfo(plugin,provider) {
       return;
     }
     if(!info.isFile() || !directory.endsWith('.md') || (kind==='skill' && basename(directory)!=='SKILL.md')) return;
-    const content=await readFile(directory,'utf8');
-    if(Buffer.byteLength(content)>128*1024) throw new Error('插件 Markdown 组件超过 128 KB');
-    const {attributes}=parsePluginMarkdown(content,{path:relative(plugin.path,directory)});
-    const name=typeof attributes.name==='string'?attributes.name:(kind==='skill'?basename(dirname(directory)):basename(directory,'.md'));
-    const description=typeof attributes.description==='string'?attributes.description:'';
-    const result={name,description,path:relative(plugin.path,directory)};
-    const list=kind==='skill'?skills:kind==='agent'?agents:commands;
-    if(!list.some(item=>item.path===result.path)) list.push(result);
+    const componentPath=relative(plugin.path,directory);
+    try {
+      const content=await readFile(directory,'utf8');
+      if(Buffer.byteLength(content)>128*1024) throw invalid('Markdown 组件超过 128 KB');
+      const {attributes}=parsePluginMarkdown(content,{path:componentPath});
+      for(const key of ['name','description','model','color']) if(attributes[key]!==undefined && typeof attributes[key]!=='string')throw invalid(`Markdown ${key} 必须为文本`);
+      const name=attributes.name ?? (kind==='skill'?basename(dirname(directory)):basename(directory,'.md'));
+      if(!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(name))throw invalid('组件名称格式无效');
+      if(kind==='agent')for(const key of ['tools','disallowedTools'])if(attributes[key]!==undefined && !(typeof attributes[key]==='string' || Array.isArray(attributes[key]) && attributes[key].every(value=>typeof value==='string')))throw invalid(`子代理 ${key} 必须为名称列表`);
+      const result={name,description:attributes.description || '',path:componentPath};
+      const list=kind==='skill'?skills:kind==='agent'?agents:commands;
+      if(!list.some(item=>item.path===result.path)){if(list.some(item=>item.name===name))throw invalid('组件名称重复');list.push(result);}
+    }catch(error){skip(error,kind,componentPath);rejectedPaths.add(componentPath);}
   }
   for(const [key,kind] of [['skills','skill'],['agents','agent'],['commands','command']]) {
     if((key==='skills' ? !plugin.rootSkillSelection : manifest[key]===undefined) && await exists(join(plugin.path,key))) await scan(`./${key}`,kind);
     for(const path of manifest[key]===undefined ? [] : [manifest[key]].flat()) {
-      if(typeof path!=='string') throw new Error(`${key} 当前仅支持相对路径声明`);
+      if(typeof path!=='string'){skip(invalid(`${key} 仅支持相对路径声明`),kind,`plugin.json#${key}`);continue;}
       await scan(path,kind);
     }
   }
   const defaultHooks=(!nativeCodex || manifest.hooks===undefined) && await exists(join(plugin.path,'hooks/hooks.json'))?['./hooks/hooks.json']:[];
   const hookDeclarations=[...new Set([...defaultHooks,...(manifest.hooks===undefined?[]:[manifest.hooks].flat())])];
-  for(const declaration of hookDeclarations) {
-    const config=typeof declaration==='string' ? pluginJson(await readFile(await contained(plugin.path,declaration),'utf8')) : declaration;
-    if(!config || typeof config!=='object' || Array.isArray(config)) throw new Error('插件 Hook 配置无效');
-    const events=config.hooks ?? config;
-    if(!events || typeof events!=='object' || Array.isArray(events)) throw new Error('插件 Hook 配置无效');
-    for(const [event,matchers] of Object.entries(events)) {
-      if(!Array.isArray(matchers)) throw new Error('Hook 事件应为数组');
-      hooks.push({event,matchers});
-    }
+  for(const [declarationIndex,declaration] of hookDeclarations.entries()) {
+    const path=typeof declaration==='string'?declaration:`plugin.json#hooks[${declarationIndex}]`;
+    let config;
+    try {
+      if(typeof declaration==='string'){
+        const content=await readFile(await contained(plugin.path,declaration),'utf8');
+        try{config=JSON.parse(content);}catch{throw invalid('Hook JSON 格式无效');}
+      }else config=declaration;
+      if(!config || typeof config!=='object' || Array.isArray(config))throw invalid('Hook 配置必须为对象');
+      const events=config.hooks ?? config;
+      if(!events || typeof events!=='object' || Array.isArray(events))throw invalid('Hook 事件配置必须为对象');
+      for(const [event,matchers] of Object.entries(events)) {
+        const eventPath=`${path}#${event}`;
+        if(!Array.isArray(matchers)){skip(invalid('Hook 事件应为数组'),'hook',eventPath);continue;}
+        const valid=[];
+        for(const [index,group] of matchers.entries()){
+          const groupPath=`${eventPath}[${index}]`;
+          try {
+            if(!group || typeof group!=='object' || !Array.isArray(group.hooks))throw invalid('Hook 处理器必须为数组');
+            if(group.matcher!==undefined){if(typeof group.matcher!=='string')throw invalid('Hook matcher 必须为文本');try{if(group.matcher!=='*')new RegExp(group.matcher);}catch{throw invalid('Hook matcher 不是有效表达式');}}
+            const handlers=[];
+            for(const [handlerIndex,handler] of group.hooks.entries())try{
+              if(!handler || typeof handler!=='object' || Array.isArray(handler) || !['command','prompt','agent','http'].includes(handler.type))throw invalid('Hook 类型无效');
+              const field=handler.type==='command'?'command':handler.type==='http'?'url':'prompt';
+              if(typeof handler[field]!=='string' || !handler[field].trim())throw invalid(`Hook ${field} 必须为非空文本`);
+              for(const key of ['timeout','timeoutSec'])if(handler[key]!==undefined && (!Number.isFinite(handler[key]) || handler[key]<=0))throw invalid('Hook 超时时间必须为正数');
+              handlers.push(handler);
+            }catch(error){skip(error,'hook',`${groupPath}.hooks[${handlerIndex}]`);}
+            if(handlers.length)valid.push({...group,hooks:handlers});
+          }catch(error){skip(error,'hook',groupPath);}
+        }
+        if(valid.length || matchers.length===0)hooks.push({event,matchers:valid});
+      }
+    }catch(error){skip(error,'hook',path);}
   }
   const reasons=[];
   if(provider==='dsh') {
@@ -135,7 +171,7 @@ async function pluginInfo(plugin,provider) {
   }
   if(manifest.apps) reasons.push('当前本机 Runtime 不支持托管 App 映射');
   const normalized=Object.fromEntries(Object.entries(manifest).filter(([key])=>['name','description','version','author','homepage','repository','license','keywords','skills','agents','commands','hooks','outputStyles','lspServers','settings'].includes(key)));
-  return {manifest:normalized,mcpServers,sourceDialect,components:{skills,agents,hooks,commands},supported:reasons.length===0,reasons};
+  return {manifest:normalized,mcpServers,sourceDialect,warnings,rejectedPaths:[...rejectedPaths],components:{skills,agents,hooks,commands},supported:reasons.length===0,reasons};
 }
 export function selectionIds(value) {
   if(!value || typeof value!=='object' || Array.isArray(value) || Object.keys(value).some(key=>!['pluginIds','mcpIds'].includes(key))) throw new Error('扩展选择仅接受 pluginIds 和 mcpIds；不再接受 Skill 选择');
@@ -241,7 +277,7 @@ export function createMarketplace(root) {
   async function catalogCompatibility(entry) {
     try {return await currentCompatibility(entry);}
     catch(error) {
-      if(error.code!=='PLUGIN_MARKDOWN_INVALID')throw error;
+      if(!['PLUGIN_MARKDOWN_INVALID','PLUGIN_COMPONENT_INVALID'].includes(error.code))throw error;
       return {...entry,providers:[],components:Object.fromEntries(Object.entries(entry.components).map(([key,items])=>[key,items.map(item=>({...item,providers:[]}))])),compatibility:Object.fromEntries(['claude-code','codex','dsh'].map(provider=>[provider,{supported:false,reasons:[error.message]}]))};
     }
   }
@@ -310,8 +346,9 @@ export function createMarketplace(root) {
       await ensure();
       if(!Array.isArray(catalog.plugins) || !catalog.plugins.length) throw new Error('来源中没有插件');
       if(new Set(catalog.plugins.map(item=>item.name)).size!==catalog.plugins.length) throw new Error('来源包含重复插件名称');
-      const batchId=randomUUID(), staging=join(pluginDirectory,`.install-${batchId}`), final=join(pluginDirectory,batchId), entries=[];
+      const batchId=randomUUID(), staging=join(pluginDirectory,`.install-${batchId}`), final=join(pluginDirectory,batchId), entries=[],warnings=[];
       try {
+        await mkdir(staging,{recursive:true,mode:0o700});
         if(pluginNames?.some(name=>!catalog.plugins.some(plugin=>plugin.name===name)))throw new Error('来源已移除已安装插件，本次更新未应用');
         for(const plugin of catalog.plugins.filter(plugin=>!pluginNames || pluginNames.includes(plugin.name))) {
         if(plugin.disabled) throw new Error(`插件 ${plugin.name} 引用了外部来源，请直接安装对应仓库；本批次未安装`);
@@ -320,7 +357,14 @@ export function createMarketplace(root) {
         try { await tree(plugin.path,target,plugin.sourceRoot || plugin.path); }
         catch(cause) { throw new Error(`插件「${plugin.name}」无法安装：${cause.message}；本批次未安装`,{cause}); }
         const originalTreeSha256=await tree(plugin.path,join(staging,'plugins',id,'source'),plugin.sourceRoot || plugin.path);
-        const variants=Object.fromEntries(await Promise.all(['claude-code','codex','dsh'].map(async provider=>[provider,await pluginInfo({...plugin,path:target},provider)])));
+        const variants=Object.fromEntries(await Promise.all(['claude-code','codex','dsh'].map(async provider=>[provider,await pluginInfo({...plugin,path:target},provider,{tolerant:true})])));
+        // Preserve all source bytes separately. Only the executable installation
+        // excludes rejected Markdown and uses sanitized, dialect-specific manifests.
+        for(const info of Object.values(variants))for(const warning of info.warnings)if(!warnings.some(item=>JSON.stringify(item)===JSON.stringify(warning)))warnings.push(warning);
+        for(const path of new Set(Object.values(variants).flatMap(info=>info.rejectedPaths)))await rm(await contained(target,'./'+path));
+        if(warnings.some(item=>item.plugin===plugin.name) && Object.values(variants).every(info=>!Object.values(info.components).some(items=>items.length) && !Object.keys(info.mcpServers).length)){
+          await rm(dirname(target),{recursive:true,force:true});continue;
+        }
         for(const [provider,info] of Object.entries(variants)) {
         Object.assign(info,await pluginExecutionPlan(info,target,provider));
         const commandSkills=[];
@@ -333,6 +377,20 @@ export function createMarketplace(root) {
         }
         if(commandSkills.length) info.manifest.skills=[...[info.manifest.skills || []].flat(),...commandSkills];
         }
+        for(const [provider,variant] of Object.entries(variants)){
+          variant.manifest.skills=[...new Set(variant.components.skills.map(item=>'./'+dirname(item.path)))];
+          variant.manifest.agents=variant.components.agents.map(item=>'./'+item.path);
+          variant.manifest.commands=variant.components.commands.map(item=>'./'+item.path);
+          const hooksPath=`.agentforge/${provider}-hooks.json`;
+          await mkdir(dirname(join(target,hooksPath)),{recursive:true,mode:0o700});
+          const events={};for(const item of variant.components.hooks)(events[item.event] ||= []).push(...item.matchers);
+          await writeFile(join(target,hooksPath),JSON.stringify({hooks:events}),{mode:0o600});
+          variant.manifest.hooks='./'+hooksPath;
+        }
+        if(await exists(join(target,'hooks/hooks.json')))await writeFile(join(target,'hooks/hooks.json'),'{}',{mode:0o600});
+        // Keep an existing Codex dialect independent of the Claude manifest.
+        if(await exists(join(target,'.codex-plugin/plugin.json'))){await writeFile(join(target,'.codex-plugin/plugin.json'),JSON.stringify(variants.codex.manifest),{mode:0o600});}
+        if(await exists(join(target,'plugin.json')))await writeFile(join(target,'plugin.json'),JSON.stringify(variants.codex.manifest),{mode:0o600});
         const info=variants['claude-code'],codex=variants.codex;
         const components=Object.fromEntries(['skills','agents','hooks','commands'].map(key=>{
           const merged=new Map();for(const [provider,variant] of Object.entries(variants))for(const item of variant.components[key]){if(!variant.supported)continue;const signature=JSON.stringify(item),record=merged.get(signature)||{...item,providers:[]};record.providers.push(provider);merged.set(signature,record);}return [key,[...merged.values()]];
@@ -349,7 +407,7 @@ export function createMarketplace(root) {
         await writeFile(join(target,'.claude-plugin/plugin.json'),JSON.stringify(info.manifest),{mode:0o600});
         await mkdir(join(target,'.agentforge'),{recursive:true,mode:0o700});
         await writeFile(join(target,'.agentforge/codex.json'),JSON.stringify({hooks:codex.components.hooks,agents:codex.components.agents}),{mode:0o600});
-        const entry={protocol:3,originalTreeSha256,sourceDialects:Object.fromEntries(Object.entries(variants).map(([provider,info])=>[provider,info.sourceDialect])),id,kind:'plugin',name:plugin.name,description:String(plugin.description || info.manifest.description || '').slice(0,500),version:info.manifest.version || '',createdAt:new Date().toISOString(),source:{...(plugin.source || {url:catalog.url,revision:catalog.revision}),origin:{url:catalog.url,revision:catalog.revision}},components,compatibility,runtimeComponents:Object.fromEntries(Object.entries(variants).map(([provider,variant])=>[provider,{skills:variant.components.skills.map(item=>item.path)}])),providers:Object.keys(variants).filter(provider=>compatibility[provider].supported),sha256:digest(await readFile(join(target,'.claude-plugin/plugin.json'))),treeSha256:await tree(target)};
+        const entry={protocol:3,warnings:warnings.filter(item=>item.plugin===plugin.name),originalTreeSha256,sourceDialects:Object.fromEntries(Object.entries(variants).map(([provider,info])=>[provider,info.sourceDialect])),id,kind:'plugin',name:plugin.name,description:String(plugin.description || info.manifest.description || '').slice(0,500),version:info.manifest.version || '',createdAt:new Date().toISOString(),source:{...(plugin.source || {url:catalog.url,revision:catalog.revision}),origin:{url:catalog.url,revision:catalog.revision}},components,compatibility,runtimeComponents:Object.fromEntries(Object.entries(variants).map(([provider,variant])=>[provider,{skills:variant.components.skills.map(item=>item.path)}])),providers:Object.keys(variants).filter(provider=>compatibility[provider].supported),sha256:digest(await readFile(join(target,'.claude-plugin/plugin.json'))),treeSha256:await tree(target)};
         await writeFile(join(dirname(target),'entry.json'),JSON.stringify(entry),{flag:'wx',mode:0o600}); entries.push(entry);
         for(const {name,service,providers} of includeMcps?mcpVariants:[]) {
           const expand=value=>typeof value==='string'?value.replaceAll('${CLAUDE_PLUGIN_ROOT}',join(final,'plugins',id,'plugin')).replaceAll('${PLUGIN_ROOT}',join(final,'plugins',id,'plugin')):Array.isArray(value)?value.map(expand):value && typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,item])=>[key,expand(item)])):value;
@@ -365,7 +423,7 @@ export function createMarketplace(root) {
         }
         }
         await writeFile(join(staging,'batch.json'),JSON.stringify({protocol:3,entries:entries.map(({id,kind})=>({id,kind}))}),{flag:'wx',mode:0o600});
-        await rename(staging,final);return {plugins:entries.filter(item=>item.kind==='plugin').map(summary),mcps:entries.filter(item=>item.kind==='mcp').map(summary)};
+        await rename(staging,final);return {warnings,plugins:entries.filter(item=>item.kind==='plugin').map(summary),mcps:entries.filter(item=>item.kind==='mcp').map(summary)};
       } catch(error) {await rm(staging,{recursive:true,force:true});throw error;}
     },
     async add(input, location, entryId) {

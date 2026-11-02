@@ -33,7 +33,7 @@ export function createPluginUpdates({getStore,marketplace,probe=remotePluginRevi
     timer=setTimeout(()=>{nextCheckAt=null;if(canRun())void check();else schedule();},duration());timer.unref?.();
   };
   async function perform(store,signal){
-    const result={checkedSources:0,updatedPlugins:0,updates:[],errors:[]};
+    const result={checkedSources:0,updatedPlugins:0,updates:[],warnings:[],errors:[]};
     const plugins=(await marketplace.catalog()).plugins.filter(item=>!store.isExtensionRemoved('plugin',item.id));
     const revisions=new Map();
     for(const group of pluginUpdateSources(plugins)){
@@ -49,6 +49,7 @@ export function createPluginUpdates({getStore,marketplace,probe=remotePluginRevi
         }
         if(!changed)continue;
         candidates=await marketplace.import(group.url.startsWith('file:')?{path:fileURLToPath(group.url)}:{url:group.url},{pluginNames:[...new Set(group.plugins.map(item=>item.name))],includeMcps:false,signal,transient:true});
+        if(candidates.warnings?.length)result.warnings.push(...candidates.warnings);
         const replacements=group.plugins.map(old=>{
           const next=candidates.plugins.find(item=>item.name===old.name);if(!next)throw new Error('来源中找不到已安装插件');
           return {...next,previousId:old.id};

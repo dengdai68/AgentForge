@@ -73,7 +73,7 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 - 插件来源链接在 `marketplace.mjs` 的安装复制阶段按 `configuration.mjs` 提供的 sourceRoot 展开，执行期仍拒绝链接；CLI 操作帮助同步边界。详情统一滚动区与稳定卡片布局在 `styles.css`，滚轮/键盘、跨行对齐和真实链接 Skill 加载分别由 Electron/插件 E2E 覆盖。
 
 - 协调流程：Store → Orchestrator → Runtime；平台只执行协调决定，不评价业务结果。
-- 角色：Store 拥有 roles 集合与员工 `roleId` 绑定校验/删除拒绝；Task 创建把角色文本冻结为员工快照的 `roleSnapshot`，沟通投递快照在发送/重试时嵌入；`prompts.mjs` 把快照中的角色提示词并入应用系统指令（任务与沟通共用，Claude `--append-system-prompt-file` / Codex `developer_instructions` 通道不变），Runtime 无角色状态。界面 BUILD 组有独立角色目录；CLI 为 `roles` 组与 `agents` 的 `roleId`。
+- 角色：Store 拥有 roles 集合与员工有序 `roleIds` 多选绑定校验/删除拒绝；Task 创建把角色文本冻结为员工快照的 `roleSnapshots`，沟通投递快照在发送/重试时嵌入；`prompts.mjs` 把快照中的角色提示词并入应用系统指令（任务与沟通共用，Claude `--append-system-prompt-file` / Codex `developer_instructions` 通道不变），Runtime 无角色状态。界面 BUILD 组有独立角色目录；CLI 为 `roles` 组与 `agents` 的 `roleIds`。
 - 角色侧栏展示：`web/preferences.mjs` 的 NAVIGATION 包含 roles，隐藏选择可重载保留、默认恢复与空 BUILD 分组共用现有偏好逻辑；`web/index.html` 用 SVG 人物名牌替代字体符号，`apps/electron/compact.css` 补同形蒙版以修复实心方块。`test-roles-ui.mjs` 验证偏好及宽窄窗口、两种主题；只改展示，CLI 无变动。
 - 配置能力：HTTP/Store、界面与 CLI 一起核对；当前输入协议见员工配置和 CLI 文档。员工/插件/MCP 目录共用同行搜索工具栏与卡片；插件/MCP 删除经 Store 记录 extensionRemovals 并拒绝当前员工引用，文件保留供冻结任务使用。
 - 插件/MCP：`web/marketplace.mjs` → 认证目录/详情与来源整批 import → Runtime 不可变插件版本及拆分 MCP；员工只选 pluginIds/mcpIds，创建/编辑均可设置 active/inactive。`mcp-launcher.mjs` 通过现有 SDK 桥接 SSE/Streamable HTTP；`plugin-hooks.mjs` 为 Codex 执行完整性校验的选定命令 Hook，Subagent 配置投影到 Trace。Electron 数据仍由 runtime-paths 指向 ~/.agentforge。
@@ -132,3 +132,5 @@ Runtime 安装状态：cli-environment.runtimeInstalled 按实际执行 PATH 只
 应用更新下载展示：settings.mjs 将进度条和百分比保持同一行，下载期间隐藏独立 settings-note；styles.css 使用无底板/边框的紧凑进度行。test-application-updates 覆盖手动/原生进度、结束隐藏、两主题宽窄布局；下载、校验、宿主和 CLI/API 协议不变。
 
 ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别名和 Skill/提问工具；解析仅规范化因单行 description 冒号产生的 YAML 错误。extensions.nativePluginRuntime 在私有调用目录生成原生 YAML 投影，source/安装树/冻结引用不变；市场将格式错误限定到对应插件并返回可定位且不含原文的原因。真实源验收见 scripts/test-ai-minions-real.mjs，协议见 docs/26。
+
+组件错误隔离：marketplace 导入独立捕获 Markdown/Hook 定义错误，原始 source 完整保留、有效执行树排除错误文件并生成按方言的原生清单；返回 warnings，web 安装警告弹框/详情与 CLI 共用。路径/完整性错误仍阻断批次。多角色由 Store 校验 roleIds 并冻结 roleSnapshots，prompts 按顺序注入，员工表单可重排；真实兼容矩阵同时验证坏组件不影响三个 Runtime 和整组角色生效。

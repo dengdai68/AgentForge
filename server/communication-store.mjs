@@ -70,8 +70,8 @@ export function communicationCommands(state, save) {
   // deliveries, never rewrite queued or historical snapshots.
   const withRole = (agent) => {
     if (!agent) return agent;
-    const role = agent.roleId ? (state.roles || []).find(row => row.id === agent.roleId) : null;
-    return { ...copy(agent), roleSnapshot: role ? { id: role.id, name: role.name, prompt: role.prompt } : null };
+    const roleSnapshots=(agent.roleIds || []).map(roleId=>{const role=(state.roles || []).find(row=>row.id===roleId);if(!role)throw new Error('绑定的角色不存在');return {id:role.id,name:role.name,prompt:role.prompt};});
+    return {...copy(agent),roleSnapshots};
   };
   return {
     registerCommunicationAttachment(key, record) {

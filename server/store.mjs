@@ -216,12 +216,22 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   if (workspaceRoot !== null && (!isAbsolute(workspaceRoot) || resolve(workspaceRoot) === "/")) throw new Error("系统工作根目录必须是非根绝对目录");
   const persistence = createSqlitePersistence(databasePath, { onSaveDiagnostic }), loaded = persistence.load(); const state = migrate(loaded) || { agents: clone(agents), teams: [], tasks: [], workflowTemplates: [workflow(exampleWorkflow, { templateId: exampleWorkflow.id, current: true })], runs: [], traces: [], artifacts: [], messages: [], decisions: [], defects: [], roles: [], events: [{ id: "evt_welcome", type: "workspace.ready", runId: null, timestamp: now(), actor: { type: "system", name: "AgentForge" }, message: "工作区已就绪。", data: {} }] };
   state.roles ||= [];
-  // A role is a shared plain-text system prompt; employees bind at most one via
-  // roleId. Snapshots freeze the resolved text under `roleSnapshot` — never the
-  // retired legacy `role` property, which startup migration deletes from agents.
-  const roleSnapshotOf = (roleId) => { const role = roleId ? state.roles.find((item) => item.id === roleId) : null; return role ? { id: role.id, name: role.name, prompt: role.prompt } : null; };
-  const withRoleSnapshot = (snapshot) => !snapshot || snapshot.roleSnapshot !== undefined ? snapshot : { ...snapshot, roleSnapshot: roleSnapshotOf(snapshot.roleId) };
-  const assertRoleBinding = (roleId) => { if (roleId === null || roleId === undefined) return null; if (typeof roleId !== "string" || !state.roles.some((item) => item.id === roleId)) throw new Error("绑定的角色不存在，请先在角色管理中创建"); return roleId; };
+  // Current configuration uses ordered roleIds. Immutable historical snapshots
+  // retain their own singular/plural shape and are never resolved against live roles.
+  if(state.agents.some(employee=>employee.roleId)){
+    persistence.close();throw new Error('旧员工 roleId 配置已废弃；请在旧版本解除角色绑定后升级，或显式重新初始化配置。不会自动迁移或清除数据。');
+  }
+  const roleSnapshotsOf = (roleIds = []) => roleIds.map(roleId=>{
+    const role=state.roles.find(item=>item.id===roleId);
+    if(!role)throw new Error('绑定的角色不存在，请先在角色管理中创建');
+    return {id:role.id,name:role.name,prompt:role.prompt};
+  });
+  const withRoleSnapshot = snapshot => !snapshot || snapshot.roleSnapshots !== undefined || snapshot.roleSnapshot !== undefined ? snapshot : {...snapshot,roleSnapshots:roleSnapshotsOf(snapshot.roleIds)};
+  const assertRoleBindings = roleIds => {
+    if(roleIds===undefined)return [];
+    if(!Array.isArray(roleIds) || roleIds.some(value=>typeof value!=='string') || new Set(roleIds).size!==roleIds.length)throw new Error('roleIds 必须是不重复的角色 ID 数组，清空请使用 []');
+    roleSnapshotsOf(roleIds);return [...roleIds];
+  };
   state.dispatches ||= [];
   state.extensionRemovals ||= [];
   state.settings ||= {};
@@ -258,7 +268,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     return { ...resolved, profileId: resolved.profileId || ensureProfile(runtimeConnection(resolved)).id };
   };
   for (const employee of state.agents) employee.runtime = bindRuntime(employee.runtime);
-  for (const employee of state.agents) { employee.kind ||= employee.system ? "manager" : "business"; employee.systemPrompt ??= employee.description || ""; employee.roleId ??= null; }
+  for (const employee of state.agents) { employee.kind ||= employee.system ? "manager" : "business"; employee.systemPrompt ??= employee.description || ""; employee.roleIds ??= []; delete employee.roleId; }
   for (const team of state.teams) team.managerAgentId ||= state.agents.find(item => item.kind === "manager" && item.status === "active")?.id;
   for (const current of state.runs) {
     const task = state.tasks.find((item) => item.id === current.taskId), team = state.teams.find((item) => item.id === task?.teamId);
@@ -698,13 +708,15 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       });
     },
     createAgent(input = {}) {
+      if(Object.hasOwn(input,"roleId"))throw new Error("roleId 已废弃，请使用 roleIds 数组");
       const name = text(input.name, "数字员工名称"), kind = input.kind || "business";
       if (!["business", "manager", "developer"].includes(kind)) throw new Error("数字员工类型无效");
       if (input.status !== undefined && !['active','inactive'].includes(input.status)) throw new Error('数字员工状态无效');
-      const item = { ...agent(id("agent"), name, input.description?.trim() || "一个等待被赋予使命的数字员工。", ["violet", "cyan", "amber", "blue", "green"][state.agents.length % 5], input.runtime?.provider || "claude-code", kind), repository: employeeRepository(kind, input.repository), systemPrompt: input.systemPrompt?.trim() || input.description?.trim() || "评估输入并完成可核验交付，信息不足时向合适成员咨询。", capabilities: Array.isArray(input.capabilities) ? input.capabilities : [], roleId: assertRoleBinding(input.roleId), runtime: bindRuntime(input.runtime) };
+      const item = { ...agent(id("agent"), name, input.description?.trim() || "一个等待被赋予使命的数字员工。", ["violet", "cyan", "amber", "blue", "green"][state.agents.length % 5], input.runtime?.provider || "claude-code", kind), repository: employeeRepository(kind, input.repository), systemPrompt: input.systemPrompt?.trim() || input.description?.trim() || "评估输入并完成可核验交付，信息不足时向合适成员咨询。", capabilities: Array.isArray(input.capabilities) ? input.capabilities : [], roleIds: assertRoleBindings(input.roleIds), runtime: bindRuntime(input.runtime) };
       item.status=input.status ?? 'active';state.agents.push(item); save(); return clone(item);
     },
     updateAgent(agentId, input = {}) {
+      if(Object.hasOwn(input,"roleId"))throw new Error("roleId 已废弃，请使用 roleIds 数组");
       const stored = getAgent(agentId), current = clone(stored);
       if (!current) throw new Error("数字员工不存在");
       if (input.kind && (!["business", "manager", "developer"].includes(input.kind) || state.teams.some(team => (team.managerAgentId === agentId && input.kind !== "manager") || (team.memberAgentIds.includes(agentId) && input.kind === "manager")))) throw new Error("不能改变已被团队使用的经理类型");
@@ -715,7 +727,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (input.name) current.name = text(input.name, "数字员工名称");
       if (input.description !== undefined) current.description = input.description;
       if (input.capabilities) current.capabilities = input.capabilities;
-      if (input.roleId !== undefined) current.roleId = assertRoleBinding(input.roleId);
+      if (input.roleIds !== undefined) current.roleIds = assertRoleBindings(input.roleIds);
       if (input.runtime) current.runtime = bindRuntime(input.runtime);
       if (input.status) current.status = input.status;
       Object.assign(stored, current); save(); return clone(current);
@@ -839,7 +851,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     deleteRole(roleId) {
       const current = getRole(roleId);
       if (!current) throw new Error("角色不存在");
-      const users = state.agents.filter(item => item.roleId === roleId);
+      const users = state.agents.filter(item => item.roleIds.includes(roleId));
       if (users.length) throw new Error(`角色仍被数字员工「${users.map(item => item.name).join("、")}」绑定，请先在员工中解除绑定后再删除`);
       return this.transaction(() => {
         state.roles = state.roles.filter(item => item.id !== roleId);

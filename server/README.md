@@ -16,9 +16,9 @@ Codex 的平台历史 MCP 接收 Bridge 全部自有环境，包含打包版 Nod
 
 私有提示词快照保留完整脱敏系统指令/本轮输入，共享控制台展示完整内容和已确认原生会话 ID；静态应用图标 PNG 返回正确 MIME。员工姓名/职责/能力及插件/MCP 选择变化续接原生沟通会话，下一次调用应用新配置；只有实际 Runtime 连接或启动目录变化才重建。Codex Apps 在调用级关闭，不修改全局配置。
 
-prompts.mjs 纯组装系统指令与当前输入：身份/入口/环境进系统层，完整工作流仅经理；用户目标、职责和状态按内容摘要增量追加。员工绑定角色的共用提示词作为快照数据（`roleSnapshot`）并入身份段，组装层不查询 Store。Store 游标在模型产生内容或成功返回后确认，明确目标也不重投，不重放原生历史；派工使用经理显式员工 ID。协议见 docs/22。
+prompts.mjs 纯组装系统指令与当前输入：身份/入口/环境进系统层，完整工作流仅经理；用户目标、职责和状态按内容摘要增量追加。员工绑定角色的共用提示词作为快照数据（有序 `roleSnapshots`，已有单角色历史仍读取冻结值）并入身份段，组装层不查询 Store。Store 游标在模型产生内容或成功返回后确认，明确目标也不重投，不重放原生历史；派工使用经理显式员工 ID。协议见 docs/22。
 
-Store 拥有 roles 集合：名称＋纯文本提示词，员工经 `roleId` 单选绑定（可空），绑定校验存在性；Task 创建冻结 `roleSnapshot` 文本，沟通投递在发送/重试时嵌入，删除拒绝当前员工（含停用）引用并列出名称。HTTP 提供认证 `/api/roles` CRUD 与 bootstrap 摘要；Runtime 不持有角色状态。
+Store 拥有 roles 集合：名称＋纯文本提示词，员工经 有序 `roleIds` 多选绑定（可空数组），绑定校验存在性；Task 创建冻结整组 `roleSnapshots` 文本，沟通投递在发送/重试时嵌入，删除拒绝当前员工（含停用）引用并列出名称。HTTP 提供认证 `/api/roles` CRUD 与 bootstrap 摘要；Runtime 不持有角色状态。
 
 Runtime 原始错误脱敏后保留，分类不替换正文；已知临时错误最多三次尝试，未知/确定性错误停止自动重试，Store 保留失败投递及 Trace，由人类恢复。定时巡检只唤醒已有到期投递，不声称经理发起新工作。
 
@@ -80,3 +80,5 @@ submitHumanMessage 允许省略/null recipientAgentId，默认路由给冻结 Ru
 插件/MCP 兼容机制由三种 Runtime 分别真实验证，入口 scripts/test-plugin-runtimes-real.mjs；详见 docs/26。
 
 ai-minions/常见源 frontmatter 兼容按 docs/26 v3 处理：源文本和历史 v2 计划保留，原生私有投影规范化描述，目录中的格式异常只影响对应插件。HTTP/CLI 共享当前兼容结果与安全错误位置，不返回 YAMLException.mark.buffer 或完整 Skill 正文。
+
+插件导入将组件格式错误与来源完整性错误区分：前者返回定位 warnings 并安装有效部分，后者仍原子失败。员工角色改为有序 roleIds/roleSnapshots，HTTP 拒绝旧 roleId 写入；历史单角色快照保留。

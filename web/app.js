@@ -545,7 +545,7 @@ function renderAgents() {
       <div class="capabilities">${(agent.capabilities || []).map((capability) => `<span class="capability">${esc(capability)}</span>`).join("")}</div>
       <div class="agent-runtime"><span>${providerLabel(agent)}${agent.runtime?.model ? " · " + esc(agent.runtime.model) : " · CLI 默认模型"}${agent.runtime?.effort ? " · 思考 " + esc(agent.runtime.effort) : ""}${agent.runtime?.profile ? " · profile: " + esc(agent.runtime.profile) : ""}</span><span>插件 ${agent.runtime?.extensionSelection?.pluginIds?.length || 0} · MCP ${agent.runtime?.extensionSelection?.mcpIds?.length || 0}</span></div>
       <div class="agent-footer"><span class="agent-status" data-status="${esc(agent.status)}">● ${agent.status === "active" ? "可用" : "已停用"}</span><span>${agent.kind === "manager" ? "项目经理" : agent.kind === "developer" ? "研发工程师 · 已绑定仓库" : "其他 · 能力标签非工具权限"}</span></div>
-      ${agent.roleId ? `<div class="agent-runtime"><span>角色：${esc(state.roles.find(role => role.id === agent.roleId)?.name || "（角色不存在）")}</span></div>` : ""}
+      ${agent.roleIds?.length ? `<div class="agent-runtime"><span>角色：${agent.roleIds.map(id=>esc(state.roles.find(role=>role.id===id)?.name || "（角色不存在）")).join("、")}</span></div>` : ""}
       <div class="directory-card-actions"><button class="small-button primary" data-chat-agent="${agent.id}">对话</button><button class="small-button" data-edit-agent="${agent.id}">编辑</button><button class="small-button danger" data-delete-agent="${agent.id}">删除</button></div>
     </div>`).join("") || (query ? `<div class="directory-empty" role="status"><strong>没有匹配的数字员工</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有数字员工</strong>点击右上角「创建数字员工」添加。</div>`);
   renderListPager("agents", page);
@@ -556,7 +556,7 @@ function renderRoles() {
   const query = ($("#roles-search").value || "").trim().toLowerCase();
   const filtered = state.roles.filter(role => `${role.name} ${role.prompt || ""}`.toLowerCase().includes(query));
   const page = paginate(filtered, state.listPages.roles); state.listPages.roles = page.page;
-  const bindingCount = (roleId) => state.agents.filter(agent => agent.roleId === roleId).length;
+  const bindingCount = (roleId) => state.agents.filter(agent => agent.roleIds?.includes(roleId)).length;
   $("#roles-grid").innerHTML = page.items.map((role) => `
     <div class="agent-card">
       <div class="agent-card-top">
@@ -2207,7 +2207,7 @@ async function agentModal(existing = null) {
         <div class="form-field full"><label for="employee-repository-url">绑定 Git 仓库 <b>*</b></label><input id="employee-repository-url" name="repositoryUrl" value="${esc(existing?.repository?.url || "")}" placeholder="https://github.com/owner/repository.git" /><div class="field-error"></div></div>
         <div class="form-field full"><label for="employee-repository-ref">基线分支或提交</label><input id="employee-repository-ref" name="repositoryRef" value="${esc(existing?.repository?.ref || "main")}" /><p class="field-hint">一个研发员工绑定一个默认仓库。新任务启动前检出，员工从此仓库目录执行；仓库绑定不限制其他操作。</p></div>
       </div>
-      <div class="form-field full"><label for="employee-role">绑定角色（可选）</label><select id="employee-role" name="roleId"><option value="">不绑定角色</option>${roles.map(role => `<option value="${esc(role.id)}" ${existing?.roleId === role.id ? "selected" : ""}>${esc(role.name)}（${esc(role.id)}）</option>`).join("")}</select><p class="field-hint">最多绑定一个角色；同名角色以 ID 区分。其共用提示词与员工自己的系统提示词一起进入沟通和任务执行的系统指令。修改仅影响后续新任务和沟通。</p></div>
+      <div class="form-field full"><label for="employee-role">绑定角色（可多选）</label><select id="employee-role"><option value="">选择并添加角色</option></select><div class="extension-picked" id="employee-roles"></div><p class="field-hint">按列表顺序组合角色提示词；可调整顺序，留空为不绑定。修改仅影响新任务和后续沟通。</p></div>
       <div class="form-field full"><label>系统提示词（职责与协作边界）</label><textarea name="systemPrompt">${esc(existing?.systemPrompt || "")}</textarea></div>
       <div class="form-field full"><label>能力与简介</label><textarea name="description" placeholder="擅长什么、能解决哪些问题、何时应咨询这位员工">${esc([existing?.description, ...(existing?.capabilities || []).filter((item) => !existing?.description?.includes(item))].filter(Boolean).join("\n"))}</textarea><p class="field-hint">统一描述业务能力；系统提示词保留具体工作规则和协作边界。</p></div>
       <div class="form-field full" id="employee-market-selection"></div>
@@ -2216,6 +2216,15 @@ async function agentModal(existing = null) {
         <button type="submit" class="primary-button">${existing ? "保存修改" : "创建数字员工"}</button>
       </div>
     </form>`);
+  const selectedRoleIds=[...(existing?.roleIds || [])];
+  const roleSelect=$('#employee-role'),roleChips=$('#employee-roles');
+  const paintRoles=()=>{
+    roleSelect.innerHTML='<option value="">选择并添加角色</option>'+roles.filter(role=>!selectedRoleIds.includes(role.id)).map(role=>`<option value="${esc(role.id)}">${esc(role.name)}（${esc(role.id)}）</option>`).join('');
+    roleChips.innerHTML=selectedRoleIds.map((id,index)=>{const role=roles.find(item=>item.id===id),name=role?.name || '角色不存在';return `<span class="extension-chip">${index+1}. ${esc(name)}<button type="button" data-role-up="${index}" ${index===0?'disabled':''} aria-label="上移${esc(name)}">↑</button><button type="button" data-role-down="${index}" ${index===selectedRoleIds.length-1?'disabled':''} aria-label="下移${esc(name)}">↓</button><button type="button" data-role-remove="${index}" aria-label="移除${esc(name)}">×</button></span>`;}).join('') || '<span class="field-hint">未绑定角色</span>';
+  };
+  roleSelect.onchange=()=>{if(roleSelect.value && !selectedRoleIds.includes(roleSelect.value))selectedRoleIds.push(roleSelect.value);paintRoles();roleSelect.focus();};
+  roleChips.onclick=event=>{const button=event.target.closest('button');if(!button || button.disabled)return;const index=Number(button.dataset.roleUp ?? button.dataset.roleDown ?? button.dataset.roleRemove);if(button.hasAttribute('data-role-remove'))selectedRoleIds.splice(index,1);else{const other=index+(button.hasAttribute('data-role-up')?-1:1);[selectedRoleIds[index],selectedRoleIds[other]]=[selectedRoleIds[other],selectedRoleIds[index]];}paintRoles();roleSelect.focus();};
+  paintRoles();
   const form = $("#agent-form");
   form.closest(".modal").classList.add("employee-config-modal");
   form.querySelectorAll(".form-field").forEach((field, index) => {
@@ -2245,7 +2254,7 @@ async function agentModal(existing = null) {
     input.repository = input.kind === "developer" ? { url: data.get("repositoryUrl"), ref: data.get("repositoryRef") } : null;
     delete input.repositoryUrl; delete input.repositoryRef;
     input.capabilities = [];
-    input.roleId = data.get("roleId") || null;
+    input.roleIds = [...selectedRoleIds];
     input.runtime = {
       profileId: data.get("runtimeProfileId"),
       extensionSelection
