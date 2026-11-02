@@ -652,7 +652,7 @@ try {
         await page.waitForFunction(()=>document.querySelector('[data-selection-state]')?.textContent.includes('历史任务不变'));
         await page.locator('#agent-form [name=name]').fill('创建即停用验收');
         await page.locator('#agent-form [name=status][value=inactive]').check();
-        const pickers=await page.locator('.extension-picker').evaluateAll(items=>items.map(item=>({left:item.getBoundingClientRect().left,top:item.getBoundingClientRect().top})));
+        const pickers=await page.locator('#employee-market-selection .extension-picker').evaluateAll(items=>items.map(item=>({left:item.getBoundingClientRect().left,top:item.getBoundingClientRect().top})));
         assert.ok(pickers[0].left===pickers[1].left && pickers[1].top>pickers[0].top,'plugin and MCP selectors are separate vertical rows');
         await page.getByRole('button',{name:'创建数字员工',exact:true}).click();
         await page.locator('#agent-form').waitFor({state:'detached'});

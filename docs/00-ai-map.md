@@ -133,4 +133,6 @@ Runtime 安装状态：cli-environment.runtimeInstalled 按实际执行 PATH 只
 
 ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别名和 Skill/提问工具；解析仅规范化因单行 description 冒号产生的 YAML 错误。extensions.nativePluginRuntime 在私有调用目录生成原生 YAML 投影，source/安装树/冻结引用不变；市场将格式错误限定到对应插件并返回可定位且不含原文的原因。真实源验收见 scripts/test-ai-minions-real.mjs，协议见 docs/26。
 
-组件错误隔离：marketplace 导入独立捕获 Markdown/Hook 定义错误，原始 source 完整保留、有效执行树排除错误文件并生成按方言的原生清单；返回 warnings，web 安装警告弹框/详情与 CLI 共用。路径/完整性错误仍阻断批次。多角色由 Store 校验 roleIds 并冻结 roleSnapshots，prompts 按顺序注入，员工表单可重排；真实兼容矩阵同时验证坏组件不影响三个 Runtime 和整组角色生效。
+组件错误隔离：marketplace 导入独立捕获 Markdown/Hook 定义错误，原始 source 完整保留、有效执行树排除错误文件并生成按方言的原生清单；返回 warnings，web 安装警告弹框/详情与 CLI 共用。路径/完整性错误仍阻断批次。多角色由 Store 校验 roleIds 并冻结 roleSnapshots，prompts 按顺序注入，员工表单以框内多选标签添加/移除，不展示排序；真实兼容矩阵同时验证坏组件不影响三个 Runtime 和整组角色生效。
+
+员工框内多选：web/marketplace.mjs 的 createEmployeeMultiSelect 同时服务角色、插件与 MCP；app.js 只组合角色目录和保存值，styles.css 统一输入边框内的标签/搜索/换行与悬停桥。移除角色排序箭头/序号，绑定及 Runtime/CLI 协议不变；test-roles-ui 覆盖两主题宽窄、框内几何对齐、键盘及保存回读。

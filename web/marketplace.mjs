@@ -91,36 +91,51 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
   };
 }
 export const createMcpMarketplaceUI = options => marketUI(options,'mcp');
+// Shared employee picker: chips and search live inside one field boundary.
+// IDs remain the saved values; display order is not a priority control.
+export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items=[],selectedIds=[],available=()=>true,reason=()=>'',detail=()=>'',emptyMessage=()=> '没有可添加的匹配项'}) {
+  const selected=new Set(selectedIds);let catalog=items;
+  target.classList.add('extension-picker');
+  target.innerHTML=`<label for="${esc(id)}">${esc(label)}</label><div class="extension-picker-search"><div class="extension-picker-control"><div class="extension-picked"></div><input id="${esc(id)}" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${esc(id)}-options" autocomplete="off" placeholder="${esc(placeholder)}"></div><div class="extension-picker-options" id="${esc(id)}-options" role="listbox" hidden></div></div>`;
+  const search=target.querySelector('.extension-picker-search'),control=target.querySelector('.extension-picker-control'),input=target.querySelector('input'),list=target.querySelector('[role=listbox]'),chips=target.querySelector('.extension-picked');
+  const close=(restoreFocus=false)=>{if(restoreFocus && list.contains(document.activeElement))input.focus({preventScroll:true});list.hidden=true;input.setAttribute('aria-expanded','false');};
+  const paint=()=>{
+    const found=catalog.filter(item=>!selected.has(item.id) && `${item.name} ${item.description || ''} ${item.id}`.toLowerCase().includes(input.value.trim().toLowerCase())).slice(0,20);
+    list.innerHTML=found.map(item=>`<button type="button" role="option" aria-selected="false" data-add-extension="${esc(item.id)}" ${available(item)?'':`disabled title="${esc(reason(item))}"`}><strong>${esc(item.name)}</strong>${detail(item)}${available(item)?'':`<small>${esc(reason(item))}</small>`}</button>`).join('') || `<p class="field-hint">${esc(emptyMessage())}</p>`;
+    chips.innerHTML=[...selected].map(id=>{const item=catalog.find(item=>item.id===id),incompatible=item && !available(item),name=item?.name || '未安装版本 '+id.slice(0,8);return `<span class="extension-chip" title="${esc(id)}" data-incompatible="${Boolean(incompatible)}"><span class="extension-chip-name">${esc(name)}</span>${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" aria-label="移除${esc(name)}">×</button></span>`;}).join('');
+    input.placeholder=selected.size?'继续添加…':placeholder;
+  };
+  const open=()=>{paint();list.hidden=false;input.setAttribute('aria-expanded','true');};
+  input.onfocus=open;input.oninput=open;input.onclick=open;
+  control.onclick=event=>{if(!event.target.closest('button') && event.target!==input)input.focus();};
+  input.onkeydown=event=>{
+    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}
+    if(event.key==='ArrowDown'){event.preventDefault();open();list.querySelector('button:not(:disabled)')?.focus();}
+    if(event.key==='Backspace' && !input.value && selected.size){selected.delete([...selected].at(-1));paint();}
+  };
+  list.onkeydown=event=>{const buttons=[...list.querySelectorAll('button:not(:disabled)')],index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;buttons[next]?.focus();}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(true);}};
+  list.onclick=event=>{const button=event.target.closest('[data-add-extension]');if(!button || button.disabled)return;selected.add(button.dataset.addExtension);input.value='';paint();input.focus();close();};
+  chips.onclick=event=>{const button=event.target.closest('[data-remove-extension]');if(button){selected.delete(button.dataset.removeExtension);paint();input.focus();close();}};
+  target.addEventListener('focusout',event=>{if(!search.contains(event.relatedTarget))close();});
+  target.onpointerleave=event=>{if(event.pointerType==='mouse')close(true);};
+  (target.closest('form') || target).addEventListener('pointerdown',event=>{if(!target.contains(event.target))close(true);});
+  paint();
+  return {refresh(items=catalog){catalog=items;paint();},value(){return [...selected];}};
+}
+
 export function createMarketplaceUI(options) {
   const {api,esc}=options;
   return {...marketUI(options,'plugin'),select(target,runtime,provider){
-    const selected={plugin:new Set(runtime.extensionSelection?.pluginIds || []),mcp:new Set(runtime.extensionSelection?.mcpIds || [])};
     let catalogs={plugin:[],mcp:[]},loaded=false,currentProvider=provider;
-    const painters=[];
-    target.innerHTML=['plugin','mcp'].map(kind=>`<div class="extension-picker" data-picker="${kind}"><label for="employee-${kind}-search">${kind==='plugin'?'插件':'MCP'}</label><div class="extension-picker-search"><input id="employee-${kind}-search" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="employee-${kind}-options" autocomplete="off" placeholder="搜索并添加${kind==='plugin'?'插件':'MCP'}"><div class="extension-picker-options" id="employee-${kind}-options" role="listbox" hidden></div></div><div class="extension-picked"></div></div>`).join('')+'<p class="field-hint" data-selection-state>正在读取已安装插件与 MCP…</p>';
-    function setup(kind){
-      const picker=target.querySelector(`[data-picker="${kind}"]`),search=picker.querySelector('.extension-picker-search'),input=picker.querySelector('input'),list=picker.querySelector('[role=listbox]'),chips=picker.querySelector('.extension-picked');
-      const close=(restoreFocus=false)=>{if(restoreFocus && list.contains(document.activeElement))input.focus({preventScroll:true});list.hidden=true;input.setAttribute('aria-expanded','false');};
-      function paint(){
-        const found=catalogs[kind].filter(item=>!selected[kind].has(item.id) && `${item.name} ${item.description}`.toLowerCase().includes(input.value.toLowerCase())).slice(0,20);
-        list.innerHTML=found.map(item=>`<button type="button" role="option" aria-selected="false" data-add-extension="${esc(item.id)}" ${item.providers.includes(currentProvider)?'':`disabled title="${esc(supportReason(item,currentProvider))}"`}><strong>${esc(item.name)}</strong><small>${esc(item.description || '')}</small>${runtimeBadges(item,esc)}${item.providers.includes(currentProvider)?'':`<small>${esc(supportReason(item,currentProvider))}</small>`}</button>`).join('') || `<p class="field-hint">${loaded?'没有可添加的匹配项':'正在读取…'}</p>`;
-        chips.innerHTML=[...selected[kind]].map(id=>{const item=catalogs[kind].find(item=>item.id===id),incompatible=item && !item.providers.includes(currentProvider);return `<span class="extension-chip" data-incompatible="${Boolean(incompatible)}">${esc(item?.name || '未安装版本 '+id.slice(0,8))}${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" aria-label="移除${esc(item?.name || id)}">×</button></span>`;}).join('') || '<span class="field-hint">未选择</span>';
-      }
-      const open=()=>{paint();list.hidden=false;input.setAttribute('aria-expanded','true');};
-      input.onfocus=open;input.oninput=open;input.onclick=open;
-      input.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}if(event.key==='ArrowDown'){event.preventDefault();input.onfocus();list.querySelector('button:not(:disabled)')?.focus();}};
-      list.onkeydown=event=>{const buttons=[...list.querySelectorAll('button:not(:disabled)')],index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();buttons[(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(true);}};
-      list.onclick=event=>{const button=event.target.closest('[data-add-extension]');if(!button || button.disabled)return;selected[kind].add(button.dataset.addExtension);input.value='';paint();input.focus();close();};
-      chips.onclick=event=>{const button=event.target.closest('[data-remove-extension]');if(button){selected[kind].delete(button.dataset.removeExtension);paint();input.focus();close();}};
-      picker.addEventListener('focusout',event=>{if(!search.contains(event.relatedTarget))close();});
-      // Keep the input-to-options gap inside the picker; touch and keyboard
-      // selection must not be cancelled by mouse-only hover dismissal.
-      picker.onpointerleave=event=>{if(event.pointerType==='mouse')close(true);};
-      (target.closest('form') || target).addEventListener('pointerdown',event=>{if(!picker.contains(event.target))close(true);});
-      painters.push(paint);paint();
-    }
-    setup('plugin');setup('mcp');
-    Promise.all([api('/api/runtime/marketplace'),api('/api/runtime/mcp-marketplace')]).then(([plugins,mcps])=>{if(!target.isConnected)return;catalogs={plugin:plugins.plugins,mcp:mcps.entries};loaded=true;painters.forEach(paint=>paint());target.querySelector('[data-selection-state]').textContent=runtime.extensionSelection?.skillIds?.length?'单 Skill 选择已移除，请重新选择完整插件后保存。':'插件和 MCP 只属于此员工，历史任务不变。';}).catch(error=>{if(target.isConnected)target.querySelector('[data-selection-state]').textContent=`扩展读取失败：${error.message}`;});
-    return {provider(value){currentProvider=value;painters.forEach(paint=>paint());},value(){if(!loaded)throw new Error('扩展尚未读取成功，请关闭后重试');for(const kind of ['plugin','mcp'])for(const id of selected[kind]){const item=catalogs[kind].find(item=>item.id===id);if(!item)throw new Error('已选版本未安装，请移除后重新安装选择');if(!item.providers.includes(currentProvider))throw new Error(`「${item.name}」与 ${providerLabel(currentProvider)} 不兼容：${supportReason(item,currentProvider)}`);}return {pluginIds:[...selected.plugin],mcpIds:[...selected.mcp]};}};
+    target.innerHTML=['plugin','mcp'].map(kind=>`<div data-picker="${kind}"></div>`).join('')+'<p class="field-hint" data-selection-state>正在读取已安装插件与 MCP…</p>';
+    const pickers=Object.fromEntries(['plugin','mcp'].map(kind=>[kind,createEmployeeMultiSelect(target.querySelector(`[data-picker="${kind}"]`),{
+      id:`employee-${kind}-search`,label:kind==='plugin'?'插件':'MCP',placeholder:`搜索并添加${kind==='plugin'?'插件':'MCP'}`,esc,
+      selectedIds:runtime.extensionSelection?.[kind==='plugin'?'pluginIds':'mcpIds'] || [],
+      available:item=>item.providers.includes(currentProvider),reason:item=>supportReason(item,currentProvider),
+      detail:item=>`${item.description?`<small>${esc(item.description)}</small>`:''}${runtimeBadges(item,esc)}`,
+      emptyMessage:()=>loaded?'没有可添加的匹配项':'正在读取…'
+    })]));
+    Promise.all([api('/api/runtime/marketplace'),api('/api/runtime/mcp-marketplace')]).then(([plugins,mcps])=>{if(!target.isConnected)return;catalogs={plugin:plugins.plugins,mcp:mcps.entries};loaded=true;for(const kind of ['plugin','mcp'])pickers[kind].refresh(catalogs[kind]);target.querySelector('[data-selection-state]').textContent=runtime.extensionSelection?.skillIds?.length?'单 Skill 选择已移除，请重新选择完整插件后保存。':'插件和 MCP 只属于此员工，历史任务不变。';}).catch(error=>{if(target.isConnected)target.querySelector('[data-selection-state]').textContent=`扩展读取失败：${error.message}`;});
+    return {provider(value){currentProvider=value;Object.values(pickers).forEach(picker=>picker.refresh());},value(){if(!loaded)throw new Error('扩展尚未读取成功，请关闭后重试');for(const kind of ['plugin','mcp'])for(const id of pickers[kind].value()){const item=catalogs[kind].find(item=>item.id===id);if(!item)throw new Error('已选版本未安装，请移除后重新安装选择');if(!item.providers.includes(currentProvider))throw new Error(`「${item.name}」与 ${providerLabel(currentProvider)} 不兼容：${supportReason(item,currentProvider)}`);}return {pluginIds:pickers.plugin.value(),mcpIds:pickers.mcp.value()};}};
   }};
 }

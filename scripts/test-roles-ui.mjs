@@ -1,5 +1,5 @@
 // Isolated real Electron UI acceptance for role management: directory CRUD,
-// search/pagination, employee ordered multi-role binding and reference-rejected
+// search/pagination, employee inline multi-select binding and reference-rejected
 // deletion. No Provider calls; never touches the operator's data or session.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -112,7 +112,8 @@ try {
   await page.locator('.nav-item[data-view="agents"]').click();
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
   await page.locator('#employee-role').waitFor();
-  const optionTexts = await page.locator('#employee-role option').allTextContents();
+  await page.locator('#employee-role').click();
+  const optionTexts = await page.locator('#employee-role-options [role=option]').allTextContents();
   for (const candidate of [role, duplicate]) assert.ok(optionTexts.some(text => text.includes(candidate.name) && text.includes(candidate.id)), 'same-name roles are distinguishable by ID: ' + candidate.id);
   await page.locator('#agent-form [data-close-modal]').click();
   await api(`/api/roles/${duplicate.id}`, {}, 'DELETE');
@@ -138,29 +139,60 @@ try {
   await page.locator('[data-pagination="roles"] [data-page="2"]').click();
   assert.equal(await page.locator('#roles-grid .agent-card').count(), 2);
 
-  // Employee form binds an ordered group of roles; the card shows the binding.
+  const pickerPlugins=[],pickerMcps=[];
+  for(let index=0;index<2;index++){
+    const source=join(root,'picker-plugin-'+index);await mkdir(join(source,'.claude-plugin'),{recursive:true});await mkdir(join(source,'skills/proof'),{recursive:true});
+    await writeFile(join(source,'.claude-plugin/plugin.json'),JSON.stringify({name:'picker-proof-'+index,description:'多选框布局验证'}));
+    await writeFile(join(source,'skills/proof/SKILL.md'),'---\nname: proof\ndescription: Layout only\n---\nDo not run');
+    pickerPlugins.push((await api('/api/runtime/marketplace',{path:source})).plugins[0]);
+    const mcp=await api('/api/runtime/mcp-marketplace',{name:'多选框验证 MCP '+index,description:'布局验证，不执行',content:JSON.stringify({mcpServers:{['picker_'+index]:{command:'node',args:['--version']}}})});pickerMcps.push(mcp.entry || mcp);
+  }
+  // All three fields share one inline token/search control, without role priority UI.
   await page.locator('.nav-item[data-view="agents"]').click();
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
   await page.locator('#employee-role').waitFor();
-  const options = await page.locator('#employee-role option').allTextContents();
-  assert.ok(options.includes('选择并添加角色') && options.some(text => text.startsWith('界面验收角色') && text.includes(role.id)));
-  await page.locator('#employee-role').selectOption(role.id);
+  await page.locator('#employee-role').fill(role.name);
+  await page.locator(`#employee-role-options [data-add-extension="${role.id}"]`).click();
   await page.locator('#agent-form [type=submit]').click();
   await page.locator('#agent-form').waitFor({ state: 'detached' });
   await page.locator('#agents-grid .agent-card', { hasText: '界面验收角色' }).waitFor();
   assert.deepEqual((await api('/api/agents', null, 'GET')).agents.find(item => item.id === employee.id).roleIds,[role.id]);
   // Persisted selection is shown when the form reopens.
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
-  assert.ok((await page.locator('#employee-roles').textContent()).includes(role.name));
+  assert.ok((await page.locator('#employee-role-selection .extension-picked').textContent()).includes(role.name));
   const another=roles.find(item=>item.id!==role.id) || (await api('/api/roles',null,'GET')).roles.find(item=>item.id!==role.id);
-  await page.locator('#employee-role').selectOption(another.id);
-  await page.locator('[data-role-up="1"]').click();
+  await page.locator('#employee-role').click();
+  await page.locator('#employee-role').fill(another.name);
+  await page.locator(`#employee-role-options [data-add-extension="${another.id}"]`).click();
+  assert.equal(await page.locator('[data-role-up],[data-role-down]').count(),0);
+  assert.doesNotMatch(await page.locator('#employee-role-selection .extension-picked').textContent(),/^[12]\./);
+  for(const [kind,items] of [['plugin',pickerPlugins],['mcp',pickerMcps]])for(const item of items){await page.locator(`#employee-${kind}-search`).click();await page.locator(`#employee-${kind}-search`).fill(item.name);await page.locator(`[data-picker="${kind}"] [data-add-extension="${item.id}"]`).click();}
+  await page.getByRole('heading',{name:'编辑数字员工',exact:true}).click();
+  for(const theme of ['minimal','warm'])for(const width of [1320,760]){
+    // Match the two existing theme tokens without closing the current draft.
+    await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;},theme);
+    await app.evaluate(({BrowserWindow},{origin,width})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,850),{origin,width});
+    await page.waitForFunction(expected=>innerWidth===expected,width);
+    const geometry=await page.locator('#agent-form .extension-picker').evaluateAll(pickers=>pickers.map(picker=>{
+      const control=picker.querySelector('.extension-picker-control'),r=control.getBoundingClientRect(),style=getComputedStyle(control),inner=getComputedStyle(picker.querySelector('input')),chips=[...picker.querySelectorAll('.extension-chip')];
+      return {innerBorder:inner.borderWidth,innerShadow:inner.boxShadow,count:chips.length,inside:chips.every(chip=>{const c=chip.getBoundingClientRect();return c.left>=r.left && c.right<=r.right+1 && c.top>=r.top && c.bottom<=r.bottom+1;}),border:style.border,background:style.backgroundColor,radius:style.borderRadius,outside:picker.querySelectorAll(':scope > .extension-picked').length};
+    }));
+    assert.equal(geometry.length,3);for(const result of geometry){assert.equal(result.innerBorder,'0px');assert.equal(result.innerShadow,'none');assert.equal(result.count,2);assert.equal(result.inside,true);assert.equal(result.outside,0);assert.equal(result.border,geometry[0].border);assert.equal(result.background,geometry[0].background);assert.equal(result.radius,geometry[0].radius);}
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.screenshot({path:join(root,`inline-select-${theme}-${width}.png`),animations:'disabled'});
+  }
   await page.locator('#agent-form [type=submit]').click();
   await page.locator('#agent-form').waitFor({state:'detached'});
-  assert.deepEqual((await api('/api/agents',null,'GET')).agents.find(item=>item.id===employee.id).roleIds,[another.id,role.id]);
+  const saved=(await api('/api/agents',null,'GET')).agents.find(item=>item.id===employee.id);
+  assert.deepEqual(saved.roleIds,[role.id,another.id]);
+  assert.deepEqual(saved.runtime.extensionSelection,{pluginIds:pickerPlugins.map(item=>item.id),mcpIds:pickerMcps.map(item=>item.id)});
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
-  await page.locator('#employee-roles .extension-chip').first().waitFor();
-  assert.equal(await page.locator('#employee-roles .extension-chip').count(),2);
+  await page.locator('#employee-role-selection .extension-chip').first().waitFor();
+  assert.equal(await page.locator('#employee-role-selection .extension-chip').count(),2);
+  // Keyboard opens the same candidate list; Escape returns focus and keeps the modal.
+  await page.locator('#employee-role').click();await page.locator('#employee-role').press('ArrowDown');await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#employee-role').getAttribute('aria-expanded'),'false');assert.equal(await page.locator('#agent-form').count(),1);
+
   await page.locator('#agent-form [data-close-modal]').click();
 
   // A bound role cannot be deleted; the referencing employee is listed in place.
@@ -185,9 +217,9 @@ try {
   // Unbind, then deletion succeeds.
   await page.locator('.nav-item[data-view="agents"]').click();
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
-  await page.locator('[data-role-remove]').first().waitFor();
+  await page.locator('#employee-role-selection [data-remove-extension]').first().waitFor();
   await page.screenshot({path:join(root,'employee-multiple-roles-narrow.png')});
-  while(await page.locator('[data-role-remove]').count())await page.locator('[data-role-remove]').first().click();
+  while(await page.locator('#employee-role-selection [data-remove-extension]').count())await page.locator('#employee-role-selection [data-remove-extension]').first().click();
   await page.locator('#agent-form [type=submit]').click();
   await page.locator('#agent-form').waitFor({ state: 'detached' });
   assert.deepEqual((await api('/api/agents', null, 'GET')).agents.find(item => item.id === employee.id).roleIds, []);
@@ -225,6 +257,22 @@ try {
   // Current HTTP and actual CLI agree on role arrays and reject the retired field.
   const old=await page.evaluate(async id=>{const r=await fetch('/api/agents/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({roleId:null})});return r.status;},employee.id);assert.equal(old,400);
 
+  await page.goto(origin+'/agents');await page.locator('[data-action="new-agent"]').click();
+  await page.locator('#agent-form [name=name]').fill('框内多选新建员工');
+  const roleCandidate=(await api('/api/roles',null,'GET')).roles[0];
+  for(const [inputId,item] of [['employee-role',roleCandidate],['employee-plugin-search',pickerPlugins[0]],['employee-mcp-search',pickerMcps[0]]]){
+    const input=page.locator('#'+inputId);await input.click();await input.fill(item.name);
+    const picker=input.locator('xpath=ancestor::*[contains(@class,"extension-picker-search")]');
+    const control=await picker.locator('.extension-picker-control').boundingBox();
+    await page.mouse.move(control.x+control.width/2,control.y+control.height-2);await page.mouse.move(control.x+control.width/2,control.y+control.height+2);
+    assert.equal(await input.getAttribute('aria-expanded'),'true','the 4px gap remains inside the picker hover region');
+    await picker.locator(`[data-add-extension="${item.id}"]`).click();
+    assert.equal(await picker.locator('.extension-chip').count(),1);
+  }
+  const createdResponse=page.waitForResponse(response=>response.url().endsWith('/api/agents') && response.request().method()==='POST');
+  await page.locator('#agent-form [type=submit]').click();const created=await (await createdResponse).json();assert.deepEqual(created.agent.roleIds,[roleCandidate.id]);
+  assert.deepEqual(created.agent.runtime.extensionSelection,{pluginIds:[pickerPlugins[0].id],mcpIds:[pickerMcps[0].id]});
+  await page.locator('#agent-form').waitFor({state:'detached'});
   const cli=(args,input='')=>new Promise((resolvePromise,reject)=>{
     const child=spawn(process.execPath,['cli/main.mjs',...args,'--endpoint-file',join(data,'desktop-endpoint.json'),'--session-file',join(root,'cli-session.json'),'--json'],{env:{...process.env,HOME:home},stdio:['pipe','pipe','pipe']});let output='',error='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>error+=chunk);child.on('error',reject);child.on('close',code=>code===0?resolvePromise(JSON.parse(output).data):reject(new Error('CLI failed '+error)));child.stdin.end(input);
   });

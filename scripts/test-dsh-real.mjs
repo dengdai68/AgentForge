@@ -85,7 +85,8 @@ try {
   const form=page.locator('#agent-form'); await form.waitFor();
   assert.deepEqual(await form.locator('[name=runtimeProfileId] option').allTextContents(), ['Claude Code','Codex','DeepSeek Harness']);
   await form.locator('[name=name]').fill('DeepSeek Harness worker'); await form.locator('[name=runtimeProfileId]').selectOption(slot.id);
-  await form.locator('#employee-role').selectOption(role.id);
+  await form.locator('#employee-role').fill(role.name);
+  await form.locator(`#employee-role-options [data-add-extension="${role.id}"]`).click();
   const {role:secondRole}=await api('/api/roles',{name:'Additional verification role',prompt:'交接 summary 必须包含 MULTI_ROLE_SECOND。'});
   // Reload the employee form so its role directory contains the additional role.
   // The second role is set through the same authenticated employee command after creation.

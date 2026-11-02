@@ -2,7 +2,7 @@ import { disposeManualGraphs, disposeWorkflowGraphs, fitManualGraph, mountManual
 import { createCommunicationUI, formatCommunicationContent, memberMentionMarkup } from "./communication.js";
 import { applyPreferences, normalizePreferences, PREFERENCES_KEY, readPreferences, savePreferences } from "./preferences.mjs";
 import { createSettingsUI } from "./settings.mjs";
-import { createMarketplaceUI, createMcpMarketplaceUI } from "./marketplace.mjs";
+import { createMarketplaceUI, createMcpMarketplaceUI, createEmployeeMultiSelect } from "./marketplace.mjs";
 import { paginate, paginationMarkup } from "./pagination.mjs";
 import { consoleContentTokens, editDiff, isShellTool, shellCommandText, shellTokens, toolCommandSummary, toolEditInput, toolFileInput, workingDirectoryIcon } from "/client/console-projections.mjs";
 import { EVENT_KIND_LABEL as KIND_LABEL, STATUS_TEXT as statusText, buildConsoleEntries, classifyEvent, collaborationRecords, displayText, formatExactTime as exactTime, formatRelativeTime as timeAgo, isTransportFrame, mentionables, providerLabel, roleExecutionStatus, taskActionLabel, taskMatchesFilter, taskNeedsAttention, workspaceAgents, workflowFocus } from "/client/console-projections.mjs";
@@ -2207,7 +2207,7 @@ async function agentModal(existing = null) {
         <div class="form-field full"><label for="employee-repository-url">绑定 Git 仓库 <b>*</b></label><input id="employee-repository-url" name="repositoryUrl" value="${esc(existing?.repository?.url || "")}" placeholder="https://github.com/owner/repository.git" /><div class="field-error"></div></div>
         <div class="form-field full"><label for="employee-repository-ref">基线分支或提交</label><input id="employee-repository-ref" name="repositoryRef" value="${esc(existing?.repository?.ref || "main")}" /><p class="field-hint">一个研发员工绑定一个默认仓库。新任务启动前检出，员工从此仓库目录执行；仓库绑定不限制其他操作。</p></div>
       </div>
-      <div class="form-field full"><label for="employee-role">绑定角色（可多选）</label><select id="employee-role"><option value="">选择并添加角色</option></select><div class="extension-picked" id="employee-roles"></div><p class="field-hint">按列表顺序组合角色提示词；可调整顺序，留空为不绑定。修改仅影响新任务和后续沟通。</p></div>
+      <div class="form-field full" id="employee-role-selection"></div>
       <div class="form-field full"><label>系统提示词（职责与协作边界）</label><textarea name="systemPrompt">${esc(existing?.systemPrompt || "")}</textarea></div>
       <div class="form-field full"><label>能力与简介</label><textarea name="description" placeholder="擅长什么、能解决哪些问题、何时应咨询这位员工">${esc([existing?.description, ...(existing?.capabilities || []).filter((item) => !existing?.description?.includes(item))].filter(Boolean).join("\n"))}</textarea><p class="field-hint">统一描述业务能力；系统提示词保留具体工作规则和协作边界。</p></div>
       <div class="form-field full" id="employee-market-selection"></div>
@@ -2216,15 +2216,7 @@ async function agentModal(existing = null) {
         <button type="submit" class="primary-button">${existing ? "保存修改" : "创建数字员工"}</button>
       </div>
     </form>`);
-  const selectedRoleIds=[...(existing?.roleIds || [])];
-  const roleSelect=$('#employee-role'),roleChips=$('#employee-roles');
-  const paintRoles=()=>{
-    roleSelect.innerHTML='<option value="">选择并添加角色</option>'+roles.filter(role=>!selectedRoleIds.includes(role.id)).map(role=>`<option value="${esc(role.id)}">${esc(role.name)}（${esc(role.id)}）</option>`).join('');
-    roleChips.innerHTML=selectedRoleIds.map((id,index)=>{const role=roles.find(item=>item.id===id),name=role?.name || '角色不存在';return `<span class="extension-chip">${index+1}. ${esc(name)}<button type="button" data-role-up="${index}" ${index===0?'disabled':''} aria-label="上移${esc(name)}">↑</button><button type="button" data-role-down="${index}" ${index===selectedRoleIds.length-1?'disabled':''} aria-label="下移${esc(name)}">↓</button><button type="button" data-role-remove="${index}" aria-label="移除${esc(name)}">×</button></span>`;}).join('') || '<span class="field-hint">未绑定角色</span>';
-  };
-  roleSelect.onchange=()=>{if(roleSelect.value && !selectedRoleIds.includes(roleSelect.value))selectedRoleIds.push(roleSelect.value);paintRoles();roleSelect.focus();};
-  roleChips.onclick=event=>{const button=event.target.closest('button');if(!button || button.disabled)return;const index=Number(button.dataset.roleUp ?? button.dataset.roleDown ?? button.dataset.roleRemove);if(button.hasAttribute('data-role-remove'))selectedRoleIds.splice(index,1);else{const other=index+(button.hasAttribute('data-role-up')?-1:1);[selectedRoleIds[index],selectedRoleIds[other]]=[selectedRoleIds[other],selectedRoleIds[index]];}paintRoles();roleSelect.focus();};
-  paintRoles();
+  const roleSelection=createEmployeeMultiSelect($('#employee-role-selection'),{id:'employee-role',label:'绑定角色（可多选）',placeholder:'搜索并添加角色',esc,items:roles,selectedIds:existing?.roleIds || [],detail:role=>`<small>${esc(role.id)}</small>`});
   const form = $("#agent-form");
   form.closest(".modal").classList.add("employee-config-modal");
   form.querySelectorAll(".form-field").forEach((field, index) => {
@@ -2254,7 +2246,7 @@ async function agentModal(existing = null) {
     input.repository = input.kind === "developer" ? { url: data.get("repositoryUrl"), ref: data.get("repositoryRef") } : null;
     delete input.repositoryUrl; delete input.repositoryRef;
     input.capabilities = [];
-    input.roleIds = [...selectedRoleIds];
+    input.roleIds = roleSelection.value();
     input.runtime = {
       profileId: data.get("runtimeProfileId"),
       extensionSelection

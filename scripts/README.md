@@ -108,6 +108,6 @@ test-collaboration-flow 核对精简后的协作顶部/答复正文，以及两�
 
 `AGENTFORGE_AI_MINIONS_REAL=1 AGENTFORGE_AI_MINIONS_SOURCE=/absolute/checkout node scripts/test-ai-minions-real.mjs` 使用外部本地来源隔离导入，核对每个插件在全部 Runtime 的计划和原生 YAML；真实加载 nyx-build 并调用来源内的独立代码分析子代理验证模型映射。只读加载业务 Skill，不触发部署，不运行来源的 transcript-upload Hook；Hook/MCP 机制由既有六组真实矩阵另验。证据仅写 .data，原检出和真实任务不变。
 
-test-roles-ui 覆盖有序多角色添加/重排/移除；test-plugin-runtimes-real 在两种来源内加入错误 Skill/Subagent/Hook，验证有效组件在三种 Runtime 中真实调用与多个角色指令生效；test-dsh-real 验证整组角色冻结及完整任务验收。
+test-roles-ui 覆盖角色/插件/MCP 框内多选添加/移除、无排序操作、两主题宽窄几何一致性及保存回读；test-plugin-runtimes-real 在两种来源内加入错误 Skill/Subagent/Hook，验证有效组件在三种 Runtime 中真实调用与多个角色指令生效；test-dsh-real 验证整组角色冻结及完整任务验收。
 
 `AGENTFORGE_ROLES_APP=/absolute/path/AgentForge.app node scripts/test-roles-ui.mjs` 将同一多角色/部分安装验收用于真实打包版（仍使用隔离数据），并实际通过已认证 CLI 写入/清空 roleIds。
