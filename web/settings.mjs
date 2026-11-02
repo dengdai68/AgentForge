@@ -35,6 +35,7 @@ export function createAppUpdateUI(panel, desktop) {
   const status = panel.querySelector('[data-app-update-status]'), version = panel.querySelector('[data-app-version]');
   const check = panel.querySelector('[data-app-update-check]'), download = panel.querySelector('[data-app-update-download]');
   const install = panel.querySelector('[data-app-update-install]'), progress = panel.querySelector('progress');
+  const progressRow = panel.querySelector('[data-app-update-progress]'), percent = panel.querySelector('[data-app-update-percent]');
   const note = panel.querySelector('[data-app-update-note]');
   let disposed = false, observed;
   function accept(value) {
@@ -45,9 +46,10 @@ export function createAppUpdateUI(panel, desktop) {
     check.disabled = busy; check.textContent = value.phase === 'checking' ? '正在检查…' : '检查更新';
     download.hidden = !value.canDownload; download.disabled = busy;
     install.hidden = !value.canInstall; install.textContent = value.installMode === 'native' ? '重启并安装' : '打开安装包';
-    progress.hidden = value.phase !== 'downloading'; progress.value = value.percent || 0;
-    note.textContent = value.phase === 'downloading' ? `已下载 ${Math.floor(value.percent || 0)}%`
-      : value.version && value.installMode === 'manual' ? '当前版本或发布包不满足原生自动安装条件；下载后手动安装。' : '启动后及运行期间自动检查正式版；不会自动下载或打断任务重启。';
+    progressRow.hidden = value.phase !== 'downloading'; progress.value = value.percent || 0;
+    percent.textContent = `${Math.floor(value.percent || 0)}%`;
+    note.hidden = value.phase === 'downloading';
+    note.textContent = value.version && value.installMode === 'manual' ? '当前版本或发布包不满足原生自动安装条件；下载后手动安装。' : '启动后及运行期间自动检查正式版；不会自动下载或打断任务重启。';
   }
   async function run(method) {
     if (disposed) return;
@@ -520,7 +522,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             <section class="settings-update-module" aria-labelledby="app-update-title">
             <h3 id="app-update-title">应用更新</h3><p class="settings-description app-update-version"><span data-app-version>正在读取当前版本…</span><a data-app-github href="https://github.com/dengdai68/AgentForge-App" target="_blank" rel="noopener noreferrer">GitHub</a></p>
             <p data-app-update-status role="status" aria-live="polite">正在读取更新状态…</p>
-            <progress class="app-update-progress" max="100" value="0" aria-label="安装包下载进度" hidden></progress>
+            <div class="app-update-progress-row" data-app-update-progress hidden><progress class="app-update-progress" max="100" value="0" aria-label="安装包下载进度"></progress><span data-app-update-percent aria-hidden="true">0%</span></div>
             <div class="form-actions"><button type="button" class="small-button" data-app-update-check>检查更新</button><button type="button" class="primary-button compact" data-app-update-download hidden>下载更新</button><button type="button" class="primary-button compact" data-app-update-install hidden>重启并安装</button></div>
             <p class="settings-note" data-app-update-note>只检查正式版，Beta 不参与更新。</p>
             </section>

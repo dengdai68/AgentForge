@@ -27,3 +27,5 @@ macOS Developer ID 签名的安装版使用原生自动安装。当前 ad-hoc �
 参考：[electron-builder 更新](https://www.electron.build/v26/docs/features/auto-update/)、[Electron macOS 签名要求](https://www.electronjs.org/docs/latest/api/auto-updater)。
 
 正式发布渠道与签名等级分开：v0.1.1 经操作者明确授权手动发布为非预发布 Release，沿用 ad-hoc 签名并在 Release 中声明；可检测、下载及校验后手动安装。签名正式发布工作流仍要求完整 Developer ID/公证配置，不会降级签名要求。后续获得证书后通过该工作流发布；首次从 ad-hoc 升级到 Developer ID 版本需手动安装。
+
+下载期间，进度条与百分比同行展示，不再另建下载进度说明框；完成后隐藏进度行并恢复既有安装方式说明。此为 renderer 展示调整，宿主状态、下载安装校验及 CLI/API 协议不变。

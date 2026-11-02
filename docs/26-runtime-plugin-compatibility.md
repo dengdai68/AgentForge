@@ -27,3 +27,9 @@ MCP 使用统一解析与完整性启动器映射 command/args/env/cwd/传输，
 覆盖 Claude/Codex 两类源、纯 Skill/MCP、独立子代理、Hook 实际执行/拒绝、未知组件失败、源完整性、历史冻结及 UI/CLI 一致性。真实模型完整任务验证到可见人类确认；使用隔离 HOME 和数据，不改造真实实例。控制台普通 Markdown 仅由时间线纵向滚动，列表保留编号空间；代码与宽表格保留横向滚动。
 
 跨 Runtime 门禁由 `scripts/test-plugin-runtimes-real.mjs` 给出两种源 × 三种 Provider 的逐项证据，包含 Skill/子代理/Hook 与三种 MCP 传输真实调用。卡片不展示支持标签；详情与选择器仍保留静态能力、失败原因。兼容机制验证与业务插件完整流程验收分别记录，不能互相替代。
+
+## ai-minions 源标准补充（执行计划 v3）
+
+源 Markdown 的顶层单行 description 若只因未转义的冒号+空格导致 YAML 映射错误，按完整单行字面描述重新编码；不修复其他结构错误、标签或脚本。解析错误仅带相对组件路径和行列，不将 YAML 缓冲区、原始提示正文或片段带入诊断。原始 source 与已安装冻结目录不改写；必要时只在调用私有投影中规范化 frontmatter，正文与支持文件保持原字节。某个已安装插件的格式错误以该插件不兼容说明呈现，不使整个目录读取失败；执行与导入仍明确拒绝不能解析的内容。
+
+v3 将源 opus/sonnet/haiku 等 Claude 别名在其他 Runtime 中明确映射为继承目标 Runtime 的已配置模型，保留 sourceModel 元信息，不声称使用同一个模型。非已知别名仍明确拒绝未知固定模型。DeepSeek 的 Skill、AskUserQuestion 依原生 skill、ask_user_question 工具映射；Codex 的原生委派/等待、读取技能和提问按源工具能力映射。插件包含 Codex 清单时，DeepSeek 使用该完整源方言配置，不混拼两份 Hook。已有 v2 引用仍按 v2 计划重算与验摘要，不转换历史事实。

@@ -127,7 +127,9 @@ button { cursor:pointer; }
 .brand strong { display:block; font-size:17px; letter-spacing:-.04em; }
 .brand small { display:block; margin-top:3px; color:#879088; font:500 8px 'DM Mono',monospace; letter-spacing:.16em; }
 .application-icon { display:block; flex:none; width:28px; height:28px; object-fit:contain; }
-.app-update-progress { width:100%; height:8px; accent-color:var(--accent); }
+.app-update-progress-row { display:flex; align-items:center; gap:10px; margin:10px 0; }
+.app-update-progress { flex:1; min-width:0; width:100%; height:8px; accent-color:var(--accent); }
+.app-update-progress-row [data-app-update-percent] { flex:none; min-width:4ch; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; text-align:right; }
 .settings-update-module + .settings-update-module { margin-top:24px; padding-top:20px; border-top:1px solid var(--line); }
 .app-update-version { display:flex; align-items:baseline; flex-wrap:wrap; gap:8px; }
 .app-update-version a { color:var(--accent); text-underline-offset:2px; white-space:nowrap; }

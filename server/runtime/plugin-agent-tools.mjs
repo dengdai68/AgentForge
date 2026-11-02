@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 
 export function sourceToolAllowed(policy,tool) {
   const matches=(pattern,name)=>pattern===name || (pattern.endsWith('*') && name.startsWith(pattern.slice(0,-1)));
-  const aliases=tool==='apply_patch'?['Write','Edit']:tool==='web_search'?['WebSearch']:[tool];
+  const aliases=tool==='apply_patch'?['Write','Edit']:tool==='web_search'?['WebSearch']:['spawn_agent','wait_agent','send_input','close_agent'].includes(tool)?['Task','Agent']:tool==='request_user_input'?['AskUserQuestion']:tool==='skill'?['Skill']:[tool];
   if(policy.deniedTools?.some(pattern=>aliases.some(name=>matches(pattern,name)))) return false;
   return !policy.tools || policy.tools.some(pattern=>aliases.some(name=>matches(pattern,name)));
 }

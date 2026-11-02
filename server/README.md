@@ -78,3 +78,5 @@ submitHumanMessage 允许省略/null recipientAgentId，默认路由给冻结 Ru
 插件源标准兼容由 runtime/plugin-compatibility 及目标 Runtime 适配器负责；当前安装支持矩阵只读重算，Store 冻结摘要，HTTP/CLI 共用同一结果。契约见 docs/26。
 
 插件/MCP 兼容机制由三种 Runtime 分别真实验证，入口 scripts/test-plugin-runtimes-real.mjs；详见 docs/26。
+
+ai-minions/常见源 frontmatter 兼容按 docs/26 v3 处理：源文本和历史 v2 计划保留，原生私有投影规范化描述，目录中的格式异常只影响对应插件。HTTP/CLI 共享当前兼容结果与安全错误位置，不返回 YAMLException.mark.buffer 或完整 Skill 正文。

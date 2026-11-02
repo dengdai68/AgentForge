@@ -67,3 +67,5 @@ DeepSeek Harness 接入使用本机 dsh sdk（实测 0.2.1-rc.2），系统/角�
 Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
 跨 Runtime 扩展按 docs/26 的源标准计划执行。私有 Trace 物化 DeepSeek 原生子代理/官方 Hook 桥，peer 解析锚定实际 dsh CLI，版本不匹配拒绝含这些组件的调用。纯 Skill 不依赖 Hook 桥版本。原始安装源与历史冻结引用不重写。
+
+源插件计划 v3 与旧 v2 的冻结边界、模型/工具映射及原生 YAML 私有投影见 docs/26；真实 ai-minions 验收通过独立来源目录导入和三个真实 Runtime 调用，不修改操作者插件/任务。

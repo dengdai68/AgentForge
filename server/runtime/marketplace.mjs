@@ -54,7 +54,8 @@ const exists = path => lstat(path).then(()=>true,error=>{if(error.code==='ENOENT
 async function pluginInfo(plugin,provider) {
   if(plugin.disabled) throw new Error('外部插件引用暂不支持，请直接读取该插件仓库');
   let manifest={};
-  const order=provider!=='codex'?['.claude-plugin/plugin.json','plugin.json','.codex-plugin/plugin.json']:['plugin.json','.codex-plugin/plugin.json','.claude-plugin/plugin.json'];
+  const prefersCodex=plugin.sourceDialect ? plugin.sourceDialect==='codex' : provider==='codex' || provider==='dsh' && await exists(join(plugin.path,'.codex-plugin/plugin.json'));
+  const order=prefersCodex?['plugin.json','.codex-plugin/plugin.json','.claude-plugin/plugin.json']:['.claude-plugin/plugin.json','plugin.json','.codex-plugin/plugin.json'];
   const manifestFile=(await Promise.all(order.map(async path=>await exists(join(plugin.path,path))?path:null))).find(Boolean) || '.claude-plugin/plugin.json';
   const manifestPath=join(plugin.path,manifestFile);
   if(await exists(manifestPath)) {
@@ -97,7 +98,7 @@ async function pluginInfo(plugin,provider) {
     if(!info.isFile() || !directory.endsWith('.md') || (kind==='skill' && basename(directory)!=='SKILL.md')) return;
     const content=await readFile(directory,'utf8');
     if(Buffer.byteLength(content)>128*1024) throw new Error('插件 Markdown 组件超过 128 KB');
-    const {attributes}=parsePluginMarkdown(content);
+    const {attributes}=parsePluginMarkdown(content,{path:relative(plugin.path,directory)});
     const name=typeof attributes.name==='string'?attributes.name:(kind==='skill'?basename(dirname(directory)):basename(directory,'.md'));
     const description=typeof attributes.description==='string'?attributes.description:'';
     const result={name,description,path:relative(plugin.path,directory)};
@@ -166,10 +167,10 @@ export async function readExtensionFile(ref) {
 }
 export async function readPluginExecutionPlan(ref) {
   await readExtensionFile(ref);
-  if(ref.adapterVersion!==COMPATIBILITY_VERSION) throw new Error('插件执行计划版本不支持');
+  if(![2,COMPATIBILITY_VERSION].includes(ref.adapterVersion)) throw new Error('插件执行计划版本不支持');
   const root=dirname(dirname(ref.path));
   const info=await pluginInfo({path:root,name:ref.name,sourceDialect:ref.sourceDialect},ref.planTarget);
-  const result=await pluginExecutionPlan(info,root,ref.planTarget);
+  const result=await pluginExecutionPlan(info,root,ref.planTarget,ref.adapterVersion);
   if(!result.supported || result.digest!==ref.planSha256) throw new Error(`插件执行计划校验失败：${result.reasons.join('；') || '冻结计划不一致'}`);
   return result.plan;
 }
@@ -219,13 +220,13 @@ export function createMarketplace(root) {
     }
     const location=dirname(dirname(reference(entry).path)),plans={},runtimeComponents={},components=Object.fromEntries(['skills','agents','hooks','commands'].map(key=>[key,new Map()]));
     for(const provider of ['claude-code','codex','dsh']) {
-      const info=await pluginInfo({path:location,name:entry.name,sourceDialect:entry.sourceDialects?.[provider]},provider);
+      const info=await pluginInfo({path:location,name:entry.name,sourceDialect:provider==='dsh'?undefined:entry.sourceDialects?.[provider]},provider);
       // The installed inventory preserves an explicit marketplace root selection
       // and generated Command instruction files. Reparse their actual bytes;
       // do not rediscover neighbouring plugins as implicit default Skills.
       const selected=entry.runtimeComponents?.[provider]?.skills;
       if(selected) info.components.skills=await Promise.all(selected.map(async path=>{
-        const {attributes}=parsePluginMarkdown(await readFile(await contained(location,'./'+path),'utf8'));
+        const {attributes}=parsePluginMarkdown(await readFile(await contained(location,'./'+path),'utf8'),{path});
         return {name:attributes.name || basename(dirname(path)),description:attributes.description || '',path};
       }));
       plans[provider]=await pluginExecutionPlan(info,location,provider);
@@ -237,11 +238,18 @@ export function createMarketplace(root) {
     const compatibility=Object.fromEntries(Object.entries(plans).map(([provider,result])=>[provider,{supported:result.supported,reasons:result.reasons}]));
     return {...entry,plans,runtimeComponents,components:Object.fromEntries(Object.entries(components).map(([key,list])=>[key,[...list.values()]])),compatibility,providers:Object.keys(compatibility).filter(provider=>compatibility[provider].supported)};
   }
+  async function catalogCompatibility(entry) {
+    try {return await currentCompatibility(entry);}
+    catch(error) {
+      if(error.code!=='PLUGIN_MARKDOWN_INVALID')throw error;
+      return {...entry,providers:[],components:Object.fromEntries(Object.entries(entry.components).map(([key,items])=>[key,items.map(item=>({...item,providers:[]}))])),compatibility:Object.fromEntries(['claude-code','codex','dsh'].map(provider=>[provider,{supported:false,reasons:[error.message]}]))};
+    }
+  }
   return {
     async catalog() {
       await ensure(); const plugins=[];
-      for(const item of await batches()) if(item.kind==='plugin') plugins.push(summary(await currentCompatibility(await read(item.id,'plugin',item.directory))));
-      for(const id of (await readdir(pluginDirectory)).filter(uuid).sort()) if(await exists(join(pluginDirectory,id,'entry.json'))) plugins.push(summary(await currentCompatibility(await read(id,'plugin',join(pluginDirectory,id)))));
+      for(const item of await batches()) if(item.kind==='plugin') plugins.push(summary(await catalogCompatibility(await read(item.id,'plugin',item.directory))));
+      for(const id of (await readdir(pluginDirectory)).filter(uuid).sort()) if(await exists(join(pluginDirectory,id,'entry.json'))) plugins.push(summary(await catalogCompatibility(await read(id,'plugin',join(pluginDirectory,id)))));
       return {plugins:plugins.sort((a,b)=>b.createdAt.localeCompare(a.createdAt))};
     },
     async mcpCatalog() {
@@ -262,7 +270,7 @@ export function createMarketplace(root) {
     },
     async list() {return [...(await this.catalog()).plugins,...(await this.mcpCatalog()).entries];},
     async detail(id,kind) {
-      const entry=await currentCompatibility(await read(id,kind)), content=await readExtensionFile(reference(entry));
+      const raw=await read(id,kind),entry=kind==='plugin'?await catalogCompatibility(raw):await currentCompatibility(raw), content=await readExtensionFile(reference(entry));
       if(kind==='plugin') return diagnosticRedactor()({...summary(entry),components:entry.components,manifest:JSON.parse(content)});
       const configuration=parseMcpJson(content), secrets=Object.values(configuration.mcpServers).flatMap(server=>[...Object.values(server.env||{}),...Object.values(server.headers||{})]);
       const redact=diagnosticRedactor({secrets});

@@ -52,3 +52,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 tasks message 的 recipientAgentId 可省略，默认发给当前 Run 的项目经理；显式提供需为当前 Run 成员 ID。tasks reply 仍必须指定待答问题 ID，普通消息不会被猜成澄清回答；回执保留实际接收方。
 
 插件/MCP 跨 Runtime 支持按源标准计划统一查询；既有安装无需重装，`plugins get` 可核对每种 Runtime 的当前原因。输入命令不新增兼容转换开关，MCP cwd/env_vars 在三种 Runtime 共用私有启动器，详见 docs/26。
+
+插件导入/查询共享源标准 v3：已知 Claude 模型别名在其他 Runtime 继承目标模型；单行描述冒号在原生投影规范化，未知结构明确拒绝。某个已安装插件格式错误在该条兼容原因中显示，不阻塞全部列表；原始源和冻结任务不改写。命令、输入 schema 和引用输出不新增转换参数。

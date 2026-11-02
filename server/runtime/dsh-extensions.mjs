@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
-const sourceTools = {read:'Read',write:'Write',edit:'Edit',bash:'Bash',glob:'Glob',grep:'Grep',web_search:'WebSearch',web_fetch:'WebFetch'};
+const sourceTools = {read:'Read',write:'Write',edit:'Edit',bash:'Bash',glob:'Glob',grep:'Grep',web_search:'WebSearch',web_fetch:'WebFetch',skill:'Skill',ask_user_question:'AskUserQuestion'};
 const nativeTools = Object.fromEntries(Object.entries(sourceTools).map(([native,source])=>[source,native]));
 const notify = (method,params) => process.stdout.write(JSON.stringify({jsonrpc:'2.0',method,params})+'\n');
 

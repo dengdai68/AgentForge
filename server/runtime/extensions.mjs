@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, cp, mkdtemp } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { readExtensionFile, readPluginExecutionPlan, selectionIds } from './marketplace.mjs';
@@ -9,6 +9,7 @@ import { parseMcpJson } from './configuration.mjs';
 import { diagnostic } from '../diagnostics.mjs';
 import { cliEnvironment } from './cli-environment.mjs';
 import { diagnoseLaunch } from './launch-diagnostics.mjs';
+import { parsePluginMarkdown } from './plugin-compatibility.mjs';
 
 const exec = promisify(execFile);
 // Preserve existing model connection env without loading user extensions/hooks.
@@ -23,6 +24,32 @@ export async function claudeMarketEnvironment(path = join(process.env.CLAUDE_CON
 }
 export const tomlValue = value => Array.isArray(value) ? `[${value.map(tomlValue).join(',')}]` : value && typeof value === 'object' ? `{${Object.entries(value).map(([key,item]) => `${JSON.stringify(key)}=${tomlValue(item)}`).join(',')}}` : JSON.stringify(value);
 export const codexAgentKey=(ref,index,name)=>`af_${ref.id.replaceAll('-','')}_${index}_${name.replace(/[^a-zA-Z0-9_]/g,'_').toLowerCase().slice(0,24)}`;
+
+// Native readers receive valid YAML without changing source bytes, installation
+// hashes or frozen paths. Only components needing the narrow text correction
+// get a private copy, including their relative supporting resources.
+export async function nativePluginRuntime(runtime, traceDirectory) {
+  const roots=new Map();let directory;
+  for(const ref of (runtime.extensionManifest || []).filter(item=>item.kind==='plugin')) {
+    const root=dirname(dirname(ref.path)),paths=new Set(ref.skills || []);
+    if([2,3].includes(ref.adapterVersion))for(const agent of (await readPluginExecutionPlan(ref)).agents)paths.add(agent.path);
+    const changed=[];
+    for(const path of paths) {
+      const content=await readFile(join(root,path),'utf8'),{nativeContent}=parsePluginMarkdown(content,{path});
+      if(content!==nativeContent)changed.push({path,content:nativeContent});
+    }
+    if(!changed.length)continue;
+    await readExtensionFile(ref);
+    directory ||= await mkdtemp(join(traceDirectory,'native-plugins-'));
+    const target=join(directory,ref.id);await cp(root,target,{recursive:true,errorOnExist:true,force:false});
+    for(const item of changed)await writeFile(join(target,item.path),item.content,{mode:0o600});
+    roots.set(root,target);
+  }
+  if(!roots.size)return runtime;
+  return {...runtime,pluginPaths:(runtime.pluginPaths || []).map(path=>roots.get(path) || path),skillPaths:(runtime.skillPaths || []).map(path=>{
+    for(const [root,target] of roots)if(path.startsWith(root+'/'))return join(target,path.slice(root.length+1));return path;
+  })};
+}
 
 export async function selectedExtensions(runtime) {
   // An omitted selection means no market extensions, never ambient discovery.
@@ -59,7 +86,7 @@ export async function selectedExtensions(runtime) {
     if (JSON.stringify(refs.map(ref => ref.id)) !== JSON.stringify(selection[kind === 'plugin' ? 'pluginIds' : 'mcpIds']) || (kind==='mcp' && JSON.stringify(refs.map(ref => ref.path)) !== JSON.stringify(runtime.mcpConfigPaths || []))) throw new Error('市场扩展绑定与执行路径不一致');
     for (const ref of refs) {
       const content = await readExtensionFile(ref);
-      if(kind==='plugin' && ref.adapterVersion===2) {
+      if(kind==='plugin' && [2,3].includes(ref.adapterVersion)) {
         if(ref.planTarget!==(runtime.provider || 'claude-code'))throw new Error('冻结插件执行计划与 Runtime 不一致');
         await readPluginExecutionPlan(ref);
       }
@@ -112,18 +139,18 @@ export async function codexMarketArgs(runtime, servers, workspacePath, traceDire
     await readExtensionFile(ref);
     // Frozen Skill-only invocations predate native projections; their recorded
     // paths remain executable without rewriting history or installation files.
-    if(![1,2].includes(ref.adapterVersion)) continue;
-    const root=dirname(dirname(ref.path)), plan=ref.adapterVersion===2 ? await readPluginExecutionPlan(ref) : JSON.parse(await readFile(join(root,'.agentforge/codex.json'),'utf8'));
-    const namespace=ref.adapterVersion===2 ? JSON.parse(await readFile(ref.path,'utf8')).name : '';
+    if(![1,2,3].includes(ref.adapterVersion)) continue;
+    const root=dirname(dirname(ref.path)), plan=[2,3].includes(ref.adapterVersion) ? await readPluginExecutionPlan(ref) : JSON.parse(await readFile(join(root,'.agentforge/codex.json'),'utf8'));
+    const namespace=[2,3].includes(ref.adapterVersion) ? JSON.parse(await readFile(ref.path,'utf8')).name : '';
     if(!traceDirectory && (plan.agents.length || plan.hooks.length)) throw new Error('插件原生组件需要执行记录目录');
     for(const [agentIndex,agent] of plan.agents.entries()) {
       const content=await readFile(join(root,agent.path),'utf8');
-      const key=ref.adapterVersion===2 ? codexAgentKey(ref,agentIndex,agent.name) : `af_${ref.id.replaceAll('-','')}_${agentIndex}_${agent.name.replace(/[^a-zA-Z0-9_]/g,'_').slice(0,24)}`;
-      const configFile=join(traceDirectory,ref.adapterVersion===2?`agent-${ref.id}-${agentIndex}.toml`:`${key}.toml`);
+      const key=[2,3].includes(ref.adapterVersion) ? codexAgentKey(ref,agentIndex,agent.name) : `af_${ref.id.replaceAll('-','')}_${agentIndex}_${agent.name.replace(/[^a-zA-Z0-9_]/g,'_').slice(0,24)}`;
+      const configFile=join(traceDirectory,[2,3].includes(ref.adapterVersion)?`agent-${ref.id}-${agentIndex}.toml`:`${key}.toml`);
       await mkdir(traceDirectory,{recursive:true,mode:0o700});
       await writeFile(configFile,`${agent.model && agent.model!=='inherit'?`model=${tomlValue(agent.model)}\n`:''}developer_instructions=${tomlValue(content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/,''))}\n`,{mode:0o600});
-      pluginArgs.push('-c',`agents.${key}=${tomlValue({description:ref.adapterVersion===2?`[${namespace}:${agent.name}] ${agent.description || agent.name}`:agent.description || agent.name,config_file:configFile})}`);
-      if(ref.adapterVersion===2)agentTools[key]={tools:agent.tools,deniedTools:agent.deniedTools};
+      pluginArgs.push('-c',`agents.${key}=${tomlValue({description:[2,3].includes(ref.adapterVersion)?`[${namespace}:${agent.name}] ${agent.description || agent.name}`:agent.description || agent.name,config_file:configFile})}`);
+      if([2,3].includes(ref.adapterVersion))agentTools[key]={tools:agent.tools,deniedTools:agent.deniedTools};
     }
     for(const [eventIndex,item] of plan.hooks.entries()) for(const [groupIndex,group] of item.matchers.entries()) {
       if(!hooks[item.event]) throw new Error('插件 Hook 与当前 Codex 不兼容');
@@ -132,8 +159,8 @@ export async function codexMarketArgs(runtime, servers, workspacePath, traceDire
         if(hook.type!=='command') throw new Error('Codex 插件只支持可映射的 command Hook');
         const quote=value=>`'${String(value).replaceAll("'","'\\''")}'`;
         const frozenRef=join(traceDirectory,`plugin-${ref.id}.json`);
-        if(ref.adapterVersion===2)await writeFile(frozenRef,JSON.stringify(ref),{mode:0o600});
-        const command=[process.execPath,fileURLToPath(new URL('./plugin-hooks.mjs',import.meta.url)),ref.path,ref.sha256,ref.treeSha256,eventIndex,groupIndex,hookIndex,...(ref.adapterVersion===2?[frozenRef]:[])].map(quote).join(' ');
+        if([2,3].includes(ref.adapterVersion))await writeFile(frozenRef,JSON.stringify(ref),{mode:0o600});
+        const command=[process.execPath,fileURLToPath(new URL('./plugin-hooks.mjs',import.meta.url)),ref.path,ref.sha256,ref.treeSha256,eventIndex,groupIndex,hookIndex,...([2,3].includes(ref.adapterVersion)?[frozenRef]:[])].map(quote).join(' ');
         projected.push({...hook,command:(process.versions.electron?'ELECTRON_RUN_AS_NODE=1 ':'')+command});hookCount++;
       }
       hooks[item.event].push({...group,hooks:projected});

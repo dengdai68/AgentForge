@@ -105,3 +105,5 @@ test-collaboration-flow 核对精简后的协作顶部/答复正文，以及两�
 `test-console-layout.mjs` 使用隔离暂停任务，实际检查两个主题与 1320/760px 的长 Markdown、编号缩进、单一纵向滚动；可用 AGENTFORGE_CONSOLE_LAYOUT_APP 指定待验收安装包。
 
 `AGENTFORGE_PLUGIN_RUNTIMES_REAL=1 node scripts/test-plugin-runtimes-real.mjs`：两种源格式 × Claude Code/Codex/DeepSeek Harness，六个真实模型组合。每项实际读取 Skill、调用独立子代理和 command Hook、调用 stdio/HTTP/SSE 三种 MCP，核对随机输出与本地工具证据。所有素材与模型工作目录隔离；不等于逐一完成已安装业务插件的生成/翻译/配音业务流程。失败逐项保留，不将静态支持标签当验收。
+
+`AGENTFORGE_AI_MINIONS_REAL=1 AGENTFORGE_AI_MINIONS_SOURCE=/absolute/checkout node scripts/test-ai-minions-real.mjs` 使用外部本地来源隔离导入，核对每个插件在全部 Runtime 的计划和原生 YAML；真实加载 nyx-build 并调用来源内的独立代码分析子代理验证模型映射。只读加载业务 Skill，不触发部署，不运行来源的 transcript-upload Hook；Hook/MCP 机制由既有六组真实矩阵另验。证据仅写 .data，原检出和真实任务不变。

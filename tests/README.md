@@ -71,3 +71,5 @@ Runtime 安装可用性由 cli-environment 与 runtime-profiles 测试分别覆�
 任务协作消息覆盖未指定/null 接收人默认冻结经理、显式成员校验、待答澄清不被普通消息消费、终态仅答疑；renderer 保留明确 @ 与精确回复，移除顶部冗余和答复问题副本。
 
 `plugin-compatibility.test.mjs` 覆盖安全 YAML、两种源的冻结计划、源完整性、旧安装只读重算、未映射组件与 Hook 审计隐私；真实子代理/Hook 在 scripts/test-dsh-real.mjs 另验。
+
+plugin-compatibility 新增单行描述规范化、错误不泄露缓冲区、格式错误插件不阻断其他条目、原生支持文件保留、v3 模型与方言映射、v2 摘要稳定及原生工具别名选择回归。实际外部来源和三 Runtime 由 scripts/test-ai-minions-real.mjs 另验。

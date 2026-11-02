@@ -63,8 +63,8 @@ function extensionBinding(value) {
     if(manifest.some(ref=>!['plugin','mcp'].includes(ref.kind) || !selection[ref.kind==='plugin'?'pluginIds':'mcpIds'].includes(ref.id) || typeof ref.name!=='string' || !isAbsolute(ref.path || '') || !/^[a-f0-9]{64}$/.test(ref.sha256 || '') || (ref.kind==='plugin' && (!/^[a-f0-9]{64}$/.test(ref.treeSha256 || '') || !Array.isArray(ref.skills) || ref.skills.some(path=>typeof path!=='string' || isAbsolute(path) || path.split('/').includes('..'))))) || new Set(manifest.map(ref=>ref.id)).size!==ids.length) throw new Error('插件/MCP 引用无效');
     const plugins=manifest.filter(ref=>ref.kind==='plugin');
     for(const ref of manifest) {
-      if(ref.adapterVersion!==undefined && ![1,2].includes(ref.adapterVersion)) throw new Error('插件执行计划版本无效');
-      if(ref.adapterVersion===2 && (ref.kind!=='plugin' || ref.planTarget!==(value.provider || 'claude-code') || !['claude-code','codex'].includes(ref.sourceDialect) || !/^[a-f0-9]{64}$/.test(ref.planSha256 || ''))) throw new Error('插件冻结执行计划无效');
+      if(ref.adapterVersion!==undefined && ![1,2,3].includes(ref.adapterVersion)) throw new Error('插件执行计划版本无效');
+      if([2,3].includes(ref.adapterVersion) && (ref.kind!=='plugin' || ref.planTarget!==(value.provider || 'claude-code') || !['claude-code','codex'].includes(ref.sourceDialect) || !/^[a-f0-9]{64}$/.test(ref.planSha256 || ''))) throw new Error('插件冻结执行计划无效');
       if((ref.sourceRoot!==undefined || ref.sourceSha256!==undefined) && (ref.kind!=='plugin' || !isAbsolute(ref.sourceRoot || '') || !/^[a-f0-9]{64}$/.test(ref.sourceSha256 || ''))) throw new Error('插件原始源引用无效');
       if(ref.mcpAdapterVersion!==undefined && (ref.kind!=='mcp' || ref.mcpAdapterVersion!==2)) throw new Error('MCP 执行适配版本无效');
     }

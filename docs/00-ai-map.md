@@ -128,3 +128,7 @@ Runtime 安装状态：cli-environment.runtimeInstalled 按实际执行 PATH 只
 市场卡片在 web/marketplace.mjs 只保留版本/ID 与详情；Runtime 兼容信息保留在详情和员工选择器。三 Runtime、两源格式与三种 MCP 传输的真实兼容验证入口为 scripts/test-plugin-runtimes-real.mjs。
 
 正式安装包回归 scripts/test-packaged-electron.mjs 在隔离 HOME/PATH 验证 Codex 缺失时关闭并拒绝启用，再安装只供检查存在的可执行夹具验证开关更新；不依赖或调用操作者的 Codex。
+
+应用更新下载展示：settings.mjs 将进度条和百分比保持同一行，下载期间隐藏独立 settings-note；styles.css 使用无底板/边框的紧凑进度行。test-application-updates 覆盖手动/原生进度、结束隐藏、两主题宽窄布局；下载、校验、宿主和 CLI/API 协议不变。
+
+ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别名和 Skill/提问工具；解析仅规范化因单行 description 冒号产生的 YAML 错误。extensions.nativePluginRuntime 在私有调用目录生成原生 YAML 投影，source/安装树/冻结引用不变；市场将格式错误限定到对应插件并返回可定位且不含原文的原因。真实源验收见 scripts/test-ai-minions-real.mjs，协议见 docs/26。

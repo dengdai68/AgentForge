@@ -93,6 +93,31 @@ const resourcePaths = ['LICENSE', 'NOTICE', 'web/icons/application.png', 'web/ic
 const resourceProof = await execute(executable, ['-e', `const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');console.log(JSON.stringify(${JSON.stringify(resourcePaths)}.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(path.join(${JSON.stringify(join(appBundle, 'Contents/Resources/app.asar'))},file))).digest('hex')])));`], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30000 });
 for (const [file, hash] of JSON.parse(resourceProof.stdout)) assert.equal(hash, createHash('sha256').update(await readFile(resolve(file))).digest('hex'), `packaged resource differs from frozen source: ${file}`);
 console.log('PASS packaged application resources match the frozen source');
+// Exercise the actual ASAR implementation using bundled Electron Node, not the
+// source checkout's parser/FS implementation or a real business plugin Hook.
+const yamlProjectionProof=await execute(executable,['-e',`
+(async()=>{
+  const fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict');
+  const load=require('node:module').createRequire(${JSON.stringify(join(appBundle,'Contents/Resources/app.asar/package.json'))});
+  const {createMarketplace,readExtensionFile}=load('./server/runtime/marketplace.mjs');
+  const {nativePluginRuntime}=load('./server/runtime/extensions.mjs');
+  const root=${JSON.stringify(join(evidenceRoot,'native-yaml-probe'))},source=path.join(root,'source');
+  await fs.mkdir(path.join(source,'.claude-plugin'),{recursive:true});await fs.mkdir(path.join(source,'skills/proof'),{recursive:true});
+  await fs.writeFile(path.join(source,'.claude-plugin/plugin.json'),JSON.stringify({name:'native-yaml-proof'}));
+  const text='---\\nname: proof\\ndescription: Build metadata. Triggers on: local validation\\n---\\nOriginal body\\n';
+  await fs.writeFile(path.join(source,'skills/proof/SKILL.md'),text);
+  const market=createMarketplace(path.join(root,'market')),entry=(await market.import({path:source})).plugins[0];
+  for(const provider of ['claude-code','codex','dsh']){
+    const runtime={provider,...await market.resolve({pluginIds:[entry.id],mcpIds:[]},provider)},trace=path.join(root,provider);await fs.mkdir(trace);
+    const native=await nativePluginRuntime(runtime,trace);assert.notEqual(native.skillPaths[0],runtime.skillPaths[0]);
+    const projected=await fs.readFile(native.skillPaths[0],'utf8'),header=projected.match(/^---\\n([\\s\\S]*?)\\n---/)[1];
+    assert.equal(load('js-yaml').load(header).description,'Build metadata. Triggers on: local validation');
+    assert.equal(await fs.readFile(runtime.skillPaths[0],'utf8'),text);await readExtensionFile(runtime.extensionManifest[0]);
+  }
+  console.log('PASS packaged native YAML projection for all three Runtimes; source hashes preserved');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+`],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',HOME:home,AGENTFORGE_LOG_DIR:join(evidenceRoot,'logs')},timeout:60000});
+console.log(yamlProjectionProof.stdout.trim());
 // Validate the actual distribution bundle, not just its inherited Mach-O signature.
 await execute("/usr/bin/codesign", ["--verify", "--deep", "--strict", appBundle]);
 const tamperedBundle = join(evidenceRoot, "tampered.app");

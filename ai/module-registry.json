@@ -845,6 +845,7 @@
     },
     {
       "id": "server.local-agent-runtime",
+      "sourceMarkdownCompatibility": "v3 plans map known source model aliases and native Skill/question tools while preserving v2 frozen digests. A narrow description-colon YAML repair is materialized only in private invocation copies. Format errors expose relative paths/positions without YAML buffers and isolate the affected catalog entry. External-source acceptance imports ai-minions once and checks every plugin against all three Runtimes.",
       "pluginUpdates": "Git HEAD/ref/sha probing and original-market/dependency provenance prepare only requested installed names. Automatic source clones are transient; failed candidates never replace active bindings, and bundled MCP is excluded from auto installation.",
       "mcpEditing": "mcpEditInput preserves unchanged redacted JSON fields and reuses current configuration validation; edits create immutable files and leave frozen references readable.",
       "nativeSkills": "Selected Claude plugins retain native Skill activation with ambient settings excluded. Selected Codex Skills use an invocation-owned app-server with explicit extra roots, native per-thread enablement and exact session resume, rather than prompt path instructions. Non-Skill Codex calls retain exec transport over the same native thread store.",
@@ -878,6 +879,7 @@
         "tests/dsh.test.mjs",
         "scripts/test-dsh-real.mjs",
         "scripts/test-plugin-runtimes-real.mjs",
+        "scripts/test-ai-minions-real.mjs",
         "scripts/test-console-layout.mjs",
         "tests/plugin-compatibility.test.mjs"
       ],
@@ -1089,7 +1091,7 @@
       "cliPresentation": "CLI category always belongs to the client; unavailable host methods report a client error rather than selecting a browser product mode. Task workspace text does not select a Web/Desktop target.",
       "rolePresentation": "The BUILD group has a standalone Roles directory with the shared search toolbar, 20-per-page pagination and employee-card styling; role create/edit uses name plus plain-text prompt only; empty/no-match messages reuse the full-width MCP/plugin region outside the grid with only the toolbar create action; all three directories share theme surface-soft backgrounds and 6px corners, deletion shows reference errors in place, and the employee form offers an optional single role select including unbound. Cards use the avatar column so titles keep full width and show the role ID; same-name roles are distinguished by ID in the employee selector. Roles is registered in NAVIGATION for persisted visibility, empty-group hiding and default restore. Its currentColor SVG identity-badge icon remains legible across themes and narrow navigation without font glyphs; no CLI change.",
       "incrementalReading": "Stable event/Trace rows append or update in place; workspace summary reconciliation preserves the current console subtree, hydrated content, selection and scroll. History pagination preserves the reading anchor.",
-      "applicationUpdates": "One Settings/updates tab directly contains application and plugin configuration sections using the standard settings heading level, without a repeated Updates title. Application state/progress/actions are inline only; a compact GitHub text link follows the current version and survives status refreshes. Plugin settings preserve drafts and pause hidden-page polling. No notification cards, renderer URL/path arguments or CLI expansion."
+      "applicationUpdates": "One Settings/updates tab directly contains application and plugin configuration sections using the standard settings heading level, without a repeated Updates title. Application state/progress/actions are inline only; download percent follows the native progress bar on one unboxed row and the separate note is hidden while downloading; a compact GitHub text link follows the current version and survives status refreshes. Plugin settings preserve drafts and pause hidden-page polling. No notification cards, renderer URL/path arguments or CLI expansion."
     },
     {
       "id": "web.manual-graphs",

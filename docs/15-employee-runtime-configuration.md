@@ -106,3 +106,5 @@ DeepSeek Harness 使用唯一 dsh 槽位，不允许创建/删除具名连接。
 Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
 源标准兼容层见 [docs/26](26-runtime-plugin-compatibility.md)：安装保留源副本；当前安装可只读重算 Runtime 支持与组件标签，不必逐个重装。DeepSeek Harness 0.2.1-rc.2 使用原生独立子代理 Session 和版本匹配的官方 Claude/Codex command Hook 桥，保留源系统正文、继承模型与工具选择；父调用等待子代理真实结果/清理。无法等价映射的事件、字段、模型或动态 Hook 输出明确失败，不把跳过组件当支持。MCP 的 cwd/env_vars/传输在三种 Runtime 共用私有启动器。
+
+插件来源描述中的单行字面冒号可在原生调用副本中规范化；其他不合法 YAML 明确指出相对文件与行列，不输出原文。v3 已知 Claude 模型别名在非 Claude Runtime 使用所选 Runtime 的模型，源名称保留在计划中；旧 v2 冻结不转换。DeepSeek 可使用插件自带的完整 Codex 清单。详见 docs/26。

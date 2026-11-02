@@ -71,6 +71,8 @@ test('plugin CLI exposes Runtime support progressively and documents source-wide
   const json=await captured(['plugins','get',entry.id,'--session-file',f.sessionFile,'--json'],{fetcher});assert.deepEqual(JSON.parse(json.stdout).data.compatibility,compatibility);
   const help=await captured(['plugins','import','--help']);assert.match(help.stdout,/全部插件/);assert.match(help.stdout,/github\/url\/git-subdir/);assert.match(help.stdout,/npm\/archive\/command/);
   assert.match(help.stdout,/链接安装为普通文件/);assert.match(help.stdout,/来源外链接/);assert.match(help.stdout,/整批回滚/);
+  assert.match(help.stdout.replace(/\s+/g,''),/模型别名.*继承目标模型/);assert.match(help.stdout.replace(/\s+/g,''),/相对文件与行列/);
+  assert.deepEqual(Object.keys(resources.plugins.schema.properties),['url','path'],'compatibility is automatic, without new conversion flags');
 });
 test('all task commands progressively disclose their own data and compact related references in text and JSON', async () => {
   const f = await fixture(), marker = 'INTERNAL_EMPLOYEE_PROMPT_MUST_NOT_EXPAND';

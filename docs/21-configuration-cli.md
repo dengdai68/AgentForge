@@ -94,3 +94,5 @@ DeepSeek Harness 的 CLI 入口为 runtimes list/get/update/test/models，按 ds
 Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
 插件兼容性由统一的源标准执行计划计算（docs/26）。`plugins list/get` 与员工选择共用当前结果；已有插件不需重装，旧 providers 不作为新 Runtime 的能力门禁。`mcps create/get` 的 cwd/env_vars 在三种 Runtime 中经统一私有启动器保留；无新增导入开关或手工降级字段，命令/输入 schema 不变。新增绑定的执行计划摘要为服务生成，CLI 不接受用户伪造引用。
+
+插件兼容语义补充：Runtime v3 对已知 Claude 模型别名在其他 Provider 继承目标模型，保留原名供执行计划核验；不声称使用同一个模型。描述的单行冒号仅在调用私有投影规范化，未知 YAML 结构/标签仍拒绝。list/get 将格式异常限定到相应插件的兼容原因，错误仅包含相对组件路径及行列；既有命令、输入 schema 和关联引用格式不变。

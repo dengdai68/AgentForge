@@ -250,7 +250,7 @@ test('dual manifests keep Claude Hooks and explicit empty Codex Hooks independen
   await writeFile(join(source,'.codex-plugin/plugin.json'),JSON.stringify({name:'proof',skills:'./skills/',hooks:{}}));
   await writeFile(join(source,'hooks/hooks.json'),JSON.stringify({hooks:{SessionStart:[{hooks:[{type:'command',command:'echo selected'}]}]}}));
   const {plugins:[entry]}=await market.import({path:source}),detail=await market.detail(entry.id,'plugin');
-  assert.deepEqual(entry.providers,['claude-code','codex','dsh']);assert.deepEqual(detail.components.hooks[0].providers,['claude-code','dsh']);
+  assert.deepEqual(entry.providers,['claude-code','codex','dsh']);assert.deepEqual(detail.components.hooks[0].providers,['claude-code']);
   const runtime=await market.resolve({pluginIds:[entry.id],mcpIds:[]},'codex');
   const projection=JSON.parse(await readFile(join(runtime.extensionManifest[0].path,'../../.agentforge/codex.json'),'utf8'));
   assert.deepEqual(projection.hooks,[],'explicit empty Codex Hooks do not inherit the Claude startup Hook');

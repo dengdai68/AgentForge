@@ -50,7 +50,7 @@ try{
           return {tag_name:'v'+version,draft:false,prerelease:state.mode==='beta',assets:[`AgentForge-${version}-arm64.dmg`,'latest-mac.yml'].map(name=>({name,state:'uploaded',size:bytes.length,digest:'sha256:'+digest,browser_download_url:`${RELEASE_ROOT}/download/v${version}/${name}`}))};
         },
         downloadInstaller:async(release,cache,progress,options)=>{
-          progress({percent:25});await new Promise(resolve=>{state.finish=resolve;});
+          state.progress=progress;progress({percent:25});await new Promise(resolve=>{state.finish=resolve;});
           return downloadReleaseInstaller(release,cache,progress,{...options,fetcher:async()=>new Response(bytes)});
         },
         openInstaller:async path=>{state.opened=path;return '';},
@@ -93,6 +93,7 @@ try{
     await desktop.evaluate((_electron,mode)=>{globalThis.agentforgeUpdateFixture.mode=mode;},mode);await check();
     await page.locator('[data-app-update-status]').filter({hasText:mode==='offline'?'离线检查失败':mode==='none'?'尚未发布正式版':'没有可用'}).waitFor();
     assert.equal(await page.locator('[data-app-update-download]').isVisible(),false);evidence.cases.push(mode);
+    assert.equal(await page.locator('[data-app-update-progress]').isVisible(),false);
   }
   await desktop.evaluate(()=>{globalThis.agentforgeUpdateFixture.mode='stable';});await check();
   await page.locator('[data-app-update-status]').filter({hasText:'发现正式版 1.0.0'}).waitFor();
@@ -104,9 +105,13 @@ try{
   await page.getByRole('button',{name:'下载更新',exact:true}).waitFor();
   await page.getByRole('button',{name:'下载更新',exact:true}).click({noWaitAfter:true});
   await page.locator('progress:visible').waitFor();assert.equal(await page.locator('progress').getAttribute('value'),'25');
+  assert.equal(await page.locator('[data-app-update-percent]').innerText(),'25%');
+  assert.equal(await page.locator('[data-app-update-note]').isVisible(),false,'downloading has no separate note box');
   await page.screenshot({path:join(root,'downloading.png')});
   await desktop.evaluate(()=>globalThis.agentforgeUpdateFixture.finish());
   await page.getByRole('button',{name:'打开安装包',exact:true}).waitFor();
+  assert.equal(await page.locator('[data-app-update-progress]').isVisible(),false);
+  assert.equal(await page.locator('[data-app-update-note]').isVisible(),true);
   assert.equal(await page.locator('.app-update-notice').count(),0,'download completion stays inside update settings');
   await page.getByRole('button',{name:'打开安装包',exact:true}).click();
   const opened=await desktop.evaluate(()=>globalThis.agentforgeUpdateFixture.opened);
@@ -115,6 +120,7 @@ try{
   await desktop.evaluate(()=>{const s=globalThis.agentforgeUpdateFixture;s.native=true;s.reset();});
   await page.goto(origin+'/settings/updates');await check();
   await page.getByRole('button',{name:'下载更新',exact:true}).click({noWaitAfter:true});await page.locator('progress:visible').waitFor();
+  assert.equal(await page.locator('[data-app-update-percent]').innerText(),'50%');
   await desktop.evaluate(()=>globalThis.agentforgeUpdateFixture.finish());await page.getByRole('button',{name:'重启并安装',exact:true}).waitFor();
   await page.getByRole('button',{name:'重启并安装',exact:true}).click();await page.locator('[data-app-update-status]').filter({hasText:'仍有任务'}).waitFor();
   assert.equal(await desktop.evaluate(()=>globalThis.agentforgeUpdateFixture.installed),0);
@@ -123,9 +129,23 @@ try{
   for(const theme of ['minimal','warm'])for(const width of [1320,760]){
     await page.goto(origin+'/settings/appearance');await page.locator(`[name=theme][value=${theme}]`).check();
     await desktop.evaluate(({BrowserWindow},{origin,width})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,760),{origin,width});
+    await page.waitForFunction(width=>innerWidth===width,width);
+    await desktop.evaluate(()=>{const s=globalThis.agentforgeUpdateFixture;s.native=false;s.reset();});
     await page.goto(origin+'/settings/updates');await page.locator('[data-app-version]').filter({hasText:'1.0.0-beta.1'}).waitFor();
+    await check();await page.getByRole('button',{name:'下载更新',exact:true}).click({noWaitAfter:true});
+    await page.locator('[data-app-update-percent]').filter({hasText:'25%'}).waitFor();
+    await desktop.evaluate(()=>globalThis.agentforgeUpdateFixture.progress({percent:100}));
+    await page.locator('[data-app-update-percent]').filter({hasText:'100%'}).waitFor();
+    const layout=await page.locator('[data-app-update-progress]').evaluate(row=>{
+      const bar=row.querySelector('progress').getBoundingClientRect(),percent=row.querySelector('[data-app-update-percent]').getBoundingClientRect(),bounds=row.getBoundingClientRect(),style=getComputedStyle(row);
+      return {sameLine:Math.abs((bar.top+bar.height/2)-(percent.top+percent.height/2))<1,afterBar:percent.left>=bar.right,inside:percent.right<=bounds.right+1,border:style.borderTopWidth,background:style.backgroundColor};
+    });
+    assert.deepEqual(layout,{sameLine:true,afterBar:true,inside:true,border:'0px',background:'rgba(0, 0, 0, 0)'});
+    assert.equal(await page.locator('[data-app-update-note]').isVisible(),false);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.screenshot({path:join(root,`${theme}-${width}-updates.png`)});evidence.cases.push(`${theme}-${width}`);
+    await desktop.evaluate(()=>globalThis.agentforgeUpdateFixture.finish());
+    await page.getByRole('button',{name:'打开安装包',exact:true}).waitFor();
   }
   evidence.result='PASS';await writeFile(join(root,'evidence.json'),JSON.stringify(evidence,null,2));console.log('PASS application updates:',root);
 }catch(error){console.error('Evidence:',root);throw error;}

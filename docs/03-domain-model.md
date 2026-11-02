@@ -80,3 +80,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 任务协作的人类新消息未提供 recipientAgentId（省略或 null）时，由 Store 路由给该 Run 的冻结项目经理；显式指定仍校验当前 Run 成员。精确澄清回复继续由 replyToMessageId 决定接收人，普通消息不能隐式回答待答问题。已完成/暂停/失败/终止 Run 的无指定消息仍为经理答疑，不恢复业务执行；已归档继续只读。
 
 插件新绑定的 `adapterVersion:2` 引用冻结 `planTarget`、`sourceDialect`、`planSha256`，只含元数据与摘要，不存原始提示词或 Hook 命令。新安装另外保留 `sourceRoot/sourceSha256` 完整性引用。执行计划按源标准解析；已有 Task/Run 的旧引用继续按旧适配语义执行，不自动换计划。MCP 新绑定 `mcpAdapterVersion:2` 保留源服务名，历史调用保留其记录的命名方式。详见 docs/26。
+
+插件执行引用 adapterVersion=3 冻结 v3 计划摘要（含已知源模型别名到目标 Runtime 继承模型的 sourceModel）；原始来源与安装树不变。已有 adapterVersion=2 仍按 v2 规则重算和核验原摘要，不升级旧 Task/Run。调用内 YAML 文本编码投影不回写领域状态、安装目录或冻结事实；契约见 docs/26。

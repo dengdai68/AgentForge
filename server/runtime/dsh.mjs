@@ -9,7 +9,7 @@ import { cliEnvironment } from './cli-environment.mjs';
 import { registerExecution, hasActiveExecution } from './registry.mjs';
 import { diagnostic } from '../diagnostics.mjs';
 import { diagnoseLaunch } from './launch-diagnostics.mjs';
-import { selectedExtensions } from './extensions.mjs';
+import { selectedExtensions, nativePluginRuntime } from './extensions.mjs';
 import { fileURLToPath } from 'node:url';
 import { readPluginExecutionPlan } from './marketplace.mjs';
 import { parsePluginMarkdown, dshHookMatchers } from './plugin-compatibility.mjs';
@@ -48,9 +48,10 @@ async function launch(input, { content = () => null, cancelledError = message =>
   const plugin = join(directory, 'dsh-agentforge.mjs'), instructionsPath = join(directory, 'dsh-instructions.json'), patch = join(directory, 'dsh-patch.yml');
   await writeFile(plugin, await readFile(new URL('./dsh-plugin.mjs', import.meta.url)), { mode: 0o600 });
   const servers = catalog ? {} : await selectedExtensions(runtime);
+  const nativeRuntime=catalog?runtime:await nativePluginRuntime(runtime,directory);
   await writeFile(join(directory,'dsh-extensions.mjs'),await readFile(new URL('./dsh-extensions.mjs',import.meta.url)),{mode:0o600});
   const plugins=[];
-  for(const ref of catalog ? [] : (runtime.extensionManifest || []).filter(item=>item.kind==='plugin' && item.adapterVersion===2)) {
+  for(const ref of catalog ? [] : (runtime.extensionManifest || []).filter(item=>item.kind==='plugin' && [2,3].includes(item.adapterVersion))) {
     const plan=await readPluginExecutionPlan(ref),root=dirname(dirname(ref.path));
     const agents=await Promise.all(plan.agents.map(async agent=>({...agent,body:parsePluginMarkdown(await readFile(join(root,agent.path),'utf8')).body})));
     plugins.push({name:JSON.parse(await readFile(ref.path,'utf8')).name,root,sourceDialect:plan.sourceDialect,agents,hooks:dshHookMatchers(plan.hooks,plan.sourceDialect)});
@@ -62,7 +63,7 @@ async function launch(input, { content = () => null, cancelledError = message =>
   entries.push({ id: 'agentforge', name: plugin, config: { instructionsPath } });
   const rows = [
     { id: 'credentials', config: { path: join(credentialHome, '.credentials.yaml'), watch: false } },
-    { id: 'skill-filesystem', config: { includeDefaultRoots: false, customSkillDirs: (runtime.skillPaths || []).map(path => dirname(path)), watch: false } },
+    { id: 'skill-filesystem', config: { includeDefaultRoots: false, customSkillDirs: (nativeRuntime.skillPaths || []).map(path => dirname(path)), watch: false } },
     { id: 'skill-office', disabled: true },
     { id: 'sdk-jsonrpc-server', config: { maxTokensAsSuccess: false } },
     { insert: entries }

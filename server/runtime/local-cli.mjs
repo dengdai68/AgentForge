@@ -7,7 +7,7 @@ import { runCodexAppServer } from "./codex-app-server.mjs";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline";
 import { registerExecution, hasActiveExecution } from "./registry.mjs";
-import { selectedExtensions, codexMarketArgs, claudeMarketEnvironment } from "./extensions.mjs";
+import { selectedExtensions, codexMarketArgs, claudeMarketEnvironment, nativePluginRuntime } from "./extensions.mjs";
 import { diagnostic, diagnosticRedactor, withDiagnosticContext } from "../diagnostics.mjs";
 import { diagnoseLaunch } from "./launch-diagnostics.mjs";
 import { cliEnvironment } from "./cli-environment.mjs";
@@ -386,6 +386,7 @@ async function invokeClaudeCodeCli(input) {
   await verifyPaths(runtime.skillPaths, "Claude Code 技能文件");
   await verifyPaths(runtime.pluginPaths, "Claude Code 插件目录");
   await verifyPaths(runtime.mcpConfigPaths, "Claude Code MCP 配置");
+  const nativeRuntime=await nativePluginRuntime(runtime,traceDirectory);
   const args = ["--print", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--permission-mode", "bypassPermissions", "--add-dir", traceDirectory];
   if (input.systemPrompt) {
     const instructionsPath = join(traceDirectory, "agentforge-instructions.md");
@@ -405,7 +406,7 @@ async function invokeClaudeCodeCli(input) {
     if (!/^[a-z]{1,20}$/.test(runtime.effort)) throw new Error("思考等级配置无效");
     args.push("--effort", runtime.effort);
   }
-  for (const pluginPath of runtime.pluginPaths || []) args.push("--plugin-dir", pluginPath);
+  for (const pluginPath of nativeRuntime.pluginPaths || []) args.push("--plugin-dir", pluginPath);
   if(Object.keys(extensions).length) {
     const mcpServers=Object.fromEntries(Object.entries(extensions).map(([name,{ref}])=>[name,{command:process.execPath,args:[fileURLToPath(new URL('./mcp-launcher.mjs',import.meta.url)),ref.path,ref.sha256,name],...(process.versions.electron?{env:{ELECTRON_RUN_AS_NODE:'1'}}:{})}]));
     const selectedMcp=join(traceDirectory,'agentforge-market-mcp.json');
@@ -479,6 +480,7 @@ async function invokeCodexCli(input) {
   const { runtime, workspacePath, traceDirectory, schemaPath, finalPath, prompt, runId, onEvent } = input;
   const extensions = await selectedExtensions(runtime);
   await verifyPaths(runtime.skillPaths, "Codex 技能文件");
+  const nativeRuntime=await nativePluginRuntime(runtime,traceDirectory);
   const args = runtime.profile ? ["--profile", runtime.profile, "exec"] : ["exec"];
   if (input.systemPrompt) args.push("-c", `developer_instructions=${JSON.stringify(input.systemPrompt)}`);
   args.push(...await codexMarketArgs(runtime, extensions, workspacePath, traceDirectory));
@@ -541,7 +543,7 @@ async function invokeCodexCli(input) {
     async getFinal() { return (await readFile(finalPath, "utf8").catch(error => { diagnostic("provider.final_file_error", { error }); return ""; })) || finalText; }
   };
   return runtime.skillPaths?.length
-    ? runCodexAppServer(input, {args:nativeArgs, normalizeEvent:transport.normalizeEvent, cancelledError:message=>new RuntimeCancelledError(message), missingSessionError:message=>new RuntimeSessionMissingError(message)})
+    ? runCodexAppServer({...input,runtime:nativeRuntime}, {args:nativeArgs, normalizeEvent:transport.normalizeEvent, cancelledError:message=>new RuntimeCancelledError(message), missingSessionError:message=>new RuntimeSessionMissingError(message)})
     : executeJsonl(transport);
 }
 
