@@ -1232,7 +1232,7 @@
       "path": "scripts/",
       "kind": "developer-tooling",
       "owner": "developer-experience",
-      "purpose": "Build and verification tooling; packaged UI checks trigger explicit employee selection and viewport-lazy content, including closed Bash/Read/Write headers, grouped Read success/failure and literal Write text in narrow windows.",
+      "purpose": "Build and verification tooling; packaged UI checks trigger explicit employee selection and viewport-lazy content, including closed Bash/Read/Write headers, grouped Read success/failure and literal Write text in narrow windows. Communication fixtures create independent groups and derive reply fields from the actual output schema.",
       "sourceOfTruth": [
         "AGENTS.md",
         "CONTRIBUTING.md"

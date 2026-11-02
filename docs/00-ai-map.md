@@ -91,7 +91,7 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 - 新增模块：先更新注册表；契约变化同步 source of truth、测试和变更记录。
 - CHANGE 空态由 `renderWorkingChanges` 统一呈现，目录下不重复显示无更改；保留读取错误与 Git 未初始化提示，CLI/API 不受影响。
 
-发布检查：`scripts/test-packaged-electron.mjs` 验证控制台默认选择最近执行者，再显式切换员工读取历史；无选择时不再期待旧的空白提示，仍触发真实按需加载。
+发布检查：`scripts/test-packaged-electron.mjs` 验证控制台默认选择最近执行者，再显式切换员工读取历史；无选择时不再期待旧的空白提示，仍触发真实按需加载。沟通夹具创建独立群聊，并按实际输出 schema 区分私聊 reply 与群聊 mentionAgentIds。
 
 记录可读性：`renderChatStream` 按 Trace 时间合并提示词/事件并尊重分页窗口；`collaborationRecords` 提供视觉状态投影，沟通按稳定发送者配色，共享 tokens 在 renderer、紧凑覆盖在宿主；CLI 排除视觉元数据。
 

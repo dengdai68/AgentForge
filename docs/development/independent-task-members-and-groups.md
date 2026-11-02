@@ -50,9 +50,17 @@ Claude Code 2.1.310、Codex CLI 0.164.0、DeepSeek Harness 0.2.1-rc.2 均验证�
 
 如实保留两次脚本末尾失败：第一次附加“CLI 缺失”探针误用了已经删除的员工，第二次探针的界面断言只匹配 ENOENT，而实际为 Shell 的文件不存在错误。修正夹具和断言后，对同一已确认归档的任务及失败 Run 补测宽窄控制台、健康端点、取消投递，均通过；没有重写原失败证据。证据：`.data/prompt-e2e-wfbadi/evidence.json`、`.data/prompt-e2e-ACLHMZ/evidence.json`、后者同目录的 `supplemental-evidence.json` 与截图。补测命令：`node .data/membership-final-ui-recheck.mjs`。
 
+## 本机安装补验（2026-11-03）
+
+- 按人类指令执行 `npm run package:mac -- --config.directories.output=.data/local-install-9f569f8`，DMG、ZIP 和应用包构建成功；应用代码为 `9f569f8`，版本仍为 `0.1.3-beta.3`，没有发布 GitHub Release。
+- `AGENTFORGE_PACKAGED_APP=/Applications/.AgentForge-install-9f569f8.app npm run package:mac:check` 完整通过。覆盖资源与源码哈希、签名完整性、原生插件/MCP、CLI、任务验收、私聊/群聊、隔离重置及重启退出。证据位于 `.data/packaged-electron-e2e-wJrLL6/`；模型调用为受控夹具，不重复声称真实模型验证。
+- 原两次打包检查失败如实保留：群聊创建夹具残留 `kind=team`，修正后其 Provider 夹具又缺少 `mentionAgentIds`。现按实际输出 schema 生成回复，第三次完整检查退出码 0；应用代码无须修改。
+- 经界面核对原任务均已结束后，退出旧客户端，将通过校验的应用替换到 `/Applications/AgentForge.app` 并重新打开；签名及安装前后 ASAR SHA-256 一致：`7e20b59f979a7fe7262e692f8e88ddcfa2e6d8352f474e79fa4b7f0936f8946b`。
+- 实机界面核对原 4 个任务和原沟通列表保留；任务列表没有团队列，新建任务显示独立成员选择，原群聊显示当前员工列表与个人控制台入口。未创建真实测试任务、未重置操作者数据。
+
 ## 限制与交付边界
 
-- 本轮验证源码 Electron，未构建、安装或发布新包；没有改造操作者真实任务、数据库、安装或全局 CLI 凭据。
+- 源码与打包 Electron 均已验证，后续按人类指令完成本机安装，未发布新版本；没有清空操作者真实任务或数据库、改写全局 Provider 凭据。
 - 原生会话可能记得旧成员、旧角色或旧沟通；更改当前配置不会擦除原生历史，后续调用以当前系统指令和成员事实为准。
 - 未对每个业务插件执行完整视频生产等业务流程；这里验证成员关系、实际模型沟通与完整代码任务生命周期。
 - 测试日志、截图、SQLite、会话及配置只留在忽略的 `.data/`，不进入提交。

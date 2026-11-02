@@ -261,6 +261,8 @@ import { join } from "node:path";
 const userPrompt = process.argv.at(-1) || "";
 const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
+const schemaFlag = process.argv.indexOf("--json-schema");
+const responseSchema = schemaFlag < 0 ? null : JSON.parse(process.argv[schemaFlag+1]);
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
 const criteria = JSON.parse((prompt.split("任务验收标准：")[1] || "[]").split(String.fromCharCode(10))[0]);
 const roster = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]);
@@ -269,7 +271,7 @@ const workspace = (prompt.split("任务工作目录：")[1] || "").split(String.
 if (process.env.ELECTRON_RUN_AS_NODE || process.env.AGENTFORGE_BOOTSTRAP_TOKEN) throw new Error("control-plane bootstrap environment leaked to Provider fixture");
 if (process.env.AF_SHELL_PROOF !== ${JSON.stringify(shellProof)} || process.env.AF_PROFILE_LOADED !== 'yes') throw new Error('shell environment did not reach the Provider');
 let result = { kind: "node_result", summary: "Packaged execution content fixture", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture input is sufficient", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
-if (prompt.includes("人类沟通中回答")) result = { reply: "Packaged unread fixture reply" };
+if (prompt.includes("人类沟通中回答")) result = { reply: "Packaged unread fixture reply", ...(responseSchema?.properties?.mentionAgentIds ? { mentionAgentIds: [] } : {}) };
 else if (prompt.includes('"purpose":"delivery_review"')) result.deliveryReview = { verdict: "pass", restartFromNodeId: "packaged_verify", findings: ["packaged fixture evidence reviewed"] };
 else if (prompt.includes("任务级项目经理")) result.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "packaged_verify", nextAgentId: prompt.includes('"type":"node"') ? null : roster.find(member => member.type === "agent" && member.kind === "business")?.id, rationale: "fixture selects a business member from the frozen roster" };
 else {
@@ -608,7 +610,7 @@ async function runResetAndUnread(page, proof) {
   assert.ok(alignment.find(row=>row.human).left>alignment.find(row=>!row.human).left+15,'packaged human messages align right, employees left');
   await page.screenshot({path:join(evidenceRoot,'packaged-communication-colors.png')});
   await waitFor("visible conversation read acknowledgement", async () => (await api(page, "/api/notifications")).communicationUnreadCount === 0);
-  const group = (await api(page, '/api/communications', {method:'POST', body:{kind:'team', targetId:proof.team.id}})).conversation;
+  const group = (await api(page, '/api/communications', {method:'POST', body:{kind:'group', name:'Packaged group colors', memberAgentIds:proof.team.memberAgentIds}})).conversation;
   await api(page, `/api/communications/${group.id}/messages`, {method:'POST',body:{content:'Group color fixture',mentionAgentIds:[proof.worker.id],clientRequestId:randomBytes(12).toString('hex')}});
   await waitFor('group fixture reply', async () => (await api(page, `/api/communications/${group.id}`)).messages.some(message=>message.sender.type==='agent'));
   await page.goto(urlFor(page, `/communication/${group.id}`));
