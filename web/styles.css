@@ -1330,7 +1330,7 @@ button { cursor:pointer; }
 .communication-sidebar-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .communication-sidebar-heading button { display:grid; place-items:center; flex:none; box-sizing:border-box; width:36px; height:36px; min-width:36px; min-height:36px; padding:0; border-radius:9px; line-height:1; }
 .communication-sidebar-heading button svg { display:block; width:18px; height:18px; }
-.communication-picker { width:min(520px,calc(100vw - 32px)); max-height:80dvh; padding:24px; border:0; border-radius:20px; color:var(--ink); background:var(--paper); box-shadow:var(--shadow-hover); }
+.communication-picker { width:min(520px,calc(100vw - 32px)); max-height:80dvh; overflow:visible; padding:24px; border:0; border-radius:20px; color:var(--ink); background:var(--paper); box-shadow:var(--shadow-hover); }
 .communication-picker::backdrop { background:rgba(30,36,29,.3); }
 .communication-picker header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
 .communication-picker h2 { margin:0; font-size:20px; }
@@ -1358,10 +1358,6 @@ button { cursor:pointer; }
 .communication-chat,.communication-console { display:flex; flex-direction:column; min-width:0; min-height:0; }
 .communication-console { border-left:1px solid var(--line); background:var(--paper); }
 .communication-console-toolbar { flex:none; padding:10px 12px; border-bottom:1px solid var(--line); }
-.communication-console-members { display:flex; flex:none; gap:6px; overflow:auto; padding:8px 12px; border-bottom:1px solid var(--line); }
-.communication-console-members button { display:flex; align-items:center; gap:5px; flex:none; max-width:220px; overflow:hidden; text-overflow:ellipsis; }
-.communication-console-members button.selected { background:var(--selection-bg); color:var(--ink); }
-.communication-console-members button.is-running { color:var(--record-info); background:var(--record-info-soft); }
 .communication-console-older { flex:none; align-self:center; margin:8px; font-size:11px; }
 .communication-console-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; }
 .communication-console-actions button { font-size:11px; }
@@ -2018,15 +2014,24 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 .task-submit-actions { display:flex; justify-content:flex-end; gap:8px; }
 
 /* Conversations own their roster; the execution console opens at the far right. */
-.communication-panes { position:relative; grid-template-columns:minmax(0,1fr) 180px; }
-.communication-panes.console-open { grid-template-columns:minmax(240px,1fr) 156px minmax(280px,1fr); }
+.communication-panes { position:relative; grid-template-columns:minmax(0,1fr); }
+.communication-panes.has-group { grid-template-columns:minmax(0,1fr) 260px; }
+.communication-panes.console-open { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.communication-panes.has-group.console-open { grid-template-columns:minmax(220px,1fr) 240px minmax(280px,1fr); }
+.communication-header > div { flex:1; }
+.has-group .communication-heading { cursor:text; }
+.communication-name-input { box-sizing:border-box; width:100%; min-width:0; padding:5px 8px; border:1px solid var(--accent); border-radius:6px; font:inherit; color:var(--ink); background:var(--paper); }
 .communication-roster { min-width:0; overflow:auto; border-left:1px solid var(--line); background:var(--paper); padding:12px; }
 .communication-roster > header,.communication-member-detail > header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-bottom:12px; font-size:13px; }
+.communication-roster > header > strong { flex:1; white-space:nowrap; }
 .communication-roster header button { font-size:11px; }
-.communication-roster-member { display:flex; align-items:center; gap:8px; min-height:38px; }
-.communication-roster-member > button:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; text-align:left; font-size:12px; }
-.member-console-icon { flex:none; display:inline-flex; padding:5px; color:var(--muted); }
-.communication-member-detail { position:absolute; z-index:8; right:0; top:0; bottom:0; width:min(360px,95%); overflow:auto; padding:18px; background:var(--paper); border-left:1px solid var(--line); box-shadow:var(--shadow); }
+.communication-roster-member { display:flex; align-items:center; gap:8px; min-height:44px; }
+.communication-roster-member > button:first-child { display:flex; align-items:center; gap:10px; flex:1; min-width:0; overflow:hidden; text-align:left; font-size:12px; }
+.communication-member-name { display:block; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.communication-roster .agent-card-avatar { flex:none; width:30px; height:30px; border-radius:8px; }
+.member-console-icon { flex:none; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; width:32px; height:32px; padding:6px; color:var(--muted); }
+.member-console-icon svg { display:block; flex:none; }
+.communication-member-detail { width:min(600px,calc(100vw - 32px)); overflow:auto; }
 .communication-member-detail dt { margin-top:16px; color:var(--muted); font-size:12px; }
 .communication-member-detail dd { margin:6px 0 0; overflow-wrap:anywhere; font-size:13px; }
 .communication-member-prompt { white-space:pre-wrap; line-height:1.6; }
@@ -2037,23 +2042,24 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 .communication-addressed { display:block; margin-bottom:6px; color:var(--muted); }
 [data-toggle-chat-members] { display:none; }
 @media(max-width:1200px) {
-  .communication-panes.console-open { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .communication-panes.has-group.console-open { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .console-open .communication-roster { display:none; }
   [data-toggle-chat-members] { display:inline-block; }
-  .communication-panes.members-open .communication-roster { display:block; position:absolute; z-index:7; right:0; top:0; bottom:0; width:200px; box-shadow:var(--shadow); }
+  .communication-panes.members-open .communication-roster { display:block; position:absolute; z-index:7; right:0; top:0; bottom:0; width:min(300px,calc(100% - 16px)); box-shadow:var(--shadow); }
 }
 @media(max-width:760px) {
-  .communication-panes { grid-template-columns:minmax(0,1fr); }
+  .communication-panes,.communication-panes.has-group { grid-template-columns:minmax(0,1fr); }
   .communication-roster { display:none; }
-  .communication-panes.console-open { grid-template-columns:minmax(0,1fr); }
+  .communication-panes.console-open,.communication-panes.has-group.console-open { grid-template-columns:minmax(0,1fr); }
   .console-open .communication-chat { display:none; }
-  .communication-picker .extension-picker-options { position:relative; top:0; margin-top:4px; max-height:190px; }
 }
 
 .task-selectors .extension-picker-control { max-height:96px; overflow:auto; }
 .task-selectors .extension-picker-options { top:auto; bottom:calc(100% + 4px); max-height:min(240px,40dvh); }
 .task-selectors .extension-picker-search:has(.extension-picker-options:not([hidden]))::after { top:auto; bottom:100%; }
-.communication-picker .extension-picker-options { position:relative; top:0; margin-top:4px; }
+.communication-picker .extension-picker-control { max-height:96px; overflow:auto; }
+.communication-picker .extension-picker-options { top:auto; bottom:calc(100% + 4px); max-height:min(190px,32dvh); }
+.communication-picker .extension-picker-search::after { top:auto; bottom:100%; }
 
 [data-close-chat-members] { display:none; }
 .members-open [data-close-chat-members] { display:inline-block; }

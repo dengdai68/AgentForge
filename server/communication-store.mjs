@@ -34,7 +34,7 @@ export function communicationCommands(state, save) {
     return [...new Set(recorded.length ? recorded : [...(team?.memberAgentIds || []), team?.managerAgentId].filter(Boolean))];
   };
   const members = thread => rosterIds(thread).map(value => state.agents.find(row => row.id === value)).filter(row => row && row.status !== "deleted").map(row => ({
-    id: row.id, name: row.name, kind: row.kind, status: row.status, description: row.description,
+    id: row.id, name: row.name, kind: row.kind, status: row.status, description: row.description, color: row.color, initials: row.initials,
     systemPrompt: row.systemPrompt, capabilities: copy(row.capabilities || []),
     roles: (row.roleIds || []).map(value => state.roles.find(role => role.id === value)).filter(Boolean).map(role => ({ id: role.id, name: role.name, prompt: role.prompt }))
   }));
@@ -105,7 +105,8 @@ export function communicationCommands(state, save) {
       if (kind !== "group" || Object.hasOwn(input, "targetId")) throw new Error("群聊独立创建，请提交 kind=group、name 和 memberAgentIds，不再绑定团队");
       const memberAgentIds = validateMembers(input.memberAgentIds);
       if (!memberAgentIds.length) throw new Error("新群聊至少选择一位数字员工");
-      const thread = { id: id("chat"), kind: "group", name: groupName(input.name), memberAgentIds, createdAt: now(), updatedAt: now(), sessions: {}, humanReadThroughMessageId: null };
+      const name = input.name === undefined ? memberAgentIds.map(value => state.agents.find(row => row.id === value).name).join("，") : groupName(input.name);
+      const thread = { id: id("chat"), kind: "group", name, memberAgentIds, createdAt: now(), updatedAt: now(), sessions: {}, humanReadThroughMessageId: null };
       state.communicationConversations.push(thread); save(); return summary(thread);
     },
     updateCommunication(key, input = {}) {

@@ -142,6 +142,7 @@ async function refresh({ quiet = false } = {}) {
 }
 const runOfTask = (taskId) => state.runs.find((run) => run.taskId === taskId || run.task?.id === taskId);
 const communicationUI = createCommunicationUI({ api, notify: toast,
+  renderAvatar: agent => `<span class="agent-card-avatar ${esc(roleColor(agent))}" aria-hidden="true">${esc(initialsOf(agent))}</span>`,
   renderConsole: (stream, result, agent) => {
     if (result.refresh) for (const cache of [consoleContentCache, promptSnapshotCache]) for (const key of cache.keys()) if (key.startsWith(result.basePath + '/')) cache.delete(key);
     renderChatStream(result.events.map(event => ({ ...event, contentBase: result.basePath })), agent, { stream, runId: null, traces: result.traces.map(trace => ({ ...trace, contentBase: result.basePath })), hasMore: result.hasMore });

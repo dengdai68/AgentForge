@@ -11,7 +11,8 @@ import { createStore } from '../server/store.mjs';
 import { createAuth } from '../server/auth.mjs';
 
 const real = process.env.AGENTFORGE_COMMUNICATION_E2E_REAL === '1';
-const packaged = process.env.AGENTFORGE_COMMUNICATION_E2E_PACKAGED === '1';
+const packaged = process.env.AGENTFORGE_COMMUNICATION_E2E_PACKAGED === '1' || Boolean(process.env.AGENTFORGE_COMMUNICATION_APP);
+const appBundle = resolve(process.env.AGENTFORGE_COMMUNICATION_APP || 'release/mac-arm64/AgentForge.app');
 if (real && packaged) throw new Error('真实 Provider 在源码隔离客户端验证；安装包验收仅使用隔离 HOME，不连接操作者安装实例');
 await mkdir('.data', { recursive: true });
 const root = await mkdtemp(resolve('.data/communication-workbench-'));
@@ -32,7 +33,7 @@ if (real) {
   await writeFile(join(bin,'claude'), '#!/bin/sh\nHOME='+JSON.stringify(homedir())+' exec '+JSON.stringify(actual)+' "$@"\n',{mode:0o700});
 } else await writeFile(join(bin,'claude'),'#!/bin/sh\nprintf "Controlled missing CLI\\n" >&2\nexit 127\n',{mode:0o700});
 for(const name of ['.zprofile','.zshrc'])await writeFile(join(home,name),'export PATH='+JSON.stringify(bin)+':"$PATH"\n');
-const employee = store.createAgent({ name: '知识材料核对', description: '只根据真实文件核对企业内部材料', systemPrompt: '需要文件证据时实际读取附件。明确区分失败与已核对事实，不猜测附件内容、不联网、不修改业务文件。', runtime: { profileId } });
+const employee = store.createAgent({ name: '知识材料核对与交付边界验证专员'.repeat(7), description: '只根据真实文件核对企业内部材料', systemPrompt: '需要文件证据时实际读取附件。明确区分失败与已核对事实，不猜测附件内容、不联网、不修改业务文件。', runtime: { profileId } });
 const role=store.createRole({name:'核对规则',prompt:'群聊详情可查看的共用提示词'});store.updateAgent(employee.id,{roleIds:[role.id]});
 const chat = store.openCommunication({ kind: 'agent', targetId: employee.id });
 const other = store.openCommunication({ kind: 'agent', targetId: failedAgent.id });
@@ -47,7 +48,7 @@ if (!real) {
   store.completeCommunication(group.id, delivery.id, '隔离分页夹具完成，不是真实 Provider。');
 }
 store.close();
-const app = await electron.launch({ ...(packaged ? { executablePath: resolve('release/mac-arm64/AgentForge.app/Contents/MacOS/AgentForge') } : {}), args: packaged ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_LOG_DIR: join(root, 'logs'), AGENTFORGE_DESKTOP_DATA_ROOT: data }, timeout: 60000 });
+const app = await electron.launch({ ...(packaged ? { executablePath: join(appBundle,'Contents/MacOS/AgentForge') } : {}), args: packaged ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_LOG_DIR: join(root, 'logs'), AGENTFORGE_DESKTOP_DATA_ROOT: data }, timeout: 60000 });
 const errors = [], evidence = { root, real, packaged };
 const wait = async (label, check, timeout = 180000) => { const start = Date.now(); let reported = 0; while (Date.now() - start < timeout) { const value = await check(); if (value) return value; if (Date.now() - reported > 30000) { console.log('WAIT ' + label); reported = Date.now(); } await new Promise(done => setTimeout(done, 500)); } throw new Error('Timed out: ' + label); };
 try {
@@ -75,6 +76,10 @@ try {
     evidence[view] = avatars; await page.screenshot({ path: join(root, view + '.png') });
   }
   await page.goto(origin + '/communication/' + chat.id); await page.locator('.communication-heading').filter({ hasText: employee.name }).waitFor();
+  assert.equal(await page.locator('.communication-roster').isVisible(),false,'private chat has no member sidebar');
+  assert.equal(await page.locator('[data-toggle-chat-members]').isVisible(),false);
+  assert.equal(await page.locator('[data-toggle-communication-console]').innerText(),'','private Console uses an icon');
+  assert.equal(await page.locator('[data-toggle-communication-console] svg').count(),1);
   assert.equal(await page.locator('label[for=communication-input]').count(), 0);
   assert.equal(await page.locator('.communication-contact i').count(), 0);
   const draft = page.locator('#communication-input'); await draft.fill('切换控制台时保留的草稿');
@@ -95,7 +100,7 @@ try {
     assert.ok(Math.abs(geometry.left.y - geometry.console.y) < 1);
     assert.ok(Math.abs(geometry.toolbar.y - geometry.console.y) < 1);
     assert.ok(Math.abs(geometry.left.width - geometry.chat.width) < 2);
-    assert.ok(geometry.toggle.x + geometry.toggle.width <= geometry.left.x + geometry.left.width);
+    if(await p.locator('[data-toggle-communication-console]').isVisible()) assert.ok(geometry.toggle.x + geometry.toggle.width <= geometry.left.x + geometry.left.width);
     return geometry;
   };
   evidence.headers = await assertSplitHeaders(page);
@@ -130,7 +135,7 @@ try {
   if (real) await wait('visible read acknowledgement', async () => (await api('/api/communications/' + chat.id)).conversation.unreadCount === 0);
   await page.locator('[data-toggle-communication-console]').click();
   await page.locator('[data-communication-stream] .log-row').first().waitFor();
-  assert.equal(await page.locator('[data-communication-members]').isVisible(), false);
+  assert.equal(await page.locator('[data-communication-members]').count(), 0);
   assert.equal(await page.locator('[data-communication-agent]').count(), 0);
   const consoleData = await api('/api/communications/' + chat.id + '/console?agentId=' + employee.id + '&limit=200');
   if (real) {
@@ -171,11 +176,18 @@ try {
   await app.evaluate(({BrowserWindow},origin)=>BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().startsWith(origin)).setContentSize(1500,1000),origin);
   await page.waitForFunction(()=>innerWidth===1500);
   // Group member selection and ordinary Web presentation share commands, not host styles.
-  await page.goto(origin + '/communication/' + group.id); await page.locator('[data-toggle-communication-console]').click();
-  await page.locator('[data-communication-agent]').first().waitFor(); assert.equal(await page.locator('[data-communication-agent]').count(), 3);
-  assert.equal(await page.locator('.communication-console-toolbar [data-communication-agent]').count(), 0);
-  await page.locator(`[data-communication-agent="${failedAgent.id}"]`).click();
-  await page.waitForFunction(id => document.querySelector(`[data-communication-agent="${id}"]`)?.getAttribute('aria-pressed') === 'true', failedAgent.id);
+  await page.goto(origin + '/communication/' + group.id); await page.locator('[data-chat-member-count]').filter({hasText:'成员 3'}).waitFor();
+  assert.equal(await page.locator('[data-toggle-communication-console]').isVisible(),false,'group Console opens from a member only');
+  const memberGeometry = await page.locator(`[data-chat-member-detail="${employee.id}"]`).evaluate(button=>{
+    const row=button.parentElement, name=button.querySelector('.communication-member-name'), icon=row.querySelector('[data-chat-member-console]'), avatar=button.querySelector('.agent-card-avatar'), rect=node=>{const r=node.getBoundingClientRect();return{x:r.x,right:r.right,width:r.width,height:r.height};};
+    return {row:rect(row),name:rect(name),icon:rect(icon),avatar:avatar.className,whiteSpace:getComputedStyle(name).whiteSpace,overflow:getComputedStyle(name).textOverflow,clipped:name.scrollWidth>name.clientWidth,roster:document.querySelector('.communication-roster').getBoundingClientRect().width};
+  });
+  assert.ok(memberGeometry.roster>=250);assert.equal(memberGeometry.whiteSpace,'nowrap');assert.equal(memberGeometry.overflow,'ellipsis');assert.equal(memberGeometry.clipped,true);
+  assert.ok(memberGeometry.name.right<=memberGeometry.icon.x);assert.ok(memberGeometry.icon.right<=memberGeometry.row.right+1);assert.ok(memberGeometry.icon.width>=30);assert.ok(memberGeometry.avatar.includes('color-'+employee.color));
+  evidence.memberGeometry=memberGeometry;
+  await page.locator(`[data-chat-member-console="${failedAgent.id}"]`).click();
+  await page.locator('[data-chat-console-name]').filter({hasText:failedAgent.name}).waitFor();
+  assert.equal(await page.locator('[data-communication-agent], [data-communication-members]').count(),0,'only the selected member has a Console');
   await assertSplitHeaders(page);
   if (!real) {
     const older = page.locator('[data-communication-console-older]');
@@ -185,15 +197,25 @@ try {
   }
   await page.locator('[data-close-chat-console]').click();
   await page.locator(`[data-chat-member-detail="${employee.id}"]`).click();
-  await page.locator('.communication-member-detail:not([hidden])').getByText('核对规则',{exact:true}).first().waitFor();
+  await page.locator('dialog.communication-member-detail[open]').getByText('核对规则',{exact:true}).first().waitFor();
+  assert.equal(await page.locator('.communication-member-detail input, .communication-member-detail textarea, .communication-member-detail select').count(),0,'employee detail is read-only');
+  const detailRect=await page.locator('.communication-member-detail').evaluate(node=>{const r=node.getBoundingClientRect();return{x:r.x,width:r.width,viewport:innerWidth};});assert.ok(Math.abs(detailRect.x+detailRect.width/2-detailRect.viewport/2)<2,'employee detail is a centered modal');
   await page.locator('.communication-member-detail').getByText('群聊详情可查看的共用提示词',{exact:false}).waitFor();
   await page.screenshot({path:join(root,'group-member-detail-wide.png')});
   await page.locator('[data-close-member-detail]').press('Escape');assert.equal(await page.locator('.communication-member-detail').isHidden(),true);
   await page.locator(`[data-chat-member-console="${failedAgent.id}"]`).click();await page.locator('[data-chat-console-name]').filter({hasText:failedAgent.name}).waitFor();
   await page.screenshot({path:join(root,'group-members-and-console-wide.png')});
   await page.locator('[data-close-chat-console]').click();
-  await page.locator('[data-edit-chat-group]').click();await page.locator('#chat-group-name').fill('独立群聊 · 修改名称');
-  await page.locator('.communication-picker [type=submit]').click();await page.locator('.communication-heading').filter({hasText:'独立群聊 · 修改名称'}).waitFor();
+  await page.locator('.communication-header').dblclick();
+  const rename=page.locator('[data-chat-name-input]');await rename.fill('轮询保留的群名草稿');
+  await page.waitForTimeout(2200);assert.equal(await rename.inputValue(),'轮询保留的群名草稿','polling does not reset inline rename');
+  await rename.press('Escape');assert.equal(await rename.isVisible(),false);assert.equal((await api('/api/communications/'+group.id)).conversation.name,'测试群聊');
+  await page.locator('.communication-heading').dblclick();await rename.fill('独立群聊 · 修改名称');
+  const rejectRename=async route=>{if(route.request().method()==='PUT')await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'受控改名失败'})});else await route.continue();};
+  await page.route('**/api/communications/'+group.id,rejectRename);await rename.press('Enter');
+  await page.getByText('受控改名失败',{exact:true}).waitFor();assert.equal(await rename.inputValue(),'独立群聊 · 修改名称');assert.equal((await api('/api/communications/'+group.id)).conversation.name,'测试群聊');
+  await page.unroute('**/api/communications/'+group.id,rejectRename);await rename.press('Enter');
+  await page.locator('.communication-heading:not([hidden])').filter({hasText:'独立群聊 · 修改名称'}).waitFor();
   await api('/api/teams/'+team.id,{},'DELETE');
   assert.equal((await api('/api/communications/'+group.id)).conversation.members.length,3,'deleting a source team leaves independent group intact');
   const input=page.locator('#communication-input');await input.fill('@'+failedAgent.name.slice(0,2));
@@ -201,16 +223,21 @@ try {
   await page.locator('.communication-composer [type=submit]').click();
   await wait('explicit group mention',async()=>{const value=await api('/api/communications/'+group.id);return value.messages.find(message=>message.content.includes('只验证定向消息选择'));});
   const addressed=(await api('/api/communications/'+group.id)).messages.at(-1);assert.deepEqual(addressed.mentionAgentIds,[failedAgent.id]);
-  // Multiple new groups may share a roster. Group form uses inline employee chips.
-  await page.locator('[data-new-chat]').click();await page.locator('#chat-group-name').fill('全新独立群聊');
+  // Creation only asks for people: one reuses the private chat; many create a named group.
+  await page.locator('[data-new-chat]').click();assert.equal(await page.locator('#chat-group-name').count(),0);
+  await page.locator('.communication-picker [type=submit]').click();await page.locator('[data-group-error]').filter({hasText:'请至少选择一位数字员工'}).waitFor();
   await page.locator('#chat-group-members').fill(employee.name);await page.locator(`[data-add-extension="${employee.id}"]`).click();
   await page.locator('#chat-group-members').focus();
   assert.deepEqual(await page.locator('#chat-group-members').evaluate(input=>{const style=getComputedStyle(input);return[style.borderTopWidth,style.boxShadow];}),['0px','none']);
   assert.equal(await page.locator('.communication-picker .extension-chip-name').textContent(),employee.name);
-  await page.locator('.communication-picker [type=submit]').click();await page.locator('.communication-heading').filter({hasText:'全新独立群聊'}).waitFor();
+  await page.locator('.communication-picker [type=submit]').click();await page.locator('.communication-heading').filter({hasText:employee.name}).waitFor();assert.equal(new URL(page.url()).pathname.split('/').at(-1),chat.id,'single-person selection reuses the private conversation');
+  assert.equal(await page.locator('.communication-roster').isVisible(),false);
+  const createGroup=async()=>{const previous=page.url();await page.locator('[data-new-chat]').click();for(const member of [employee,failedAgent]){await page.locator('#chat-group-members').fill(member.name);await page.locator(`[data-add-extension="${member.id}"]`).click();}await page.screenshot({path:join(root,'new-conversation-selected.png')});await page.locator('.communication-picker [type=submit]').click();await page.waitForURL(url=>url.href!==previous);await page.locator('.communication-heading').filter({hasText:employee.name+'，'+failedAgent.name}).waitFor();return new URL(page.url()).pathname.split('/').at(-1);};
+  const firstGroup=await createGroup();
+  const secondGroup=await createGroup();assert.notEqual(firstGroup,secondGroup,'same selected employees can create separate groups');
   const newChat=new URL(page.url()).pathname.split('/').at(-1);assert.notEqual(newChat,group.id);
   await page.locator('[data-edit-chat-group]').click();await page.locator(`[data-remove-extension="${employee.id}"]`).click();
-  await page.locator('#chat-group-members').fill(failedAgent.name);await page.locator(`[data-add-extension="${failedAgent.id}"]`).click();
+  assert.equal(await page.locator('.communication-picker .extension-chip-name').textContent(),failedAgent.name);
   await page.locator('.communication-picker [type=submit]').click();
   await wait('updated independent roster',async()=>{const value=await api('/api/communications/'+newChat);return value.conversation.members.length===1&&value.conversation.members[0].id===failedAgent.id;});
   await page.locator(`[data-chat-member-console="${failedAgent.id}"]`).click();await page.locator('[data-chat-console-name]').filter({hasText:failedAgent.name}).waitFor();
@@ -221,14 +248,14 @@ try {
   await app.evaluate(({BrowserWindow},origin)=>BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().startsWith(origin)).setContentSize(760,700),origin);await page.waitForFunction(()=>innerWidth===760);
   await page.locator('[data-toggle-chat-members]').click();await page.locator('.communication-roster').waitFor();
   await page.screenshot({path:join(root,'group-members-narrow.png')});
-  evidence.independentGroups={renamed:true,teamDeletionDoesNotChangeMembers:true,inlineSelectedChips:true,newGroupsUnique:true,membershipEditable:true,employeeDetails:true,targetedConsole:true,explicitMention:true,deletedMemberHidden:true};
+  evidence.independentGroups={renamed:true,inlineRenameFailureAndPolling:true,singleSelectionPrivate:true,defaultNameFromMembers:true,teamDeletionDoesNotChangeMembers:true,inlineSelectedChips:true,newGroupsUnique:true,membershipEditable:true,employeeDetails:true,targetedConsole:true,explicitMention:true,deletedMemberHidden:true};
   for(const theme of ['minimal','warm']) {
     await page.goto(origin+'/settings/appearance');await page.locator(`[name="theme"][value="${theme}"]`).check();
     for(const [width,height] of [[1500,1000],[760,700]]) {
       await app.evaluate(({BrowserWindow},{origin,width,height})=>BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().startsWith(origin)).setContentSize(width,height),{origin,width,height});await page.waitForFunction(width=>innerWidth===width,width);
       await page.goto(origin+'/communication/'+group.id);await page.locator('.communication-heading').filter({hasText:'独立群聊 · 修改名称'}).waitFor();
       if(width===760)await page.locator('[data-toggle-chat-members]').click();
-      await page.locator(`[data-chat-member-detail="${employee.id}"]`).click();await page.locator('.communication-member-detail:not([hidden])').waitFor();
+      await page.locator(`[data-chat-member-detail="${employee.id}"]`).click();await page.locator('dialog.communication-member-detail[open]').waitFor();
       await page.screenshot({path:join(root,`member-detail-${theme}-${width}.png`)});await page.locator('[data-close-member-detail]').click();
       if(width===760){await page.locator('[data-close-chat-members]').click();assert.equal(await page.locator('.communication-roster').isVisible(),false);await page.locator('[data-toggle-chat-members]').click();}
       await page.locator(`[data-chat-member-console="${employee.id}"]`).click();await page.locator('[data-chat-console-name]').filter({hasText:employee.name}).waitFor();
@@ -247,5 +274,5 @@ try {
   assert.deepEqual(errors, []); evidence.browserErrors = errors; evidence.result = 'PASS';
   await writeFile(join(root, 'evidence.json'), JSON.stringify(evidence, null, 2));
   console.log(`PASS communication workbench ${real ? 'REAL Claude' : 'controlled-failure UI'}: ${root}`);
-} catch (error) { console.error('Evidence root:', root); throw error; }
+} catch (error) { console.error('Evidence root:', root); const page=(await app.windows())[0];if(page){await page.screenshot({path:join(root,'failure.png')}).catch(()=>{});console.error('Dialog diagnostics:',JSON.stringify(await page.locator('dialog[open]').evaluateAll(nodes=>nodes.map(node=>({error:node.querySelector('[data-group-error]')?.textContent,inputs:[...node.querySelectorAll('input')].map(input=>({id:input.id,required:input.required,valid:input.validity.valid,message:input.validationMessage}))}))).catch(()=>[])));}throw error; }
 finally { await app.close(); }

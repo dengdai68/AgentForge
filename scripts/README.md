@@ -38,7 +38,7 @@ test-electron.mjs 用两个不同原生 ID、完全相同参数的 MCP 调用验
 
 沟通工作台验收断言顶部只出现最新/刷新、私聊无重复员工标签；群聊成员切换仍可操作且不在顶部工具栏，加载历史、折叠草稿和宽窄布局继续验证。
 
-`test-communication-workbench.mjs` 覆盖真实市场卡片、附件上传/下载、同名文件、未读与半屏控制台及真实 HTTP 失败路径。显式 `AGENTFORGE_COMMUNICATION_E2E_REAL=1` 在源码隔离客户端调用已有 Claude Code，读取随机附件标记并触发缺失文件工具失败；host HOME/数据库/下载隔离。`AGENTFORGE_COMMUNICATION_E2E_PACKAGED=1` 仅安装包受控验收，不与 REAL 同用。不复制凭据或重置真实实例。
+`test-communication-workbench.mjs` 覆盖真实市场卡片、附件上传/下载、同名文件、未读与个人控制台及真实 HTTP 失败路径；同时验证一人私聊/多人默认命名群聊、无标题创建、长姓名省略/固定图标/成员数、只读居中详情和群名编辑的失败/轮询保留，两主题宽窄布局。显式 `AGENTFORGE_COMMUNICATION_E2E_REAL=1` 在源码隔离客户端调用已有 Claude Code，读取随机附件标记并触发缺失文件工具失败；host HOME/数据库/下载隔离。`AGENTFORGE_COMMUNICATION_E2E_PACKAGED=1` 或 `AGENTFORGE_COMMUNICATION_APP=/absolute/path/AgentForge.app` 为安装包受控验收，不与 REAL 同用。不复制凭据或重置真实实例。
 
 AGENTFORGE_CLI_E2E=1 或 AGENTFORGE_TASK_CLI_E2E=1 的真实开发验收启动独立 Electron，CLI 使用其私有 endpoint，不连接或停止 Web 4310。任务工作根预存隔离目录，真实 Provider 继续使用操作者已配置的运行环境；配置、开发、失败探针、澄清阻塞及最终人类确认均记录在隔离证据目录。
 

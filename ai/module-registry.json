@@ -521,7 +521,7 @@
       "path": "server/communication-store.mjs",
       "kind": "domain",
       "owner": "server",
-      "purpose": "Store-internal communication conversations, immutable messages, human mention/broadcast delivery queues and isolated sessions. Completing a reply finishes only that delivery; there are no routing candidates or generated peer deliveries. Historical messages, attempts and provenance remain unchanged.",
+      "purpose": "Store-internal independent communication conversations, immutable messages, human mention/broadcast delivery queues and isolated sessions. Explicit group peer mentions are deduplicated by human discussion round; historical messages, attempts and provenance remain unchanged.",
       "sourceOfTruth": [
         "docs/17-communication.md",
         "docs/03-domain-model.md"
@@ -551,7 +551,7 @@
           "sessions"
         ]
       },
-      "membershipContract": "Independent group rosters/names, editable through Store; team deletion does not affect groups. Soft deletion hides current employees, cancels unstarted replies and retains active replies/history. Explicit mentions are bounded once per employee per human discussion round. See docs/17-communication.md."
+      "membershipContract": "Independent group rosters/names, editable through Store; omitted creation names join the selected employee names with Chinese commas. Member projections preserve directory avatar fields. Team deletion does not affect groups; employee deletion hides current members and retains frozen history. See docs/17-communication.md."
     },
     {
       "id": "server.communication",
@@ -1047,8 +1047,8 @@
       "consoleNoise": "Task and communication share client routine-notification filtering; prompt chronology and raw page boundaries stay intact, empty state describes content rather than lifecycle notifications.",
       "promptContract": "Shared Task/communication Console renders full redacted system/current prompt and confirmed Provider session ID, without scope boilerplate or tool audit detail. Human collaboration metadata stays outside the padded right-aligned bubble; known mentions are bold ink.",
       "directoryHeaders": "Task/archive page names appear once visually in the topbar; the inner semantic heading is clipped without layout space on Web and desktop. Team/workflow search by name/description before paging. Task filters have bounded title width and reset/archive/create order. Directory toolbar is compact 44px, without a top divider; drafts and action focus survive refresh. Sidebar reuses the application icon PNG. Task search/actions and inventory container share both horizontal edges with 8px vertical separation, including empty search and archives; no duplicate full-panel horizontal inset.",
-      "communicationToolbar": "Only latest/refresh in the top toolbar; omit a redundant sole-member selector and keep group member selection and older-history controls below the toolbar without changing paging or execution contracts.",
-      "communicationWorkbench": "Stable employee-palette plugin/MCP avatars, no redundant composer label or outgoing pending dot, upload-before-send attachments with retry-preserved draft/references and safe downloads; right-hand 50/50 Console splits the full header/content height while its toggle stays in the chat header. Reuses task renderer/hydration with member/cursor paging, active-only polling and scoped content-cache refresh.",
+      "communicationToolbar": "Single chats use an icon in the chat header; groups open a selected employee console from the roster only. The console has a name, latest/refresh/close and older-history paging, with no employee tabs.",
+      "communicationWorkbench": "Selection-only creation opens a private chat for one employee and an independently named group for many. Groups have inline title rename, a wider counted roster with shared employee avatars, single-line ellipsis and fixed console icons; employee details use a centered read-only dialog. Private chats hide the roster. Drafts, active-only polling, renderer/hydration and member/cursor history remain shared.",
       "recordPresentation": "Prompt rows merge once by invocation timestamp within the loaded member-page window rather than pinning above partial history. Active roles, collaboration and private/group messages use shared accessible semantic accents with labels retained.",
       "path": "web/",
       "kind": "presentation",

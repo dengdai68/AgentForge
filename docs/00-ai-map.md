@@ -70,7 +70,7 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 
 - 目录顶部一致性：index.html 为团队/工作流采用同行搜索/创建工具栏，styles.css 统一紧凑高度；compact.css 移除团队/工作流列表顶边框。scripts/test-directory-headers.mjs 以隔离数据操作六页、宽窄 客户端、跨页搜索及创建弹框；CLI/HTTP/执行协议不变。
 
-- 沟通控制台工具栏仅保留最新/刷新；`communication.js` 隐藏唯一成员的重复标签，把群聊成员选择与更早记录入口置于工具栏外。`styles.css` 负责间距，运行/HTTP/CLI 契约不变；UI 验收覆盖单聊、群聊切换和宽窄布局。
+- 沟通工作台：`communication.js` 新建只选人，一人私聊、多人独立群聊；省略群名由 `communication-store` 按员工姓名生成。单聊无成员栏且使用控制台图标，群聊使用带人数/员工头像的加宽成员栏和居中只读详情弹层；双击标题区编辑群名。控制台仅展示所选员工，无全员 Tab，更早记录仍按游标加载。`styles.css` 负责单行省略与固定图标，`test-communication-workbench` 覆盖两主题宽窄、改名失败/轮询保留、创建和定向控制台；Runtime/CLI 不变，契约见 docs/17。
 
 - 沟通工作台：communication-store 拥有附件引用与每次投递/尝试的会话事实；Run Files 管理原文件和私有正文，HTTP 暴露同源上传、校验下载、成员分页控制台。communication.js 管理半屏布局/草稿/未读，app.js 注入与任务空间同一个 renderer/hydrator。详情见 docs/17；CLI 未覆盖长期沟通，本轮无 CLI 命令/字段变化。市场头像复用员工 palette。
 

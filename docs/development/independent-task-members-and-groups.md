@@ -58,6 +58,17 @@ Claude Code 2.1.310、Codex CLI 0.164.0、DeepSeek Harness 0.2.1-rc.2 均验证�
 - 经界面核对原任务均已结束后，退出旧客户端，将通过校验的应用替换到 `/Applications/AgentForge.app` 并重新打开；签名及安装前后 ASAR SHA-256 一致：`7e20b59f979a7fe7262e692f8e88ddcfa2e6d8352f474e79fa4b7f0936f8946b`。
 - 实机界面核对原 4 个任务和原沟通列表保留；任务列表没有团队列，新建任务显示独立成员选择，原群聊显示当前员工列表与个人控制台入口。未创建真实测试任务、未重置操作者数据。
 
+## 沟通工作台交互细化（2026-11-03）
+
+- 新建只选人：一人复用私聊，多人创建独立群聊，Store 省略 name 时以员工姓名用中文逗号生成完整默认群名。已存在群聊编辑为一人仍保留群身份与历史；默认名超过 100 字时也保留完整内容，成员编辑不重写未变更的名称。显式自定义名称仍限制 1–100 字符。
+- 单聊隐藏成员栏，标题栏改控制台图标；群聊移除标题栏控制台，通过成员旁固定图标打开。成员栏加宽至 260px（控制台展开时 240px），复用员工卡片头像，姓名单行省略，显示人数。右侧控制台只显示所选员工，不再显示全员 Tab。
+- 双击群聊标题区或用键盘 Enter/F2 编辑，Enter 保存、Escape/离开取消；轮询不覆盖草稿，保存失败可原地重试。员工详情为居中只读 dialog，窄屏可关闭返回。
+- 实际检查修复了候选列表收起改变居中弹框高度、导致提交按钮在鼠标按下/抬起之间移动的问题；候选使用不占表单布局的浮层，保留原共享控件关闭策略。原失败 UI 证据保留；同名新群测试按实际 URL/ID 等待，编辑成员测试按已选集合核验。
+- `node --test tests/communication.test.mjs`：42 项通过；`npm test`：616 项通过。契约、影响、规定语法与 diff 检查通过。源码 UI 与打包 UI 在两主题、1500×1000 / 760×700 完整通过，含空选择一次点击报错、单人私聊复用、同成员多次建群、超长默认群名、失败改名/轮询保留、只读居中详情、图标/姓名几何、成员删除和控制台历史分页。证据分别为 `.data/communication-workbench-YnQp0G/evidence.json`、`.data/communication-workbench-axpyPB/evidence.json`。
+- 本机构建：`npm run package:mac -- --dir --config.directories.output=/private/tmp/af-chat-ui-f9fb6f5`；打包 UI：`AGENTFORGE_COMMUNICATION_APP=/private/tmp/af-chat-ui-f9fb6f5/mac-arm64/AgentForge.app node scripts/test-communication-workbench.mjs`。严格签名、5 个关键运行文件与源码哈希、规范化产品元数据一致检查通过。
+- 确认本机任务均已结束且没有 Provider 子进程后，已替换并重新打开 `/Applications/AgentForge.app`。ASAR SHA-256 为 `cea2fbb22bae6bb22873d53c45ad881a38e57a7d541781886ba0214f2958a979`；当前服务 health 正常，原 4 个任务及沟通历史保留。实机确认群聊无顶部控制台、成员 4/头像/固定图标、只展示所选员工控制台；私聊无成员栏、顶部为图标入口。
+- 本轮只调整沟通工作台、默认群名及头像读模型；没有更改任务执行、Runtime 或模型提示词/投递规则，也没有新增 CLI 长期沟通权限。CLI 已覆盖的配置/Task 参数、输出与 schema 不受影响；本轮未重复真实模型业务任务或发布 GitHub Release。
+
 ## 限制与交付边界
 
 - 源码与打包 Electron 均已验证，后续按人类指令完成本机安装，未发布新版本；没有清空操作者真实任务或数据库、改写全局 Provider 凭据。

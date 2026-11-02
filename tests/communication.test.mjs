@@ -114,8 +114,8 @@ for (const count of [0, 1, 3]) test(`Console toolbar has only latest/refresh wit
   const result = { agents, traces: [], events: [], hasMore: false, nextBefore: null };
   f.take('/a/console?limit=50').resolve(result); await f.flush();
   if (count) { f.take('/a/console?limit=50&agentId=member-0').resolve(result); await f.flush(); }
-  assert.equal(f.query('[data-communication-members]').hidden, count < 2);
-  assert.equal((f.query('[data-communication-members]').innerHTML.match(/data-communication-agent=/g) || []).length, count < 2 ? 0 : count);
+  assert.doesNotMatch(f.query('.communication-main').innerHTML, /data-communication-members|data-communication-agent=/);
+  assert.equal(f.query('[data-chat-console-name]').textContent, count ? '成员0' : '控制台');
 });
 
 test("unread replies persist and read acknowledgements cannot skip unseen replies or cross conversations", async t => {
@@ -477,6 +477,36 @@ test("communication UI uses searchable dialog and hides runtime chrome and priva
   const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   assert.match(app, /team-card-header.*directory-card-actions.*data-chat-team=.*data-edit-team=/);
   assert.match(app, /agent-card-top[\s\S]*?directory-card-actions.*data-chat-agent=.*data-edit-agent=[\s\S]*?<p>/);
+});
+
+test('group names default to the complete selected employee names and preserve directory avatars', () => {
+  const store = createStore();
+  try {
+    const ids = ['agent_analyst','agent_engineer'];
+    for (const value of ids) store.updateAgent(value,{name:('长姓名'+value).repeat(5)});
+    const employees = ids.map(value => store.listAgents().find(row => row.id === value));
+    const group = store.openCommunication({kind:'group',memberAgentIds:ids});
+    assert.equal(group.name,employees.map(row => row.name).join('，'));
+    assert.ok(group.name.length > 100,'the generated roster name is not truncated by the custom name limit');
+    assert.deepEqual(group.members.map(({color,initials})=>({color,initials})),employees.map(({color,initials})=>({color,initials})));
+    assert.notEqual(store.openCommunication({kind:'group',memberAgentIds:ids}).id,group.id);
+    assert.throws(()=>store.openCommunication({kind:'group',memberAgentIds:ids,name:' '}),/名称/);
+    assert.throws(()=>store.openCommunication({kind:'group',memberAgentIds:ids,name:'x'.repeat(101)}),/名称/);
+  } finally { store.close(); }
+});
+
+for (const memberAgentIds of [[],['one'],['one','two']]) test(`team chat shortcut follows selected headcount: ${memberAgentIds.length}`, async () => {
+  const posts=[],destinations=[],errors=[];
+  const ui=createCommunicationUI({
+    api:async (url,options)=>{
+      if(url==='/api/teams')return {teams:[{id:'pool',memberAgentIds}]};
+      posts.push({url,input:JSON.parse(options.body)});return {conversation:{id:'opened-chat'}};
+    },
+    navigate:value=>destinations.push(value),notify:value=>errors.push(value)
+  });
+  await ui.open('team','pool');
+  if(!memberAgentIds.length) { assert.deepEqual(posts,[]);assert.deepEqual(destinations,[]);assert.match(errors[0],/至少选择/); }
+  else { assert.deepEqual(posts,[{url:'/api/communications',input:memberAgentIds.length===1?{kind:'agent',targetId:'one'}:{kind:'group',memberAgentIds}}]);assert.deepEqual(destinations,['opened-chat']);assert.deepEqual(errors,[]); }
 });
 
 test("communication private/group uniqueness, explicit mentions and restart retention are independent of tasks", async () => {
