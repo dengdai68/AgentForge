@@ -19,7 +19,7 @@ const employee="agent_analyst", peer="agent_designer";
 const send=(s,c,content,mentionAgentIds=[]) => s.sendCommunication(c,{content,mentionAgentIds,clientRequestId:randomUUID()});
 const query=(s,tool,args={},id=employee) => s.historyQuery(id,tool,args);
 const privateChat=s => s.openCommunication({kind:"agent",targetId:employee});
-const groupChat=s => s.openCommunication({kind:"team",targetId:"team_product_delivery"});
+const groupChat=s => s.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:s.listTeams().find(team=>team.id===("team_product_delivery")).memberAgentIds});
 
 test("history pages load bounded JSON while session enumeration loads summaries only", (t)=>{
   const state=createStore().snapshot();
@@ -155,14 +155,14 @@ test("all conversation history traverses stable pages, new records don't enter o
 });
 
 test("group visibility is frozen independently from mentions, new membership does not disclose old messages",()=>{
-  const s=createStore(),c=groupChat(s), team=s.listTeams().find(t=>t.id===c.targetId);
+  const s=createStore(),c=groupChat(s), team=s.listTeams()[0];
   const m=send(s,c.id,"定向但全群可见",[employee]);
   assert.equal(query(s,"search_group_chat",{query:"全群"},peer).items[0].recordId,m.id);
-  s.updateTeam(team.id,{memberAgentIds:team.memberAgentIds.filter(id=>id!==peer)});
+  s.updateCommunication(c.id,{memberAgentIds:team.memberAgentIds.filter(id=>id!==peer)});
   const hidden=send(s,c.id,"离开后的保密内容",[employee]);
   assert.equal(query(s,"search_group_chat",{query:"保密"},peer).items[0].recordId,hidden.id);
   assert.equal(query(s,"read_context",{recordId:m.id},peer).content,m.content);
-  s.updateTeam(team.id,{memberAgentIds:team.memberAgentIds});
+  s.updateCommunication(c.id,{memberAgentIds:team.memberAgentIds});
   send(s,c.id,"重新加入后提问",[peer]);
   let delivery;
   while((delivery=s.claimCommunication(c.id))) {
@@ -174,7 +174,7 @@ test("group visibility is frozen independently from mentions, new membership doe
 
 test("legacy group history is conservative and explicitly partial",()=>{
   const s=createStore(),c=groupChat(s),m=send(s,c.id,"旧群记录",[employee]);
-  const state=s.snapshot(); delete state.communicationMessages[0].visibleToAgentIds;
+  const state=s.snapshot(); delete state.communicationMessages[0].visibleToAgentIds;state.communicationConversations[0].kind="team";
   const projection=historyCommands(state);
   assert.deepEqual(communicationVisibility(state,state.communicationConversations[0],state.communicationMessages[0]),[employee]);
   assert.equal(projection.historyQuery(employee,"search_group_chat",{}).items[0].coverage,"legacy_partial");

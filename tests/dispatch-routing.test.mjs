@@ -48,7 +48,7 @@ test('dispatch provenance is same-Run metadata and does not deliver or consume t
     assert.equal(delivery.sourceMessageId, message.id); assert.deepEqual(delivery.messageIds, []);
     assert.equal(store.getRunWorkspace(run.id).messages.find(item => item.id === message.id).recipient.type, 'team');
     assert.ok(store.memberInputMessages(delivery.id).some(item => item.id === message.id));
-    const otherTask = store.createTask({ title: "其他任务", objective: "来源隔离", teamId: task.teamId, workflowTemplateId: task.workflowTemplateId, workspacePath: task.workspacePath });
+    const otherTask = store.createTask({ title: "其他任务", objective: "来源隔离", memberAgentIds: task.memberAgentIds, workflowTemplateId: task.workflowTemplateId, workspacePath: task.workspacePath });
     const other = store.createRun(otherTask.id);
     const foreign = store.addMessage({ runId: other.id, content: '另一执行的消息' });
     for (const sourceMessageId of [foreign.id, 'missing']) assert.throws(() => store.enqueueDispatch(run.id, { recipientAgentId: 'agent_tester', workflowNodeId: 'testing', purpose: 'node', sourceMessageId }), /来源消息不属于 Run/);
@@ -75,7 +75,7 @@ process.exitCode=1;
 `, {mode:0o700});
   const store=createCatalogFixtureStore({workspaceRoot:join(root,'work')}); t.after(()=>store.close());
   store.updateAgent('agent_analyst',{runtime:{provider:'claude-code',executable}});
-  const task=store.createTask({title:'续接验证',objective:'OBJECTIVE_ONCE',teamId:store.listTeams()[0].id,workflowTemplateId:'software_delivery'});
+  const task=store.createTask({title:'续接验证',objective:'OBJECTIVE_ONCE',memberAgentIds: store.listTeams()[0].memberAgentIds,workflowTemplateId:'software_delivery'});
   const run=store.createRun(task.id); store.updateRun(run.id,{status:'running'});store.setTaskStatus(task.id,'running');
   const message=store.addMessage({runId:run.id,recipientAgentId:'agent_analyst',content:'ASSIGNMENT_ONCE'});
   const delivery=store.enqueueDispatch(run.id,{recipientAgentId:'agent_analyst',workflowNodeId:'requirements',purpose:'node',messageIds:[message.id]});
@@ -153,7 +153,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(result) }));
   const store = createCatalogFixtureStore({ workspaceRoot: join(root, "workspaces") });
   store.updateAgent("agent_analyst", { runtime: { provider: "claude-code", executable } });
   const workflow = store.createWorkflowTemplate({ name: "共享消息验证", nodes: [{ id: "requirements", title: "需求", staffingGuidance: "需求成员", artifactPaths: ["docs/requirements/"], dependsOn: [] }] });
-  const task = store.createTask({ title: "团队共享", objective: "验证下一成员上下文", teamId: store.listTeams()[0].id, workflowTemplateId: workflow.id, nodeAssignments: { requirements: "agent_analyst" }, managerRuntime: { provider: "claude-code", executable } });
+  const task = store.createTask({ title: "团队共享", objective: "验证下一成员上下文", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: workflow.id, nodeAssignments: { requirements: "agent_analyst" }, managerRuntime: { provider: "claude-code", executable } });
   const run = store.createRun(task.id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(task.id, "running");
   const shared = store.addMessage({ runId: run.id, sender: { type: "agent", id: run.manager.id, name: run.manager.name }, content: "TEAM_SHARED_SENTINEL", kind: "manager_decision" });
@@ -208,7 +208,7 @@ test("persistent restart and multiple unanswered questions retain the gate until
 
 test("direct @ to an unassigned member routes to the manager, never fabricates a nodes[0] instruction", () => {
   const store = createCatalogFixtureStore();
-  const task = store.createTask({ title: "Unassigned fixture", objective: "Routing without nodeAssignments", workspacePath: mkdtempSync(join(tmpdir(), "af-routing-unassigned-")), teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery" });
+  const task = store.createTask({ title: "Unassigned fixture", objective: "Routing without nodeAssignments", workspacePath: mkdtempSync(join(tmpdir(), "af-routing-unassigned-")), memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
   assert.deepEqual(task.nodeAssignments, {});
   const run = store.createRun(task.id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
@@ -238,7 +238,7 @@ test("direct @ to an unassigned member routes to the manager, never fabricates a
 
 test("manager recipient without any assigned node never throws and binds as a manager dispatch (regression ①)", () => {
   const store = createCatalogFixtureStore();
-  const task = store.createTask({ title: "Manager recipient fixture", objective: "Manager routing without nodeAssignments", workspacePath: mkdtempSync(join(tmpdir(), "af-routing-manager-")), teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery" });
+  const task = store.createTask({ title: "Manager recipient fixture", objective: "Manager routing without nodeAssignments", workspacePath: mkdtempSync(join(tmpdir(), "af-routing-manager-")), memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
   assert.deepEqual(task.nodeAssignments, {});
   const run = store.createRun(task.id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
@@ -281,7 +281,7 @@ test("direct @ follows actual dispatch responsibility, not static Task assignmen
 
 test("read-only inquiries still reach an unassigned member directly without opening any Artifact boundary", () => {
   const store = createCatalogFixtureStore();
-  const task = store.createTask({ title: "Inquiry fixture", objective: "Inquiry routing", workspacePath: mkdtempSync(join(tmpdir(), "af-routing-inquiry-")), teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery" });
+  const task = store.createTask({ title: "Inquiry fixture", objective: "Inquiry routing", workspacePath: mkdtempSync(join(tmpdir(), "af-routing-inquiry-")), memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
   const run = store.createRun(task.id);
   store.pauseRun(run.id);
   const sent = store.submitHumanMessage(run.id, { recipientAgentId: "agent_engineer", content: "只读咨询：目前的取舍是什么？" });
@@ -499,7 +499,7 @@ test("formal routing chain: direct @ → manager dispatch → node delivery → 
   const store = createCatalogFixtureStore();
   const workspace = join(root, "workspace");
   await mkdir(workspace, { recursive: true });
-  const task = store.createTask({ title: "Chain fixture", objective: "Formal routing chain", workspacePath: workspace, teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery" });
+  const task = store.createTask({ title: "Chain fixture", objective: "Formal routing chain", workspacePath: workspace, memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
   assert.deepEqual(task.nodeAssignments, {});
   const run = store.createRun(task.id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
@@ -603,7 +603,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   for (const agent of store.listAgents().filter((agent) => agent.kind !== "manager")) store.updateAgent(agent.id, { runtime: { provider: "claude-code", executable } });
 
   // Run 1: empty nodeAssignments — direct @ routes through the manager.
-  const task = store.createTask({ title: "真实链路", objective: "真实编排链路", teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery", managerRuntime: { provider: "claude-code", executable } });
+  const task = store.createTask({ title: "真实链路", objective: "真实编排链路", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery", managerRuntime: { provider: "claude-code", executable } });
   assert.deepEqual(task.nodeAssignments, {});
   store=freezeHistoricalRepository(store,task.id);
   const run = store.createRun(task.id);
@@ -645,7 +645,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 
   // Run 2: assigned-member @ regression — the declared directory is guidance,
   // not an execution permission boundary.
-  const task2 = store.createTask({ title: "真实链路回归", objective: "已分配成员回归与越界", teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery", nodeAssignments: { requirements: "agent_analyst", design: "agent_designer", development: "agent_engineer", testing: "agent_tester", bug_fix: "agent_engineer", regression: "agent_tester" }, managerRuntime: { provider: "claude-code", executable } });
+  const task2 = store.createTask({ title: "真实链路回归", objective: "已分配成员回归与越界", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery", nodeAssignments: { requirements: "agent_analyst", design: "agent_designer", development: "agent_engineer", testing: "agent_tester", bug_fix: "agent_engineer", regression: "agent_tester" }, managerRuntime: { provider: "claude-code", executable } });
   store=freezeHistoricalRepository(store,task2.id);
   const run2 = store.createRun(task2.id);
   store.updateRun(run2.id, { status: "running" }); store.setTaskStatus(run2.taskId, "running");
@@ -670,7 +670,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 
   // Run 3: a failed developer subprocess writes repository source/tests; its
   // retry writes only a report. The original code files must still be captured.
-  const task3 = store.createTask({ title: "失败重试代码", objective: "失败后源码和测试仍应接纳", teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery", nodeAssignments: { requirements: "agent_analyst", design: "agent_designer", development: "agent_engineer", testing: "agent_tester", bug_fix: "agent_engineer", regression: "agent_tester" }, managerRuntime: { provider: "claude-code", executable } });
+  const task3 = store.createTask({ title: "失败重试代码", objective: "失败后源码和测试仍应接纳", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery", nodeAssignments: { requirements: "agent_analyst", design: "agent_designer", development: "agent_engineer", testing: "agent_tester", bug_fix: "agent_engineer", regression: "agent_tester" }, managerRuntime: { provider: "claude-code", executable } });
   store=freezeHistoricalRepository(store,task3.id);
   const run3 = store.createRun(task3.id);
   await executeRun(store, run3.id, { runFilesRoot: join(root, "audit") });
@@ -782,7 +782,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   for (const agent of store.listAgents()) store.updateAgent(agent.id, { runtime: { provider: "claude-code", executable } });
   const assignments = { requirements: "agent_analyst", design: "agent_designer", development: "agent_engineer", testing: "agent_tester", bug_fix: "agent_engineer", regression: "agent_tester" };
   const makeRun = (title) => {
-    const task = store.createTask({ title, objective: "自愈验证", teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery", nodeAssignments: assignments });
+    const task = store.createTask({ title, objective: "自愈验证", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery", nodeAssignments: assignments });
     const run = store.createRun(task.id);
     store.updateRun(run.id, { status: "running" }); store.setTaskStatus(task.id, "running");
     return run;

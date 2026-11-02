@@ -226,9 +226,9 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(result) }));
 
     const store = createStore({ workspaceRoot: join(root, "workspaces") });
     const verifier = store.createAgent({ name: "验证员工", role: "验证工程师", runtime: { provider: "claude-code", executable } });
-    const team = store.createTeam({ name: "工作目录验证团队", memberAgentIds: [verifier.id] });
+    const team = store.createTeam({ name: "工作目录验证团队", memberAgentIds: [verifier.id,store.listAgents().find(item=>item.kind==='manager').id] });
     const workflow = store.createWorkflowTemplate({ name: "工作目录验证", nodes: [{ id: "verify", title: "验证", staffingGuidance: "验证工程师", artifactPaths: ["docs/verify/", "docs/testing/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "工作目录标记运行", objective: "验证受管工作目录启动", teamId: team.id, workflowTemplateId: workflow.id, nodeAssignments: { verify: verifier.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({ title: "工作目录标记运行", objective: "验证受管工作目录启动", memberAgentIds: team.memberAgentIds, workflowTemplateId: workflow.id, nodeAssignments: { verify: verifier.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
 
     await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });

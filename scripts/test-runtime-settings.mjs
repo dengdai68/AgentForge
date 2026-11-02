@@ -23,12 +23,12 @@ const store = createStore({databasePath:join(data,'agentforge.sqlite'),workspace
 const profiles = Object.fromEntries(store.listRuntimeProfiles().map(item=>[item.provider,item]));
 const manager = store.createAgent({name:'配置验收经理',kind:'manager',systemPrompt:'仅执行一次最小验收：将 check 节点派给配置验收成员。成员文字交接后直接 request_acceptance；不需要文件，不需要向人类澄清。',runtime:{profileId:profiles['claude-code'].id}});
 const worker = store.createAgent({name:'配置验收成员',systemPrompt:'直接用一句中文回复：固定 Runtime 配置验证成功。无需工具和文件。',runtime:{profileId:profiles.codex.id}});
-const team = store.createTeam({name:'配置验收团队',managerAgentId:manager.id,memberAgentIds:[worker.id]});
+const team = store.createTeam({name:'配置验收团队',memberAgentIds: [...new Set([worker.id, manager.id])]});
 const flow = store.createWorkflowTemplate({name:'配置验收流程',nodes:[{id:'check',title:'配置验收',staffingGuidance:'配置验收成员使用 Codex',deliverable:'一句文字交接即可；无需文件。'}]});
-const task = store.createTask({title:'Runtime 固定配置与 CLI 登录验收',objective:'将 check 节点交给配置验收成员，一句文字交接后经理直接提交人类验收。无需文件或额外验证。',teamId:team.id,workflowTemplateId:flow.id});
+const task = store.createTask({title:'Runtime 固定配置与 CLI 登录验收',objective:'将 check 节点交给配置验收成员，一句文字交接后经理直接提交人类验收。无需文件或额外验证。',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id});
 const chat = store.openCommunication({kind:'agent',targetId:worker.id});
 // Presentation fixture only: no Provider execution is claimed by this lifecycle.
-const completedTask = store.createTask({title:'已完成任务的直接操作',objective:'仅验收操作展示与确认流程。',teamId:team.id,workflowTemplateId:flow.id});
+const completedTask = store.createTask({title:'已完成任务的直接操作',objective:'仅验收操作展示与确认流程。',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id});
 const completedRun = store.createRun(completedTask.id);
 store.updateRun(completedRun.id,{status:'running'}); store.setTaskStatus(completedTask.id,'running');
 store.updateRun(completedRun.id,{status:'review'}); store.setTaskStatus(completedTask.id,'review');

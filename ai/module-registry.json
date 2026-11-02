@@ -214,7 +214,8 @@
         ]
       },
       "taskContextProjection": "Preserve message provenance, reply links and complete business bodies; omit storage/routing audit metadata, empty repository config, employee staffing guidance and automatic bulk Artifact digests. Handoff paths remain; full immutable evidence is queried through history tools.",
-      "communicationContract": "Ordinary chat instructions require only reply; no peer candidates or handoff fields. Task managerDecision/consultation prompts and historical repository context remain separate."
+      "communicationContract": "Private chat uses reply-only; independent groups add explicit mentionAgentIds for peer questions. No handoff fields; Task managerDecision/consultation and frozen historical repository context remain separate.",
+      "membershipContract": "Only the Run coordinator ID receives manager/workflow rules. Private replies stay reply-only; independent groups carry explicit mentionAgentIds and bounded per-human-round member delivery."
     },
     {
       "id": "cli.configuration",
@@ -549,7 +550,8 @@
           "persistence",
           "sessions"
         ]
-      }
+      },
+      "membershipContract": "Independent group rosters/names, editable through Store; team deletion does not affect groups. Soft deletion hides current employees, cancels unstarted replies and retains active replies/history. Explicit mentions are bounded once per employee per human discussion round. See docs/17-communication.md."
     },
     {
       "id": "server.communication",
@@ -590,7 +592,8 @@
           "provider",
           "security"
         ]
-      }
+      },
+      "membershipContract": "Independent kind=group/name/memberAgentIds; team selection only expands employees. Editing membership cancels unstarted removed-member replies, retains active replies/history and isolated sessions. Explicit mentions are public and bounded once per employee per human discussion round; no handoff protocol. See docs/17-communication.md."
     },
     {
       "id": "server.authentication",
@@ -725,7 +728,8 @@
       "fixedRuntimes": "Exactly one slot per Claude Code/Codex provider. Only model/effort/enabled partial updates; no create/delete/name/executable/profile inputs. Stable employee profileId references and frozen snapshots; current enable gate blocks new invocations without killing in-flight processes.",
       "humanMessageRouting": "submitHumanMessage defaults an omitted/null recipientAgentId to the frozen Run manager; explicit members are validated, exact question replies retain priority, terminal runs remain inquiry-only and archived tasks read-only.",
       "roleProtocol": "roleIds is ordered, unique, existence-validated; roleSnapshots freeze all text. Old roleId input rejects; loaded nonempty old bindings require explicit operator preparation, no migration/reset. Frozen historical roleSnapshot retains its original text.",
-      "employeeTypeContract": "Current kind accepts only business/manager and repository writes reject. Explicit employee edits drop retired repository metadata; no startup migration or reset. New Tasks freeze no repository sources/bindings and use the shared Run root. Existing frozen repository snapshots keep their original preparation/cwd facts."
+      "employeeTypeContract": "Current kind accepts only business/manager and repository writes reject. Explicit employee edits drop retired repository metadata; no startup migration or reset. New Tasks freeze no repository sources/bindings and use the shared Run root. Existing frozen repository snapshots keep their original preparation/cwd facts.",
+      "membershipContract": "Tasks freeze independent memberAgentIds with exactly one active manager; no teamId input. Teams are employee collections and need no manager. Employee deletion marks status=deleted/deletedAt, hides current directories and detaches current memberships; frozen in-flight tasks/history remain. See docs/03-domain-model.md."
     },
     {
       "id": "server.sqlite-persistence",

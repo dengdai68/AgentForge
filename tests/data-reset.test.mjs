@@ -59,8 +59,8 @@ test("reset handles actual UUID Task workspaces without deleting siblings and st
   const { root, options, reset } = await fixture(t);
   const store = createStore({ databasePath: options.databasePath, workspaceRoot: join(root, "work") });
   const agents = store.listAgents(), manager = agents.find(item => item.kind === "manager");
-  const team = store.createTeam({ name: "Reset identity proof", managerAgentId: manager.id, memberAgentIds: [agents.find(item => item.kind === "business").id] });
-  const task = store.createTask({ title: "UUID reset", objective: "Only isolated data", teamId: team.id, workflowTemplateId: store.listWorkflowTemplates()[0].id });
+  const team = store.createTeam({ name: "Reset identity proof", memberAgentIds: [...new Set([agents.find(item => item.kind === "business").id, manager.id])] });
+  const task = store.createTask({ title: "UUID reset", objective: "Only isolated data", memberAgentIds: team.memberAgentIds, workflowTemplateId: store.listWorkflowTemplates()[0].id });
   const run = store.createRun(task.id);
   assert.match(task.id, /^task_[a-f0-9-]{36}$/);
   const workspace = run.workspacePath;
@@ -105,8 +105,8 @@ test("Store rejects clearing a live Run and exposes only confirmed managed works
   t.after(() => store.close());
   const worker = store.listAgents().find(employee => employee.kind !== "manager");
   const manager = store.listAgents().find(employee => employee.kind === "manager");
-  const team = store.createTeam({ name: "Disposable reset team", memberAgentIds: [worker.id], managerAgentId: manager.id });
-  const task = store.createTask({ teamId: team.id, workflowTemplateId: store.listWorkflowTemplates()[0].id, title: "Disposable reset eligibility", objective: "fixture", workspacePath: tmpdir() });
+  const team = store.createTeam({ name: "Disposable reset team", memberAgentIds: [...new Set([worker.id, manager.id])] });
+  const task = store.createTask({ memberAgentIds: team.memberAgentIds, workflowTemplateId: store.listWorkflowTemplates()[0].id, title: "Disposable reset eligibility", objective: "fixture", workspacePath: tmpdir() });
   const run = store.createRun(task.id);
   assert.throws(() => store.prepareDataReset(), /停止正在执行/);
   store.cancelRun(run.id, "fixture test only");

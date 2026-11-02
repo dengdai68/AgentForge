@@ -76,7 +76,7 @@ function communicationReaderFixture(t) {
   const mount = (key = "a") => ui.mount(host, { agents: [], teams: [] }, key);
   const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
   const take = (suffix) => { const index = pending.findIndex((item) => item.url === `/api/communications${suffix}`); assert.notEqual(index, -1, `request ${suffix}`); return pending.splice(index, 1)[0]; };
-  const result = (ids, { before = null, more = false, name = "A" } = {}) => ({ conversation: { id: name, kind: "agent", name }, messages: ids.map((id) => ({ id, createdAt: `2026-01-01T00:00:${id.padStart(2, "0")}.000Z`, sender: { type: "agent", name }, content: `message-${id}` })), deliveries: [], nextBefore: before, hasMore: more });
+  const result = (ids, { before = null, more = false, name = "A" } = {}) => ({ conversation: { id: name, kind: "agent", name, members: [] }, messages: ids.map((id) => ({ id, createdAt: `2026-01-01T00:00:${id.padStart(2, "0")}.000Z`, sender: { type: "agent", name }, content: `message-${id}` })), deliveries: [], nextBefore: before, hasMore: more });
   t.after(() => ui.unmount());
   return { ui, host, query, mount, flush, take, pending, result, tick: () => [...intervals].forEach((callback) => callback()), intervals };
 }
@@ -106,7 +106,7 @@ for (const count of [0, 1, 3]) test(`Console toolbar has only latest/refresh wit
   f.take('').resolve({ conversations: [] }); f.take('/a').resolve(f.result([])); await f.flush();
   const html = f.query('.communication-main').innerHTML;
   const toolbar = html.match(/<div class="communication-console-toolbar">([\s\S]*?)<\/div><\/div>/)[1];
-  assert.equal((toolbar.match(/<button /g) || []).length, 2);
+  assert.equal((toolbar.match(/<button /g) || []).length, 3);
   assert.match(toolbar, /data-communication-console-latest/); assert.match(toolbar, /data-communication-console-refresh/);
   assert.doesNotMatch(toolbar, /data-communication-members|data-communication-console-older/);
   f.query('[data-toggle-communication-console]').onclick();
@@ -136,7 +136,7 @@ test("unread replies persist and read acknowledgements cannot skip unseen replie
   assert.equal(store.markCommunicationRead(chat.id, first.id).unreadCount, 1);
   assert.equal(store.markCommunicationRead(chat.id, second.id).unreadCount, 0);
   assert.equal(store.markCommunicationRead(chat.id, first.id).unreadCount, 0);
-  const other = store.openCommunication({ kind: "team", targetId: store.listTeams()[0].id });
+  const other = store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===(store.listTeams()[0].id)).memberAgentIds});
   assert.throws(() => store.markCommunicationRead(other.id, second.id), /不属于/);
   reply("unread-fixture-3");
   store.close(); store = createStore({ databasePath });
@@ -359,12 +359,12 @@ test("CLI resumes the exact unconfirmed session when a previous process created 
 
 test("group members execute in parallel but a member keeps FIFO", async () => {
   const root = await mkdtemp(join(tmpdir(), "af-parallel-chat-"));
-  const store = createStore(), group = store.openCommunication({ kind: "team", targetId: "team_product_delivery" });
+  const store = createStore(), group = store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===("team_product_delivery")).memberAgentIds});
   const started = [], releases = [];
   const service = createCommunicationService(store, { root, invoke: async (input) => {
     started.push(input.workspacePath);
     await new Promise((resolve) => releases.push(resolve));
-    return { finalText: JSON.stringify({ reply: "done" }) };
+    return { finalText: JSON.stringify({ reply: "done", mentionAgentIds: [] }) };
   } });
   try {
     send(store, group.id, "first", ["agent_analyst", "agent_designer"]);
@@ -384,7 +384,7 @@ test("group members execute in parallel but a member keeps FIFO", async () => {
 test("broadcast freezes active digital recipients and replies never recursively fan out", () => {
   const store = createStore();
   store.updateAgent("agent_designer", { status: "inactive" });
-  const group = store.openCommunication({ kind: "team", targetId: "team_product_delivery" });
+  const group = store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===("team_product_delivery")).memberAgentIds});
   const message = send(store, group.id, "everyone");
   const deliveries = store.getCommunication(group.id).deliveries;
   assert.ok(deliveries.length > 1);
@@ -400,7 +400,7 @@ test("broadcast freezes active digital recipients and replies never recursively 
 });
 
 test("group replies finish only their explicit human delivery and never route body mentions",()=>{
-  const store=createStore(),group=store.openCommunication({kind:'team',targetId:'team_product_delivery'});
+  const store=createStore(),group=store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===('team_product_delivery')).memberAgentIds});
   send(store,group.id,'请你回答',['agent_analyst']);const item=store.claimCommunication(group.id);
   assert.equal(Object.hasOwn(store.communicationContext(group.id,item.id),'handoffCandidates'),false);
   assert.throws(()=>store.completeCommunication(group.id,item.id,'不能转交','agent_designer'),/不支持转交/);
@@ -412,7 +412,7 @@ test("group replies finish only their explicit human delivery and never route bo
 });
 
 test("only human-selected group members receive independent direct replies",()=>{
-  const store=createStore(),group=store.openCommunication({kind:'team',targetId:'team_product_delivery'});
+  const store=createStore(),group=store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===('team_product_delivery')).memberAgentIds});
   send(store,group.id,'分别回答',['agent_analyst','agent_designer']);
   const first=store.claimCommunication(group.id),second=store.claimCommunication(group.id);
   assert.notEqual(first.agentId,second.agentId);
@@ -424,7 +424,7 @@ test("only human-selected group members receive independent direct replies",()=>
 test("direct reply persistence is atomic and creates no routing facts",async()=>{
   const root=await mkdtemp(join(tmpdir(),'af-direct-reply-'));let database;
   try{
-    const databasePath=join(root,'state.sqlite'),store=createStore({databasePath}),group=store.openCommunication({kind:'team',targetId:'team_product_delivery'});
+    const databasePath=join(root,'state.sqlite'),store=createStore({databasePath}),group=store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===('team_product_delivery')).memberAgentIds});
     send(store,group.id,'直接答复',['agent_analyst']);const item=store.claimCommunication(group.id),before=store.snapshot();
     database=new DatabaseSync(databasePath);database.exec("CREATE TRIGGER fail_reply BEFORE UPDATE ON workspace_snapshots BEGIN SELECT RAISE(ABORT, 'injected persistence failure'); END");
     assert.throws(()=>store.completeCommunication(group.id,item.id,'正文'),/injected persistence failure/);assert.deepEqual(store.snapshot(),before);
@@ -433,29 +433,29 @@ test("direct reply persistence is atomic and creates no routing facts",async()=>
   }finally{database?.close();await rm(root,{recursive:true,force:true});}
 });
 
-test("all communication runtimes receive a strict reply-only schema with no handoff requirement",async()=>{
+test("private and group communication schemas across all runtimes exclude handoff and distinguish explicit mentions",async()=>{
   const root=await mkdtemp(join(tmpdir(),'af-reply-schema-')),store=createStore();
   try{
-    for(const provider of ['claude-code','codex','dsh'])for(const kind of ['agent','team']){
-      store.updateAgent('agent_analyst',{runtime:{provider}});const chat=store.openCommunication({kind,targetId:kind==='agent'?'agent_analyst':'team_product_delivery'});
-      send(store,chat.id,'普通回复',kind==='team'?['agent_analyst']:[]);
+    for(const provider of ['claude-code','codex','dsh'])for(const kind of ['agent','group']){
+      store.updateAgent('agent_analyst',{runtime:{provider}});const chat=store.openCommunication(kind==='agent'?{kind,targetId:'agent_analyst'}:{kind,name:'Schema group',memberAgentIds:['agent_analyst','agent_designer']});
+      send(store,chat.id,'普通回复',kind==='group'?['agent_analyst']:[]);
       const service=createCommunicationService(store,{root,invoke:async input=>{
-        assert.deepEqual(input.outputSchema,{type:'object',additionalProperties:false,properties:{reply:{type:'string'}},required:['reply']});
+        assert.deepEqual(input.outputSchema.required,kind==='group'?['reply','mentionAgentIds']:['reply']);assert.equal(input.outputSchema.additionalProperties,false);
         assert.deepEqual(JSON.parse(await readFile(input.schemaPath,'utf8')),input.outputSchema);
         assert.doesNotMatch(input.systemPrompt,/handoffToAgentId|本轮可转交成员/);
-        return {finalText:JSON.stringify({reply:'只有答复正文'})};
+        return {finalText:JSON.stringify({reply:'只有答复正文',...(kind==='group'?{mentionAgentIds:[]}: {})})};
       }});await service.kick(chat.id);const saved=store.getCommunication(chat.id);assert.equal(saved.deliveries.at(-1).status,'done');assert.equal(saved.messages.at(-1).content,'只有答复正文');assert.equal(saved.conversation.pending,0);
     }
   }finally{store.close();await rm(root,{recursive:true,force:true});}
 });
 
 test("retired routing outputs reject without waking anyone; retry finishes the original member only",async()=>{
-  const root=await mkdtemp(join(tmpdir(),'af-no-relay-')),store=createStore(),chat=store.openCommunication({kind:'team',targetId:'team_product_delivery'});
+  const root=await mkdtemp(join(tmpdir(),'af-no-relay-')),store=createStore(),chat=store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===('team_product_delivery')).memberAgentIds});
   try{
     for(const output of [{},{reply:''},{reply:42},{reply:'bad',handoffToAgentId:null},{reply:'bad',handoffToAgentId:'agent_designer'},{reply:'bad',recipient:'agent_designer'}]){
       send(store,chat.id,'普通消息',['agent_analyst']);const service=createCommunicationService(store,{root,invoke:async()=>({finalText:JSON.stringify(output)})});await service.kick(chat.id);
       const saved=store.getCommunication(chat.id),item=saved.deliveries.at(-1);assert.equal(item.status,'failed');assert.ok(saved.deliveries.every(d=>d.agentId==='agent_analyst' && !d.parentDeliveryId));
-      store.retryCommunication(chat.id,item.id);await createCommunicationService(store,{root,invoke:async()=>({finalText:JSON.stringify({reply:'修正后的直接答复'})})}).kick(chat.id);
+      store.retryCommunication(chat.id,item.id);await createCommunicationService(store,{root,invoke:async()=>({finalText:JSON.stringify({reply:'修正后的直接答复',mentionAgentIds:[]})})}).kick(chat.id);
       assert.equal(store.getCommunication(chat.id).deliveries.at(-1).status,'done');
     }
   }finally{store.close();await rm(root,{recursive:true,force:true});}
@@ -464,8 +464,8 @@ test("retired routing outputs reject without waking anyone; retry finishes the o
 test("communication UI uses searchable dialog and hides runtime chrome and private quotes", async () => {
   const ui = await readFile(new URL("../web/communication.js", import.meta.url), "utf8");
   assert.ok(ui.includes('dialog.showModal()'));
-  assert.ok(ui.includes('input.oninput = () => { pickerPage = 1; render(); }'));
-  assert.ok(ui.includes('state.conversation?.kind === "team" && state.messages.get'));
+  assert.ok(ui.includes('createEmployeeMultiSelect'));
+  assert.doesNotMatch(ui,/回复问题|<blockquote>/);
   assert.ok(!ui.includes('data-chat-events'));
   assert.ok(!ui.includes('communication-delivery'));
   assert.ok(!ui.includes('已回复'));
@@ -485,8 +485,8 @@ test("communication private/group uniqueness, explicit mentions and restart rete
     const databasePath = join(root, "state.sqlite"), store = createStore({ databasePath });
     const privateChat = store.openCommunication({ kind: "agent", targetId: "agent_analyst" });
     assert.equal(store.openCommunication({ kind: "agent", targetId: "agent_analyst" }).id, privateChat.id);
-    const group = store.openCommunication({ kind: "team", targetId: "team_product_delivery" });
-    assert.equal(store.openCommunication({ kind: "team", targetId: "team_product_delivery" }).id, group.id);
+    const group = store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===("team_product_delivery")).memberAgentIds});
+    assert.notEqual(store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams()[0].memberAgentIds}).id, group.id);
     const clientRequestId = randomUUID();
     const first = send(store, privateChat.id, "保留完整原文\n第二行", [], clientRequestId);
     assert.equal(send(store, privateChat.id, first.content, [], clientRequestId).id, first.id);
@@ -506,7 +506,7 @@ test("communication private/group uniqueness, explicit mentions and restart rete
     const item = store.claimCommunication(privateChat.id);
     const session = store.prepareCommunicationSession(privateChat.id, item.id, root);
     store.confirmCommunicationSession(privateChat.id, item.id, session.sessionId);
-    const disposableTask = store.createTask({ title: "Delete only this fixture", objective: "Communication survives Task deletion", workspacePath: root, teamId: store.listTeams()[0].id, workflowTemplateId: store.listWorkflowTemplates()[0].id });
+    const disposableTask = store.createTask({ title: "Delete only this fixture", objective: "Communication survives Task deletion", workspacePath: root, memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: store.listWorkflowTemplates()[0].id });
     store.deleteTask(disposableTask.id);
     const reopened = createStore({ databasePath });
     reopened.recoverCommunications();
@@ -533,7 +533,7 @@ test("communication execution queues replies, resumes exact sessions, separates 
       calls.push(input);
       await input.onEvent({ providerEventType: "system", message: "init", data: { sessionId: input.session.sessionId } });
       await input.onEvent({ providerEventType: "assistant", message: "已收到", data: {} });
-      return { finalText: JSON.stringify({ reply: "真实协议测试回复" }) };
+      return { finalText: JSON.stringify({ reply: "真实协议测试回复", ...(input.outputSchema.properties.mentionAgentIds ? {mentionAgentIds:[]} : {}) }) };
     };
     const service = createCommunicationService(store, { root, invoke });
     send(store, chat.id, "first"); send(store, chat.id, "second");
@@ -545,7 +545,7 @@ test("communication execution queues replies, resumes exact sessions, separates 
     assert.ok(!calls[1].prompt.includes('"content":"first"'), "previous user messages are not replayed");
     assert.ok(calls[1].prompt.includes('"content":"second"'));
     assert.match(calls[1].systemPrompt, /人类沟通中回答/);
-    const group = store.openCommunication({ kind: "team", targetId: "team_product_delivery" });
+    const group = store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===("team_product_delivery")).memberAgentIds});
     send(store, group.id, "hello", ["agent_analyst"]);
     await service.kick(group.id);
     assert.notEqual(calls[2].session.sessionId, calls[0].session.sessionId);
@@ -585,7 +585,7 @@ test("conversation summary keeps automatic retry deliveries visibly pending", ()
 });
 
 test("failed group member does not block peers; cancellation retains history and retry refreshes runtime", () => {
-  const store = createStore(), group = store.openCommunication({ kind: "team", targetId: "team_product_delivery" });
+  const store = createStore(), group = store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===("team_product_delivery")).memberAgentIds});
   send(store, group.id, "two members", ["agent_analyst", "agent_designer"]);
   const first = store.claimCommunication(group.id);
   store.failCommunication(group.id, first.id, "unavailable");
@@ -603,4 +603,46 @@ test("failed group member does not block peers; cancellation retains history and
   assert.equal(store.getCommunication(group.id).deliveries[0].status, "cancelled");
   assert.deepEqual(store.pendingCommunications(), []);
   assert.ok(store.getCommunicationEvents(group.id, first.id).items.some((event) => event.type === "cancelled"));
+});
+
+test('independent groups retain names and members across team edits/deletion, membership validation is atomic',()=>{
+  const store=createStore(),team=store.listTeams()[0];
+  const a=store.openCommunication({kind:'group',name:'群甲',memberAgentIds:team.memberAgentIds}),b=store.openCommunication({kind:'group',name:'群乙',memberAgentIds:team.memberAgentIds});
+  assert.notEqual(a.id,b.id);store.updateTeam(team.id,{memberAgentIds:[]});store.deleteTeam(team.id);
+  assert.equal(store.getCommunication(a.id).conversation.members.length,a.members.length);
+  const before=store.snapshot();assert.throws(()=>store.updateCommunication(a.id,{name:'Changed',memberAgentIds:['missing']}),/不存在/);assert.deepEqual(store.snapshot(),before);
+  store.updateCommunication(a.id,{name:'新群名',memberAgentIds:['agent_analyst','agent_designer']});
+  assert.equal(store.getCommunication(a.id).conversation.name,'新群名');assert.equal(store.getCommunication(b.id).conversation.name,'群乙');
+  assert.throws(()=>store.openCommunication({kind:'team',targetId:team.id}),/不再绑定团队/);
+  assert.ok(store.listCommunications().every(thread=>thread.members.every(member=>member.systemPrompt===undefined && member.roles===undefined)),'every directory row excludes system prompts');
+  assert.ok(store.getCommunication(a.id).conversation.members[0].systemPrompt,'explicit detail contains employee instructions');store.close();
+});
+
+test('public group peer messages address real members once per human round and stop cycles without handoff',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'af-group-peers-')),store=createStore(),chat=store.openCommunication({kind:'group',name:'公开讨论',memberAgentIds:['agent_analyst','agent_designer']});
+  try{
+    const calls=[];const service=createCommunicationService(store,{root,invoke:async input=>{
+      const analyst=input.workspacePath.endsWith('agent_analyst');calls.push(analyst?'A':'B');
+      assert.match(input.systemPrompt,/公开群聊|当前群聊成员/);assert.doesNotMatch(input.systemPrompt,/handoffToAgentId/);
+      if(!analyst)assert.match(input.prompt,/请设计师补充/);
+      return{finalText:JSON.stringify({reply:analyst?'请设计师补充':'公开答复，人类和同事都能看到',mentionAgentIds:[analyst?'agent_designer':'agent_analyst']})};
+    }});
+    send(store,chat.id,'两位交流',['agent_analyst']);await Promise.all([service.kick(chat.id),service.kick(chat.id)]);
+    const result=store.getCommunication(chat.id);assert.deepEqual(calls,['A','B']);assert.equal(result.messages.length,3);assert.equal(result.conversation.pending,0);
+    assert.ok(result.messages.every(message=>message.visibleToAgentIds.includes('agent_analyst')&&message.visibleToAgentIds.includes('agent_designer')));
+    assert.equal(store.snapshot().communicationEvents.filter(event=>event.type==='mention_recorded').length,1);
+    send(store,chat.id,'下一轮',['agent_analyst']);await service.kick(chat.id);assert.deepEqual(calls,['A','B','A','B']);
+    assert.equal(store.snapshot().tasks.length,0);
+  }finally{store.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('deletion cancels queued chats, hides private/member lists, retains replies and in-flight completion',()=>{
+  const store=createStore(),chat=store.openCommunication({kind:'group',name:'删除员工',memberAgentIds:['agent_analyst','agent_designer']}),privateChat=store.openCommunication({kind:'agent',targetId:'agent_analyst'});
+  send(store,chat.id,'正在回复',['agent_analyst']);const active=store.claimCommunication(chat.id);send(store,chat.id,'排队中',['agent_analyst']);send(store,privateChat.id,'还未执行');
+  store.deleteAgent('agent_analyst');store.completeCommunication(chat.id,active.id,'删除前开始的最后回复',['agent_designer']);
+  const saved=store.getCommunication(chat.id);assert.equal(saved.messages.at(-1).content,'删除前开始的最后回复');
+  assert.equal(saved.conversation.pending,0);assert.ok(!saved.conversation.members.some(member=>member.id==='agent_analyst'));
+  assert.ok(!store.listCommunications().some(row=>row.id===privateChat.id));assert.ok(!store.getCommunicationConsole(chat.id).agents.some(row=>row.id==='agent_analyst'));
+  assert.equal(store.claimCommunication(chat.id),null);assert.throws(()=>store.openCommunication({kind:'agent',targetId:'agent_analyst'}),/已删除/);
+  assert.throws(()=>send(store,chat.id,'不能再@',['agent_analyst']),/成员/);store.close();
 });

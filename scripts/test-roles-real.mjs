@@ -48,7 +48,7 @@ const ccBound = store.createAgent({ name: '角色绑定Claude', description: '�
 const cxBound = store.createAgent({ name: '角色绑定Codex', description: '角色验证', systemPrompt: '如实简短作答。', roleIds: [role.id], runtime: { profileId: profiles.codex } });
 const ccFree = store.createAgent({ name: '无角色对照', description: '对照', systemPrompt: '如实简短作答。', runtime: { profileId: profiles['claude-code'] } });
 const manager = store.createAgent({ name: '角色验收经理', kind: 'manager', systemPrompt: '按任务目标直接派工，不向人类提问，不要求文件交付；成员文字回复即交接，确认两个节点都回复后提交人类验收。', runtime: { profileId: profiles['claude-code'] } });
-const team = store.createTeam({ name: '角色验收组', managerAgentId: manager.id, memberAgentIds: [ccBound.id, cxBound.id] });
+const team = store.createTeam({ name: '角色验收组', memberAgentIds: [...new Set([ccBound.id, cxBound.id, manager.id])] });
 const flow = store.createWorkflowTemplate({ name: '角色验收流程', nodes: [
   { id: 'probe_cc', title: 'Claude 角色验证', staffingGuidance: '选择「角色绑定Claude」。', deliverable: '成员只需在交接中写出自己角色要求的探针前缀，无需文件。', artifactPaths: [], dependsOn: [] },
   { id: 'probe_cx', title: 'Codex 角色验证', staffingGuidance: '选择「角色绑定Codex」。', deliverable: '成员只需在交接中写出自己角色要求的探针前缀，无需文件。', artifactPaths: [], dependsOn: ['probe_cc'] }
@@ -164,7 +164,7 @@ try {
   console.log('PASS role edit applies to subsequent deliveries (resumed reply probe: ' + evidence.roleEdit.resumedReplyFollowed + ')');
 
   // A real task freezes the role text; the unbound manager stays unpolluted.
-  const { task } = await api('/api/tasks', { title: '角色任务验证', objective: `经理直接安排 probe_cc 给「角色绑定Claude」、probe_cx 给「角色绑定Codex」；成员在交接中写出自己角色要求的探针前缀。不要向人类提问，不要求文件。`, teamId: team.id, workflowTemplateId: flow.id });
+  const { task } = await api('/api/tasks', { title: '角色任务验证', objective: `经理直接安排 probe_cc 给「角色绑定Claude」、probe_cx 给「角色绑定Codex」；成员在交接中写出自己角色要求的探针前缀。不要向人类提问，不要求文件。`, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   const frozen = (await api('/api/tasks', null, 'GET')).tasks.find(item => item.id === task.id);
   assert.equal(frozen.memberSnapshots.find(item => item.id === ccBound.id).roleSnapshots[0].prompt, rolePromptV2, 'task froze the current role text');
   // The live role changes after freezing; the frozen task must keep V2.

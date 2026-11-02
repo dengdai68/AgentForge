@@ -25,7 +25,7 @@ await auth.setAdministrator("desktop-test", password);
 auth.close();
 const fixtureStore = createStore({ databasePath: storage.AGENTFORGE_DB_PATH, workspaceRoot: storage.AGENTFORGE_WORKSPACE_ROOT });
 assert.deepEqual(fixtureStore.listTasks(), []);
-const fixtureTask = fixtureStore.createTask({ title: "隔离任务空间验收", objective: "只用于界面回归", teamId: fixtureStore.listTeams()[0].id, workflowTemplateId: "software_delivery" });
+const fixtureTask = fixtureStore.createTask({ title: "隔离任务空间验收", objective: "只用于界面回归", memberAgentIds: fixtureStore.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
 assert.ok(fixtureTask.workspacePath.startsWith(join(directory, "agentforge") + "/"));
 const fixtureRun = fixtureStore.createRun(fixtureTask.id);
 assert.ok(fixtureRun.workspacePath.startsWith(join(directory, "agentforge") + "/"));
@@ -247,13 +247,11 @@ async function verifyTaskSearch(page, prefix) {
   };
   const form = page.locator("#task-search-form");
   await form.waitFor();
-  assert.equal(await page.locator("#tasks-table th").count(), 5);
+  assert.equal(await page.locator("#tasks-table th").count(), 4);
   assert.equal(await page.locator(".topbar").isVisible(), true);
   const title = await page.locator("#tasks-table .table-title").first().textContent();
-  const teamId = await form.locator('select[name="teamId"] option').nth(1).getAttribute("value");
   await form.locator('[name="name"]').fill(title.slice(0, 4));
   await form.locator('[name="status"]').selectOption("paused");
-  await form.locator('[name="teamId"]').selectOption(teamId);
   await form.getByRole("button", { name: "搜索", exact: true }).click();
   assert.equal(await page.locator("#tasks-table tbody tr").count(), 1);
   await form.locator('[name="status"]').selectOption("awaiting_acceptance");
@@ -262,7 +260,7 @@ async function verifyTaskSearch(page, prefix) {
   await form.getByRole("button", { name: "重置", exact: true }).click();
   assert.equal(await page.locator("#tasks-table tbody tr").count(), 1);
   assert.equal(await form.locator('[name="status"]').inputValue(), "all");
-  assert.equal(await form.locator('[name="teamId"]').inputValue(), "");
+  assert.equal(await form.locator('[name="teamId"]').count(), 0);
   await form.locator('[name="name"]').fill("未提交的搜索草稿");
   await page.locator('[data-view="agents"]').click();
   await page.locator('[data-view="tasks"]').click();
@@ -896,7 +894,7 @@ try {
           const cleanup = await fetch(`/api/tasks/${task.id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{}" });
           if (!cleanup.ok) throw new Error("Disposable Task cleanup rejected");
           return { matches: task.workspacePath === `${root}/${task.id}`, oldPath: existing.run.task.taskWorkspacePath };
-        }, { input: { title: "目录分配验收夹具", objective: "不启动 Provider", teamId: fixtureTask.teamId, workflowTemplateId: fixtureTask.workflowTemplateId }, root: nextRoot, existingRunId: fixtureRun.id });
+        }, { input: { title: "目录分配验收夹具", objective: "不启动 Provider", memberAgentIds: fixtureTask.memberAgentIds, workflowTemplateId: fixtureTask.workflowTemplateId }, root: nextRoot, existingRunId: fixtureRun.id });
         assert.equal(allocated.matches, true);
         assert.equal(allocated.oldPath, fixtureTask.workspacePath);
       }

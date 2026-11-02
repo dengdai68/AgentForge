@@ -42,9 +42,9 @@ try{
   let team,flow,frozen;
   if(real){
     const manager=(await api('/api/agents',{name:'知识经理',kind:'manager',systemPrompt:'只有 facts 一个节点。首次 managerDecision(nextNodeId=facts,nextAgentId=事实编辑真实ID) 派工；实际收到交接后 managerDecision(nextNodeId=null,nextAgentId=null) 提交人类验收。不得自己执行业务。',runtime:{profileId:profile.id}})).agent;
-    team=(await api('/api/teams',{name:'定时更新验收组',managerAgentId:manager.id,memberAgentIds:[employee.id]})).team;
+    team=(await api('/api/teams',{name:'定时更新验收组',memberAgentIds: [...new Set([employee.id, manager.id])]})).team;
     flow=(await api('/api/workflow-templates',{name:'事实简报',nodes:[{id:'facts',title:'核验当前事实',staffingGuidance:'选择事实编辑',deliverable:'使用 current-facts 原生 Skill，实际读取其事实文件，将原值和真实读取来源写入 docs/facts/brief.md。不要猜测，不读取数据库或凭据。',artifactPaths:['docs/facts/'],dependsOn:[]}]})).workflowTemplate;
-    frozen=(await api('/api/tasks',{title:'更新前冻结，不执行',objective:'只冻结原插件版本',teamId:team.id,workflowTemplateId:flow.id})).task;
+    frozen=(await api('/api/tasks',{title:'更新前冻结，不执行',objective:'只冻结原插件版本',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id})).task;
   }
   await writeFile(join(origin.source,'skills/current/facts.txt'),after);const revision=await origin.commit();
   const checked=await wait('production two-minute automatic update',async()=>{const status=await api('/api/runtime/marketplace/updates');if(status.lastResult?.errors?.length)throw Error(JSON.stringify(status.lastResult.errors));return status.lastResult?.updatedPlugins?status:null});
@@ -60,7 +60,7 @@ try{
   await cli(['auth','login','--username','update-qa','--password-stdin'],password+'\n');assert.equal((await cli(['plugins','updates'])).enabled,false);assert.equal((await cli(['plugins','auto-update','--file','-'],JSON.stringify({enabled:true,intervalMinutes:3}))).intervalMinutes,3);await cli(['plugins','auto-update','--file','-'],JSON.stringify({enabled:false}));
   if(real){
     const old=(await api('/api/tasks')).tasks.find(item=>item.id===frozen.id);assert.ok(JSON.stringify(old.memberSnapshots).includes(installed.id));assert.ok(!JSON.stringify(old.memberSnapshots).includes(current[0].id));
-    const task=(await api('/api/tasks',{title:'PLUGIN-UPDATE｜真实事实简报',objective:'实际使用已选择的当前事实技能产出完整简报，交付后等待人类确认。',teamId:team.id,workflowTemplateId:flow.id})).task;
+    const task=(await api('/api/tasks',{title:'PLUGIN-UPDATE｜真实事实简报',objective:'实际使用已选择的当前事实技能产出完整简报，交付后等待人类确认。',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id})).task;
     const run=(await api('/api/tasks/'+task.id+'/run',{})).run;
     const state=()=>api('/api/runs/'+run.id+'/workspace?view=summary');
     const final=await wait('real updated Skill task',async()=>{const w=await state();if(['failed','awaiting_human'].includes(w.run.status))throw Error('unexpected '+w.run.status);return w.run.status==='awaiting_acceptance'?w:null},900000);

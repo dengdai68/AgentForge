@@ -513,9 +513,9 @@ test('Store freezes selected market versions and rejects mixed legacy paths', as
   const runtime = {provider:'claude-code',...await market.resolve({pluginIds:[entry.id],mcpIds:[]},'claude-code')};
   const store = createStore({workspaceRoot:root});
   const employee = store.createAgent({name:'Selected',role:'需求分析师',runtime});
-  const team = store.createTeam({name:'Market team',memberAgentIds:[employee.id]});
+  const team = store.createTeam({name:'Market team',memberAgentIds:[employee.id,store.listAgents().find(item=>item.kind==='manager').id]});
   const flow = store.createWorkflowTemplate({name:'Market task',nodes:[{id:'work',title:'Work',staffingGuidance:'能使用所选技能完成本地文件交付的成员',dependsOn:[],artifactPaths:['docs/work/']}]});
-  const task = store.createTask({title:'Freeze',objective:'Check',teamId:team.id,workflowTemplateId:flow.id,nodeAssignments:{work:employee.id}});
+  const task = store.createTask({title:'Freeze',objective:'Check',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id,nodeAssignments:{work:employee.id}});
   store.updateAgent(employee.id,{runtime:{provider:'claude-code',...await market.resolve({pluginIds:[],mcpIds:[]},'claude-code')}});
   assert.deepEqual(task.memberSnapshots[0].runtime.extensionSelection.pluginIds,[entry.id]);
   store.removeExtension({kind:'plugin',id:entry.id,name:entry.name});

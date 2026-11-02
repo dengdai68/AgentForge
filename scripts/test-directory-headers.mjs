@@ -20,10 +20,10 @@ const store = createCatalogFixtureStore({ databasePath: join(data, 'agentforge.s
 store.updateWorkspaceSettings({ workspaceRoot: join(root, 'work') });
 const seedTeam = store.listTeams()[0], seedFlow = store.listWorkflowTemplates()[0];
 for (let i = 0; i < 22; i++) {
-  store.createTeam({ name: '目录搜索团队 ' + i, mission: 'Search boundary ' + i, managerAgentId: seedTeam.managerAgentId, memberAgentIds: seedTeam.members.filter(m => m.type === 'agent' && m.id !== seedTeam.managerAgentId).map(m => m.id) });
+  store.createTeam({ name: '目录搜索团队 ' + i, mission: 'Search boundary ' + i, memberAgentIds: seedTeam.memberAgentIds });
   store.createWorkflowTemplate({ name: '目录搜索流程 ' + i, description: 'Search boundary ' + i, nodes: seedFlow.nodes });
 }
-store.createTask({ title: '目录工具栏验收', objective: '仅检查列表展示，不启动执行。', teamId: store.listTeams()[0].id, workflowTemplateId: 'software_delivery' });
+store.createTask({ title: '目录工具栏验收', objective: '仅检查列表展示，不启动执行。', memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: 'software_delivery' });
 store.close();
 const app = await electron.launch({ ...(packaged ? { executablePath: resolve('release/mac-arm64/AgentForge.app/Contents/MacOS/AgentForge') } : {}), args: packaged ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 60000 });
 const errors = [], evidence = { baseline, packaged, root, views: [] };

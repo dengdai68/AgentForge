@@ -232,9 +232,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     }
     return { ...resolved, profileId: resolved.profileId || ensureProfile(runtimeConnection(resolved)).id };
   };
-  for (const employee of state.agents) employee.runtime = bindRuntime(employee.runtime);
+  for (const employee of state.agents.filter(item => item.status !== "deleted")) employee.runtime = bindRuntime(employee.runtime);
   for (const employee of state.agents) { employee.kind ||= employee.system ? "manager" : "business"; employee.systemPrompt ??= employee.description || ""; employee.roleIds ??= []; delete employee.roleId; }
-  for (const team of state.teams) team.managerAgentId ||= state.agents.find(item => item.kind === "manager" && item.status === "active")?.id;
   for (const current of state.runs) {
     const task = state.tasks.find((item) => item.id === current.taskId), team = state.teams.find((item) => item.id === task?.teamId);
     current.manager ||= clone(state.agents.find((item) => item.id === managerId));
@@ -248,16 +247,21 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   const runAgent = (current, agentId) => current?.participants?.find((item) => item.type === "agent" && item.id === agentId) || (current?.manager?.id === agentId ? current.manager : null);
   const addEvent = ({ type, runId = null, actor = { type: "system", name: "AgentForge" }, message, data = {} }) => { const item = { id: id("evt"), type, runId, timestamp: now(), actor: clone(actor), message: text(message, "事件说明"), data: clone(data) }; state.events.push(item); save(); if (transactionDepth) pendingEvents.push(item); else listeners.forEach((listener) => listener(clone(item))); return item; };
   const definition = (current, nodeId) => getTask(current.taskId)?.workflowSnapshot?.nodes.find((item) => item.id === nodeId); const assertNode = (current, nodeId) => { if (!definition(current, nodeId)) throw new Error("工作流节点不存在"); };
-  function assignments(currentTeam, template, input = {}) { const result = {}; for (const item of template.nodes) { const agentId = input[item.id] || (item.reuseOwnerFrom && result[item.reuseOwnerFrom]); if (!agentId || !currentTeam.memberAgentIds.includes(agentId) || getAgent(agentId)?.status !== "active") throw new Error(`节点「${item.title}」必须显式分配给一位可用团队成员`); result[item.id] = agentId; } const repositories = new Map(); for (const item of template.nodes.filter((node) => node.repositoryPath)) { const owner = result[item.id]; if (repositories.has(owner) && repositories.get(owner) !== item.repositoryPath) throw new Error("一个成员只能处理一个 Git 仓库"); repositories.set(owner, item.repositoryPath); } return result; }
-  function validateTeam(input) {
-    const supplied = [...new Set(input.memberAgentIds || [])];
-    const managers = supplied.filter((value) => getAgent(value)?.kind === "manager");
-    if (managers.length > 1 || (managers.length && input.managerAgentId && input.managerAgentId !== managers[0])) throw new Error("团队只能有一名负责项目经理");
-    const memberAgentIds = supplied.filter((value) => !managers.includes(value)), selectedManager = managers[0] || input.managerAgentId || state.agents.find(item => item.kind === "manager" && item.status === "active")?.id;
-    if (!memberAgentIds.length || memberAgentIds.some((value) => !getAgent(value) || getAgent(value).kind === "manager") || !memberAgentIds.some((value) => getAgent(value).status === "active")) throw new Error("团队至少需要一名可用业务数字员工");
-    if (getAgent(selectedManager)?.kind !== "manager" || getAgent(selectedManager)?.status !== "active") throw new Error("请选择可用的项目经理");
-    return { memberAgentIds, managerAgentId: selectedManager };
+  function assignments(currentMembers, template, input = {}) { const result = {}; for (const item of template.nodes) { const agentId = input[item.id] || (item.reuseOwnerFrom && result[item.reuseOwnerFrom]); if (!agentId || !currentMembers.memberAgentIds.includes(agentId) || getAgent(agentId)?.status !== "active") throw new Error(`节点「${item.title}」必须显式分配给一位可用任务成员`); result[item.id] = agentId; } const repositories = new Map(); for (const item of template.nodes.filter((node) => node.repositoryPath)) { const owner = result[item.id]; if (repositories.has(owner) && repositories.get(owner) !== item.repositoryPath) throw new Error("一个成员只能处理一个 Git 仓库"); repositories.set(owner, item.repositoryPath); } return result; }
+  const currentEmployee = value => { const employee = getAgent(value); return employee?.status === "deleted" ? null : employee; };
+  // The former separate team manager is a member in the current read model.
+  // Saving a team writes only the current member set; Task/Run snapshots stay intact.
+  const teamMembers = team => [...new Set([...(team.memberAgentIds || []), team.managerAgentId].filter(Boolean))].filter(currentEmployee);
+  function memberIds(input, { active = false, empty = false } = {}) {
+    if (!Array.isArray(input) || input.some(value => typeof value !== "string") || new Set(input).size !== input.length) throw new Error("memberAgentIds 必须是不重复的数字员工 ID 数组");
+    if ((!empty && !input.length) || input.some(value => !currentEmployee(value) || active && currentEmployee(value).status !== "active")) throw new Error(active ? "请选择可用的任务成员，已删除或停用员工不能加入" : "请选择存在的数字员工");
+    return [...input];
   }
+  function validateTeam(input) {
+    if (Object.hasOwn(input, "managerAgentId")) throw new Error("团队不再指定项目经理，请将经理放入 memberAgentIds；任务创建时校验恰好一位项目经理");
+    return { memberAgentIds: memberIds(input.memberAgentIds, { empty: true }) };
+  }
+  const taskReadModel = task => { const { teamId, team, ...record } = task; return clone({ ...record, memberAgentIds: task.memberAgentIds || [...(task.memberSnapshots || []).map(member => member.id), task.managerSnapshot?.id || task.managerAgentId].filter(Boolean) }); };
   function failedBusinessTraces(runId) {
     return state.traces.filter((trace) => trace.runId === runId && trace.status === "failed" && ["node", "instruction", "consultation"].includes(trace.type));
   }
@@ -298,7 +302,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return { taskAttentionCount: new Set(state.runs.filter(run => !getTask(run.taskId)?.archivedAt && attention.has(run.status)).map(run => run.taskId)).size, communicationUnreadCount: this.listCommunications().reduce((sum, item) => sum + item.unreadCount, 0) };
     },
     getBootstrap() {
-      const tasks = state.tasks.map((task) => ({ id: task.id, title: task.title, objective: task.objective.slice(0, 240), status: task.status, workspaceKind: task.workspaceManaged ? "managed" : "legacy", teamId: task.teamId, team: { name: getTeam(task.teamId)?.name || "" }, workflowTemplateId: task.workflowTemplateId, workflowSnapshot: { name: task.workflowSnapshot.name }, archivedAt: task.archivedAt, deletionBlockedBy: taskDeletionBlock(task.id), createdAt: task.createdAt, updatedAt: task.updatedAt }));
+      const tasks = state.tasks.map((task) => ({ id: task.id, title: task.title, objective: task.objective.slice(0, 240), status: task.status, workspaceKind: task.workspaceManaged ? "managed" : "legacy", memberAgentIds: taskReadModel(task).memberAgentIds, workflowTemplateId: task.workflowTemplateId, workflowSnapshot: { name: task.workflowSnapshot.name }, archivedAt: task.archivedAt, deletionBlockedBy: taskDeletionBlock(task.id), createdAt: task.createdAt, updatedAt: task.updatedAt }));
       const taskById = new Map(tasks.map((task) => [task.id, task]));
       const counts = new Map(state.runs.map((run) => [run.id, { traceCount: 0, artifactCount: 0 }]));
       for (const trace of state.traces) if (counts.has(trace.runId)) counts.get(trace.runId).traceCount++;
@@ -336,7 +340,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return result;
     },
     getWorkspaceSettings() { return { workspaceRoot: state.settings?.workspaceRoot || workspaceRoot, source: state.settings?.workspaceRoot ? "saved" : "startup" }; },
-    listRuntimeProfiles() { return clone(profiles().map(item => { const installed = runtimeInstalled(item.provider); return { id: item.id, provider: item.provider, installed, enabled: installed && item.enabled !== false, model: item.model || "", effort: item.effort || "", employeeCount: state.agents.filter(agent => agent.runtime.profileId === item.id).length }; })); },
+    listRuntimeProfiles() { return clone(profiles().map(item => { const installed = runtimeInstalled(item.provider); return { id: item.id, provider: item.provider, installed, enabled: installed && item.enabled !== false, model: item.model || "", effort: item.effort || "", employeeCount: state.agents.filter(agent => agent.status !== "deleted" && agent.runtime.profileId === item.id).length }; })); },
     resolveAgentRuntime(value) { return clone(resolveAgentRuntime(value)); },
     assertRuntimeEnabled(value) { assertRuntimeEnabled(value); },
     saveRuntimeProfile(input, profileId) {
@@ -350,7 +354,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(() => {
         Object.assign(previous, { model: connection.model, effort: connection.effort, enabled: input.enabled ?? (previous.enabled !== false) });
         delete previous.name; delete previous.executable; delete previous.profile;
-        for (const employee of state.agents.filter(agent => agent.runtime.profileId === previous.id)) employee.runtime = resolveAgentRuntime(employee.runtime);
+        for (const employee of state.agents.filter(agent => agent.status !== "deleted" && agent.runtime.profileId === previous.id)) employee.runtime = resolveAgentRuntime(employee.runtime);
         addEvent({ type: "settings.runtime_updated", actor: humanMember, message: "人类更新了本机 Runtime 配置", data: { profileId: previous.id, enabled: previous.enabled } });
         return this.listRuntimeProfiles().find(item => item.id === previous.id);
       });
@@ -590,6 +594,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         const recipientId = input.recipientAgentId ?? current.manager.id;
         const recipient = runAgent(current, recipientId);
         if (!recipient) throw new Error("消息接收者不属于当前 Run");
+        if (interactionOnly && getAgent(recipient.sourceAgentId || recipient.id)?.status === "deleted") throw new Error("此员工已删除，任务结束后不再接收新答疑");
         const message = this.addMessage({ runId, recipientAgentId: recipientId, content: input.content, kind: interactionOnly ? "inquiry" : "instruction" });
         const ownNode = this.memberResponsibility(runId, recipientId);
         // Never fabricate a nodes[0] binding. An instruction to a member without
@@ -646,18 +651,18 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       save(); return clone(current);
     },
     canCompleteRun(runId) { return !state.traces.some((item) => item.runId === runId && item.status === "running") && !state.dispatches.some((item) => item.runId === runId && !["done", "cancelled"].includes(item.status)); },
-    assertTaskDeletionAllowed(taskId) { const task = getTask(taskId); if (!task) throw new Error("Task 不存在"); const blockedBy = taskDeletionBlock(taskId); if (blockedBy) throw new Error(taskDeletionError(blockedBy)); return clone(task); },
+    assertTaskDeletionAllowed(taskId) { const task = getTask(taskId); if (!task) throw new Error("Task 不存在"); const blockedBy = taskDeletionBlock(taskId); if (blockedBy) throw new Error(taskDeletionError(blockedBy)); return taskReadModel(task); },
     deleteTask(taskId) { const task = this.assertTaskDeletionAllowed(taskId); const relatedRuns = state.runs.filter((run) => run.taskId === taskId); const runIds = new Set(relatedRuns.map((run) => run.id)); state.tasks = state.tasks.filter((item) => item.id !== taskId); state.runs = state.runs.filter((item) => !runIds.has(item.id)); state.traces = state.traces.filter((item) => !runIds.has(item.runId)); state.artifacts = state.artifacts.filter((item) => !runIds.has(item.runId)); state.messages = state.messages.filter((item) => !runIds.has(item.runId)); state.dispatches = state.dispatches.filter((item) => !runIds.has(item.runId)); state.decisions = state.decisions.filter((item) => !runIds.has(item.runId)); state.defects = state.defects.filter((item) => !runIds.has(item.runId)); state.events = state.events.filter((item) => !runIds.has(item.runId)); save(); return { task: clone(task), runIds: [...runIds] }; },
     getExecutionLogs: (query) => executionLogs(state, query),
     snapshot: () => clone(state), subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, addEvent,
-    listAgents: () => state.agents.map(employeeConfiguration), listTeams: () => clone(state.teams.map((item) => {
-      const businessMembers = item.memberAgentIds.map(getAgent).filter(Boolean);
-      return { ...item, members: [...businessMembers.map((agent) => ({ ...employeeConfiguration(agent), type: "agent" })), { ...employeeConfiguration(getAgent(item.managerAgentId)), type: "agent" }, humanMember] };
-    })), listTasks: () => clone(state.tasks.map((item) => ({ ...item, team: getTeam(item.teamId) }))), listWorkflowTemplates: () => clone(state.workflowTemplates), timeline: (runId = null) => clone(state.events.filter((item) => !runId || item.runId === runId)),
-    listRuns: () => clone(state.runs.map((item) => ({ ...item, task: getTask(item.taskId), traceCount: state.traces.filter((trace) => trace.runId === item.id).length, artifactCount: state.artifacts.filter((artifact) => artifact.runId === item.id).length, openDefectCount: state.defects.filter((defect) => defect.runId === item.id && defect.status !== "closed").length }))),
-    getRun(runId) { const item = getRun(runId); if (!item) throw new Error("Run 不存在"); return clone(item); }, getTask(taskId) { const item = getTask(taskId); if (!item) throw new Error("任务不存在"); return clone(item); }, getRunAgent(runId, agentId) { return clone(runAgent(getRun(runId), agentId)); },
-    getRunTask(runId) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const task = getTask(current.taskId); return clone({ ...task, taskWorkspacePath: task.workspacePath, workspacePath: current.workspacePath || task.workspacePath, deletionBlockedBy: taskDeletionBlock(task.id) }); },
-    getRunWorkspace(runId, { summary = false } = {}) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const traces = state.traces.filter((item) => item.runId === runId).map((item) => ({ ...item, agent: summary ? { id: item.agentId, name: runAgent(current, item.agentId)?.name } : runAgent(current, item.agentId) })); const artifacts = state.artifacts.filter((item) => item.runId === runId).map((item) => (summary ? { ...item } : { ...item, trace: getTrace(item.traceId), agent: runAgent(current, item.ownerAgentId) })); return clone({ failureEvents: state.events.filter((event) => event.runId === runId && event.type === "trace.failed").slice(-20).map(consoleAuditProjection), pendingQuestions: this.pendingQuestions(runId), dispatches: this.listDispatches(runId), run: { ...current, task: this.getRunTask(runId), artifactCount: artifacts.length }, traces, artifacts, messages: state.messages.filter((item) => item.runId === runId), decisions: state.decisions.filter((item) => item.runId === runId), defects: state.defects.filter((item) => item.runId === runId), events: state.events.filter((item) => item.runId === runId && (!summary || ["dispatch.retry_scheduled", "dispatch.retry_requested", "dispatch.retry_stopped", "dispatch.escalated", "dispatch.coordination_followups_settled", "session.reset", "run.completed", "run.awaiting_acceptance", "run.acceptance_reopened", "run.recovered", "run.cancelled", "run.paused", "run.resumed", "run.inquiries_cancelled", "run.failed", "run.retry_requested", "run.orchestration_retry_requested", "run.reassessment_requested"].includes(item.type))) }); },
+    listAgents: () => state.agents.filter(item => item.status !== "deleted").map(employeeConfiguration), listTeams: () => clone(state.teams.map((item) => {
+      const { managerAgentId, ...team } = item, memberAgentIds = teamMembers(item);
+      return { ...team, memberAgentIds, members: memberAgentIds.map(value => ({ ...employeeConfiguration(getAgent(value)), type: "agent" })) };
+    })), listTasks: () => state.tasks.map(taskReadModel), listWorkflowTemplates: () => clone(state.workflowTemplates), timeline: (runId = null) => clone(state.events.filter((item) => !runId || item.runId === runId)),
+    listRuns: () => clone(state.runs.map((item) => ({ ...item, task: taskReadModel(getTask(item.taskId)), traceCount: state.traces.filter((trace) => trace.runId === item.id).length, artifactCount: state.artifacts.filter((artifact) => artifact.runId === item.id).length, openDefectCount: state.defects.filter((defect) => defect.runId === item.id && defect.status !== "closed").length }))),
+    getRun(runId) { const item = getRun(runId); if (!item) throw new Error("Run 不存在"); return clone(item); }, getTask(taskId) { const item = getTask(taskId); if (!item) throw new Error("任务不存在"); return taskReadModel(item); }, getRunAgent(runId, agentId) { return clone(runAgent(getRun(runId), agentId)); },
+    getRunTask(runId) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const task = getTask(current.taskId); return clone({ ...taskReadModel(task), taskWorkspacePath: task.workspacePath, workspacePath: current.workspacePath || task.workspacePath, deletionBlockedBy: taskDeletionBlock(task.id) }); },
+    getRunWorkspace(runId, { summary = false } = {}) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const traces = state.traces.filter((item) => item.runId === runId).map((item) => ({ ...item, agent: summary ? { id: item.agentId, name: runAgent(current, item.agentId)?.name } : runAgent(current, item.agentId) })); const artifacts = state.artifacts.filter((item) => item.runId === runId).map((item) => (summary ? { ...item } : { ...item, trace: getTrace(item.traceId), agent: runAgent(current, item.ownerAgentId) })); return clone({ deletedAgentIds: state.agents.filter(item => item.status === "deleted").map(item => item.id), failureEvents: state.events.filter((event) => event.runId === runId && event.type === "trace.failed").slice(-20).map(consoleAuditProjection), pendingQuestions: this.pendingQuestions(runId), dispatches: this.listDispatches(runId), run: { ...current, task: this.getRunTask(runId), artifactCount: artifacts.length }, traces, artifacts, messages: state.messages.filter((item) => item.runId === runId), decisions: state.decisions.filter((item) => item.runId === runId), defects: state.defects.filter((item) => item.runId === runId), events: state.events.filter((item) => item.runId === runId && (!summary || ["dispatch.retry_scheduled", "dispatch.retry_requested", "dispatch.retry_stopped", "dispatch.escalated", "dispatch.coordination_followups_settled", "session.reset", "run.completed", "run.awaiting_acceptance", "run.acceptance_reopened", "run.recovered", "run.cancelled", "run.paused", "run.resumed", "run.inquiries_cancelled", "run.failed", "run.retry_requested", "run.orchestration_retry_requested", "run.reassessment_requested"].includes(item.type))) }); },
     createWorkflowTemplate(input = {}) { validateWorkflowInput(input); const item = workflow(input, {current: true}); if (state.workflowTemplates.some((candidate) => candidate.name === item.name)) throw new Error("工作流名称必须唯一"); state.workflowTemplates.push(item); save(); return clone(item); },
     updateWorkflowTemplate(templateId, input = {}) { const current = find(state.workflowTemplates, templateId); if (!current) throw new Error("工作流不存在"); validateWorkflowInput(input); Object.assign(current, workflow(input, { templateId, system: current.system, current: true })); save(); return clone(current); },
     deleteWorkflowTemplate(templateId) {
@@ -684,9 +689,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if(Object.hasOwn(input,"roleId"))throw new Error("roleId 已废弃，请使用 roleIds 数组");
       if(Object.hasOwn(input,"repository"))throw new Error("员工不再绑定仓库，请将仓库说明写入提示词");
       const stored = getAgent(agentId), current = clone(stored);
-      if (!current) throw new Error("数字员工不存在");
+      if (!current || current.status === "deleted") throw new Error("数字员工不存在或已删除");
       if(input.kind!==undefined && !["business","manager"].includes(input.kind))throw new Error("员工类型只支持普通员工和项目经理");
-      if(input.kind && state.teams.some(team=>(team.managerAgentId===agentId && input.kind!=="manager") || (team.memberAgentIds.includes(agentId) && input.kind==="manager")))throw new Error("不能改变已被团队使用的经理类型");
       if (input.status !== undefined && !["active", "inactive"].includes(input.status)) throw new Error("数字员工状态无效");
       if(!["business","manager"].includes(input.kind || current.kind))throw new Error("旧研发类型已废弃，请显式保存为普通员工");
       delete current.repository;
@@ -720,7 +724,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(()=>{
         const ids=replacements.map(item=>item.previousId);
         if(!ids.length || new Set(ids).size!==ids.length || replacements.some(item=>this.isExtensionRemoved('plugin',item.previousId) || !item.id || item.id===item.previousId))throw new Error('插件配置已变化，请重新检查');
-        const users=state.agents.filter(item=>item.runtime?.extensionSelection?.pluginIds?.some(id=>ids.includes(id)));
+        const users=state.agents.filter(item=>item.status!=="deleted" && item.runtime?.extensionSelection?.pluginIds?.some(id=>ids.includes(id)));
         if(bindings.length!==users.length || users.some(item=>!bindings.some(binding=>binding.agentId===item.id && JSON.stringify(binding.previousRuntime)===JSON.stringify(item.runtime))))throw new Error('员工配置已变化，本次插件更新未应用');
         for(const binding of bindings)this.updateAgent(binding.agentId,{runtime:binding.runtime});
         const actor={type:'system',id:'plugin-updater',name:'插件更新'};
@@ -749,7 +753,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(()=>{
         const keys=replacements.map(item=>`${item.kind}:${item.previousId}`);
         if(new Set(keys).size!==keys.length || replacements.some(item=>!['plugin','mcp'].includes(item.kind) || !item.id || !item.previousId || item.id===item.previousId || this.isExtensionRemoved(item.kind,item.previousId) || this.isExtensionRemoved(item.kind,item.id)))throw new Error('扩展配置已变化，请重新导入');
-        const users=state.agents.filter(item=>replacements.some(next=>item.runtime?.extensionSelection?.[next.kind==='plugin'?'pluginIds':'mcpIds']?.includes(next.previousId)));
+        const users=state.agents.filter(item=>item.status!=="deleted" && replacements.some(next=>item.runtime?.extensionSelection?.[next.kind==='plugin'?'pluginIds':'mcpIds']?.includes(next.previousId)));
         if(bindings.length!==users.length || new Set(bindings.map(item=>item.agentId)).size!==bindings.length || users.some(item=>!bindings.some(binding=>binding.agentId===item.id && JSON.stringify(binding.previousRuntime)===JSON.stringify(item.runtime))))throw new Error('员工配置已变化，本次导入未应用');
         for(const binding of bindings)this.updateAgent(binding.agentId,{runtime:binding.runtime});
         for(const item of replacements)this.removeExtension({kind:item.kind,id:item.previousId,name:item.name});
@@ -761,7 +765,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     replaceMcpExtension(previousId,replacement,bindings) {
       return this.transaction(()=>{
         if(this.isExtensionRemoved('mcp',previousId) || !replacement?.id || replacement.id===previousId)throw new Error('MCP 已变化，请刷新后重新编辑');
-        const users=state.agents.filter(item=>item.runtime?.extensionSelection?.mcpIds?.includes(previousId));
+        const users=state.agents.filter(item=>item.status!=="deleted" && item.runtime?.extensionSelection?.mcpIds?.includes(previousId));
         if(bindings.length!==users.length || users.some(item=>!bindings.some(binding=>binding.agentId===item.id && JSON.stringify(binding.previousRuntime)===JSON.stringify(item.runtime))))throw new Error('员工配置已变化，请刷新后重新编辑 MCP');
         for(const binding of bindings)this.updateAgent(binding.agentId,{runtime:binding.runtime});
         this.removeExtension({kind:'mcp',id:previousId,name:replacement.name});
@@ -774,7 +778,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (!["plugin", "mcp"].includes(kind) || typeof extensionId !== "string" || !extensionId) throw new Error("扩展标识无效");
       if (this.isExtensionRemoved(kind, extensionId)) throw new Error("此插件或 MCP 已删除");
       const key = kind === "plugin" ? "pluginIds" : "mcpIds";
-      const users = state.agents.filter(item => item.runtime?.extensionSelection?.[key]?.includes(extensionId));
+      const users = state.agents.filter(item => item.status !== "deleted" && item.runtime?.extensionSelection?.[key]?.includes(extensionId));
       if (users.length) throw new Error(`仍被数字员工「${users.map(item => item.name).join("、")}」使用，请先在员工中移除选择后再删除`);
       const entry = { kind, id: extensionId, name: text(name, "扩展名称"), removedAt: now() };
       return this.transaction(() => {
@@ -784,15 +788,14 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       });
     },
     deleteAgent(agentId) {
-      const current = getAgent(agentId);
-      if (!current) throw new Error("数字员工不存在");
-      if (state.teams.some(team => team.managerAgentId === agentId || team.memberAgentIds.includes(agentId))) throw new Error("数字员工仍被团队使用，请先调整或删除团队");
-      if (state.tasks.some(task => task.managerAgentId === agentId || task.memberSnapshots?.some(item => item.id === agentId) || Object.values(task.nodeAssignments || {}).includes(agentId)) || state.runs.some(run => run.manager?.sourceAgentId === agentId || run.participants?.some(item => item.id === agentId))) throw new Error("数字员工仍被任务历史引用，请保留员工以便核验历史");
-      if (state.communicationConversations?.some(thread => thread.kind === "agent" && thread.targetId === agentId) || state.communicationDeliveries?.some(item => item.agentId === agentId) || state.communicationMessages?.some(item => item.sender?.id === agentId || item.visibleToAgentIds?.includes(agentId))) throw new Error("数字员工仍被沟通历史引用，请保留员工以便核验历史");
+      const current = currentEmployee(agentId);
+      if (!current) throw new Error("数字员工不存在或已删除");
       return this.transaction(() => {
-        state.agents = state.agents.filter(item => item.id !== agentId);
-        addEvent({ type: "configuration.agent_deleted", actor: humanMember, message: "人类删除了未使用的数字员工", data: { agentId } });
-        return clone(current);
+        this.detachCommunicationMember(agentId);
+        current.status = "deleted"; current.deletedAt = now();
+        for (const team of state.teams) { team.memberAgentIds = teamMembers(team).filter(value => value !== agentId); delete team.managerAgentId; }
+        addEvent({ type: "configuration.agent_deleted", actor: humanMember, message: "人类删除了数字员工；在途任务继续使用冻结成员，历史发言保留", data: { agentId } });
+        return { id: agentId, name: current.name, status: current.status, deletedAt: current.deletedAt, historyRetained: true };
       });
     },
     listRoles: () => clone(state.roles),
@@ -819,7 +822,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     deleteRole(roleId) {
       const current = getRole(roleId);
       if (!current) throw new Error("角色不存在");
-      const users = state.agents.filter(item => item.roleIds.includes(roleId));
+      const users = state.agents.filter(item => item.status !== "deleted" && item.roleIds.includes(roleId));
       if (users.length) throw new Error(`角色仍被数字员工「${users.map(item => item.name).join("、")}」绑定，请先在员工中解除绑定后再删除`);
       return this.transaction(() => {
         state.roles = state.roles.filter(item => item.id !== roleId);
@@ -830,21 +833,68 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     deleteTeam(teamId) {
       const current = getTeam(teamId);
       if (!current) throw new Error("团队不存在");
-      if (state.tasks.some(task => task.teamId === teamId)) throw new Error("团队仍被任务引用，请保留团队以便核验历史");
-      if (state.communicationConversations?.some(thread => thread.kind === "team" && thread.targetId === teamId)) throw new Error("团队仍被沟通历史引用，请保留团队以便核验历史");
       return this.transaction(() => {
+        this.detachCommunicationTeam(teamId);
         state.teams = state.teams.filter(item => item.id !== teamId);
-        addEvent({ type: "configuration.team_deleted", actor: humanMember, message: "人类删除了未使用的团队", data: { teamId } });
-        return clone(current);
+        addEvent({ type: "configuration.team_deleted", actor: humanMember, message: "人类删除了团队；任务与群聊成员保持独立", data: { teamId } });
+        return { id: teamId, name: current.name, historyRetained: true };
       });
     },
-    createTeam(input = {}) { const members = validateTeam(input); const item = { id: id("team"), name: text(input.name, "团队名称"), mission: input.mission?.trim() || "协作完成高质量交付。", ...members, policyProfile: "local-bypass-authorized", status: "active", createdAt: now() }; state.teams.push(item); save(); return clone(item); },
-    updateTeam(teamId, input = {}) { const current = getTeam(teamId); if (!current) throw new Error("团队不存在"); const next = { ...current, ...input }, members = validateTeam(next); Object.assign(current, members, { name: text(next.name, "团队名称"), mission: next.mission, status: next.status }); save(); return clone(current); },
-    createTask(input = {}) { const workspaceRoot = this.getWorkspaceSettings().workspaceRoot; const currentTeam = getTeam(input.teamId), template = find(state.workflowTemplates, input.workflowTemplateId || state.workflowTemplates[0]?.id); if (!currentTeam || currentTeam.status !== "active" || !template) throw new Error("任务需要可用团队和工作流"); const taskId = "task_" + randomUUID(); if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定"); const workspacePath = workspaceRoot ? resolve(workspaceRoot, taskId) : text(input.workspacePath, "任务工作目录"); if (!workspaceRoot && (!isAbsolute(workspacePath) || !statSync(resolve(workspacePath)).isDirectory())) throw new Error("任务工作目录必须是存在的绝对路径"); if (input.repositorySources !== undefined) throw new Error("不再接受仓库绑定，请将仓库说明写入提示词或任务内容"); const memberSnapshots = currentTeam.memberAgentIds.map(getAgent).filter((member) => member?.status === "active").map((member) => withRoleSnapshot(employeeConfiguration(member))); if (!memberSnapshots.length) throw new Error("任务团队至少需要一位可用业务成员"); const managerSnapshot = withRoleSnapshot(employeeConfiguration(getAgent(currentTeam.managerAgentId))); if (managerSnapshot?.kind !== "manager" || managerSnapshot.status !== "active") throw new Error("团队项目经理已停用或不可用，请先选择可用经理"); if([managerSnapshot,...memberSnapshots].some(member=>!["business","manager"].includes(member.kind)))throw new Error("任务成员含旧研发类型，请先编辑为普通员工");
-      const repositories = {repositorySources:[],repositoryBindings:{}}; const effectiveTemplate = clone(template); effectiveTemplate.nodes.forEach((node) => { node.staffingGuidance ||= node.ownerRole ? `适合由熟悉${node.ownerRole}相关工作的成员承担；请结合成员提示词和能力判断。` : `选择能够完成「${node.title}」交付的成员。`; node.repositoryPath = null; }); const nodeAssignments = input.nodeAssignments ? assignments(currentTeam, effectiveTemplate, input.nodeAssignments) : {}; effectiveTemplate.nodes.forEach((node) => { node.repositoryPath = repositories.repositoryBindings[nodeAssignments[node.id]]?.path || null; }); const item = { id: taskId, workspaceManaged: Boolean(workspaceRoot), repositoryMode: "workspace", ...repositories, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), teamId: currentTeam.id, priority: input.priority || "medium", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId: currentTeam.managerAgentId, managerRuntime: runtime(input.managerRuntime || getAgent(currentTeam.managerAgentId).runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: now(), updatedAt: now() }; state.tasks.unshift(item); save(); return clone(item); },
-    archiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (current.status !== "done") throw new Error("只有已完成任务可以归档"); if (current.archivedAt) throw new Error("任务已经归档"); if (state.runs.some((run) => run.taskId === taskId && !this.canCompleteRun(run.id))) throw new Error("仍有未结束协作，不能归档"); current.archivedAt = now(); current.updatedAt = current.archivedAt; const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.archived", runId: latestRun?.id || null, message: `任务「${current.title}」已归档，交付记录仍可查看。`, data: { taskId, archivedAt: current.archivedAt } }); save(); return clone(current); },
-    unarchiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (!current.archivedAt) throw new Error("任务尚未归档"); current.archivedAt = null; current.updatedAt = now(); const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.unarchived", runId: latestRun?.id || null, message: `任务「${current.title}」已恢复至任务中心。`, data: { taskId } }); save(); return clone(current); },
-    createRun(taskId) { const currentTask = getTask(taskId); if (!currentTask || currentTask.status !== "backlog") throw new Error("Task 不能启动新的 Run"); const currentTeam = getTeam(currentTask.teamId); if (!currentTask.memberSnapshots) assignments(currentTeam, currentTask.workflowSnapshot, currentTask.nodeAssignments); const sourceManager = currentTask.managerSnapshot || getAgent(currentTask.managerAgentId || getTeam(currentTask.teamId)?.managerAgentId || managerId); if (sourceManager?.kind !== "manager" || sourceManager.status !== "active") throw new Error("项目经理不可用"); for (const employee of [sourceManager, ...(currentTask.memberSnapshots || currentTeam.memberAgentIds.map(getAgent))]) assertRuntimeEnabled(employee.runtime); const manager = { ...withRoleSnapshot(clone(sourceManager)), id: id("manager"), sourceAgentId: sourceManager.id, runtime: clone(currentTask.managerRuntime) }; const participants = [...(currentTask.memberSnapshots || getTeam(currentTask.teamId).memberAgentIds.map(getAgent)).map((item) => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...manager, type: "agent" }, clone(humanMember)]; const runId = id("run"); const item = { id: runId, workspacePath: currentTask.workspaceManaged ? resolve(currentTask.workspacePath, runId) : currentTask.workspacePath, taskId, manager, participants, status: "planning", currentFocus: null, waitingConversationId: null, waitingNodeId: null, waitingAgentId: null, pendingMessageIds: [], startedAt: now(), completedAt: null, failure: null, summary: null, deliveryReview: null }; state.runs.unshift(item); currentTask.status = "planning"; save(); return clone(item); },
+    createTeam(input = {}) {
+      const members = validateTeam(input);
+      const item = { id: id("team"), name: text(input.name, "团队名称"), mission: input.mission?.trim() || "", ...members, status: "active", createdAt: now() };
+      state.teams.push(item); save(); return clone(item);
+    },
+    updateTeam(teamId, input = {}) {
+      const current = getTeam(teamId); if (!current) throw new Error("团队不存在");
+      if (Object.hasOwn(input, "managerAgentId")) throw new Error("团队不再指定项目经理，请使用 memberAgentIds");
+      const next = { ...current, ...input }; delete next.managerAgentId;
+      const members = validateTeam({ ...next, memberAgentIds: input.memberAgentIds === undefined ? teamMembers(current) : input.memberAgentIds });
+      if (next.status !== undefined && !["active", "inactive"].includes(next.status)) throw new Error("团队状态无效");
+      const name = text(next.name, "团队名称");
+      return this.transaction(() => {
+        this.detachCommunicationTeam(teamId);
+        Object.assign(current, members, { name, mission: next.mission, status: next.status }); delete current.managerAgentId;
+        save(); return this.listTeams().find(item => item.id === teamId);
+      });
+    },
+    createTask(input = {}) {
+      if (Object.hasOwn(input, "teamId")) throw new Error("任务不再绑定团队，请将团队员工加入 memberAgentIds");
+      if (input.repositorySources !== undefined) throw new Error("不再接受仓库绑定，请将仓库说明写入提示词或任务内容");
+      const selectedIds = memberIds(input.memberAgentIds, { active: true }), members = selectedIds.map(getAgent);
+      const managers = members.filter(member => member.kind === "manager");
+      if (managers.length !== 1) throw new Error("任务成员必须且只能包含一位可用项目经理");
+      const managerAgentId = managers[0].id;
+      if (members.some(member => !["business", "manager"].includes(member.kind))) throw new Error("任务成员含旧研发类型，请先编辑为普通员工");
+      const template = find(state.workflowTemplates, input.workflowTemplateId || state.workflowTemplates[0]?.id);
+      if (!template) throw new Error("任务需要可用工作流");
+      const workspaceRoot = this.getWorkspaceSettings().workspaceRoot, taskId = "task_" + randomUUID();
+      if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定");
+      const workspacePath = workspaceRoot ? resolve(workspaceRoot, taskId) : text(input.workspacePath, "任务工作目录");
+      if (!workspaceRoot && (!isAbsolute(workspacePath) || !statSync(resolve(workspacePath)).isDirectory())) throw new Error("任务工作目录必须是存在的绝对路径");
+      const memberSnapshots = members.filter(member => member.id !== managerAgentId).map(member => withRoleSnapshot(employeeConfiguration(member)));
+      const managerSnapshot = withRoleSnapshot(employeeConfiguration(getAgent(managerAgentId)));
+      const repositories = { repositorySources: [], repositoryBindings: {} }, effectiveTemplate = clone(template);
+      effectiveTemplate.nodes.forEach(node => { node.staffingGuidance ||= node.ownerRole ? `适合由熟悉${node.ownerRole}相关工作的成员承担；请结合成员提示词和能力判断。` : `选择能够完成「${node.title}」交付的成员。`; node.repositoryPath = null; });
+      const nodeAssignments = input.nodeAssignments ? assignments({ memberAgentIds: selectedIds.filter(value => value !== managerAgentId) }, effectiveTemplate, input.nodeAssignments) : {};
+      const item = { id: taskId, workspaceManaged: Boolean(workspaceRoot), repositoryMode: "workspace", ...repositories, memberAgentIds: selectedIds, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), priority: input.priority || "medium", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId, managerRuntime: runtime(input.managerRuntime || managerSnapshot.runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: now(), updatedAt: now() };
+      state.tasks.unshift(item); save(); return clone(item);
+    },
+    archiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (current.status !== "done") throw new Error("只有已完成任务可以归档"); if (current.archivedAt) throw new Error("任务已经归档"); if (state.runs.some((run) => run.taskId === taskId && !this.canCompleteRun(run.id))) throw new Error("仍有未结束协作，不能归档"); current.archivedAt = now(); current.updatedAt = current.archivedAt; const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.archived", runId: latestRun?.id || null, message: `任务「${current.title}」已归档，交付记录仍可查看。`, data: { taskId, archivedAt: current.archivedAt } }); save(); return taskReadModel(current); },
+    unarchiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (!current.archivedAt) throw new Error("任务尚未归档"); current.archivedAt = null; current.updatedAt = now(); const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.unarchived", runId: latestRun?.id || null, message: `任务「${current.title}」已恢复至任务中心。`, data: { taskId } }); save(); return taskReadModel(current); },
+    createRun(taskId) {
+      const currentTask = getTask(taskId);
+      if (!currentTask || currentTask.status !== "backlog") throw new Error("Task 不能启动新的 Run");
+      const sourceManager = currentTask.managerSnapshot;
+      if (sourceManager?.kind !== "manager" || !Array.isArray(currentTask.memberSnapshots)) throw new Error("任务缺少冻结成员或负责经理，请重新创建任务");
+      const frozen = [sourceManager, ...currentTask.memberSnapshots];
+      if (frozen.some(employee => getAgent(employee.id)?.status === "deleted")) throw new Error("任务尚未开始且有成员已删除，请重新选择成员创建任务");
+      for (const employee of frozen) assertRuntimeEnabled(employee.runtime);
+      const manager = { ...withRoleSnapshot(clone(sourceManager)), id: id("manager"), sourceAgentId: sourceManager.id, runtime: clone(currentTask.managerRuntime) };
+      const participants = [...currentTask.memberSnapshots.map(item => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...manager, type: "agent" }, clone(humanMember)];
+      const runId = id("run"), item = { id: runId, workspacePath: currentTask.workspaceManaged ? resolve(currentTask.workspacePath, runId) : currentTask.workspacePath, taskId, manager, participants, status: "planning", currentFocus: null, waitingConversationId: null, waitingNodeId: null, waitingAgentId: null, pendingMessageIds: [], startedAt: now(), completedAt: null, failure: null, summary: null, deliveryReview: null };
+      state.runs.unshift(item); currentTask.status = "planning"; save(); return clone(item);
+    },
     updateRun(runId, patch = {}) { if (patch.status === "completed") throw new Error("完成必须由人类确认"); const current = getRun(runId); if (!current) throw new Error("Run 不存在"); if (patch.status && patch.status !== current.status && !runTransitions[current.status]?.includes(patch.status)) throw new Error(`Run 不能从 ${current.status} 变更为 ${patch.status}`); Object.assign(current, clone(patch)); save(); return clone(current); }, setTaskStatus(taskId, status) { if (status === "done") throw new Error("完成必须由人类确认"); const current = getTask(taskId); if (!current || (status !== current.status && !taskTransitions[current.status]?.includes(status))) throw new Error("Task 状态变更不合法"); current.status = status; current.updatedAt = now(); save(); return clone(current); },
     getRunRecoveryPlan(runId) {
       const current = getRun(runId);
@@ -948,7 +998,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       save();
       return clone(currentTrace);
     }, failNode(runId, nodeId, traceId, error) { const current = getRun(runId); assertNode(current, nodeId); this.completeTrace(traceId, { status: "failed", error }); save(); },
-    addMessage(input = {}) { const current = getRun(input.runId); if (!current) throw new Error("Run 不存在"); const recipient = input.recipientHuman ? { type: "human", id: "human_operator", name: "你" } : input.recipientAgentId ? runAgent(current, input.recipientAgentId) : { type: "team", id: "team", name: "全体团队" }; if (!recipient) throw new Error("消息接收者不属于当前 Run"); const item = { id: id("message"), runId: current.id, conversationId: input.conversationId || `conversation_${current.id}_${input.workflowNodeId || "general"}`, workflowNodeId: input.workflowNodeId || null, sender: input.sender || { type: "human", id: "human_operator", name: "你" }, recipient: { type: recipient.type || "agent", id: recipient.id, name: recipient.name }, traceId: input.traceId || null, replyToMessageId: input.replyToMessageId || null, questionType: input.questionType || null, routingReason: input.routingReason || null, consideredMemberIds: input.consideredMemberIds || [], kind: input.kind || "instruction", content: text(input.content, "消息内容"), createdAt: now() }; state.messages.push(item); addEvent({ type: "message.sent", runId: current.id, actor: item.sender, message: item.content, data: { messageId: item.id, conversationId: item.conversationId, workflowNodeId: item.workflowNodeId } }); return clone(item); }, waitForHuman(runId, nodeId, conversationId) { const current = getRun(runId); current.waitingNodeId = nodeId; current.waitingAgentId = null; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待人类澄清", updatedAt: now() }; current.status = "awaiting_human"; getTask(current.taskId).status = "awaiting_human"; save(); }, resumeHuman(runId, messageId) { const current = getRun(runId), message = find(state.messages, messageId); if (!current?.waitingNodeId || !message || message.conversationId !== current.waitingConversationId) throw new Error("当前 Run 没有匹配的人类澄清"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; current.status = "running"; getTask(current.taskId).status = "running"; save(); return clone(current); }, waitForAgent(runId, nodeId, agentId, conversationId) { const current = getRun(runId); if (!runAgent(current, agentId)) throw new Error("被咨询数字员工不属于当前 Run"); current.waitingNodeId = nodeId; current.waitingAgentId = agentId; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待角色协作答复", updatedAt: now() }; save(); }, resumeAgent(runId, conversationId) { const current = getRun(runId); if (!current?.waitingNodeId || !current.waitingAgentId || current.waitingConversationId !== conversationId) throw new Error("当前 Run 没有匹配的角色协作"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; save(); return clone(current); },
+    addMessage(input = {}) { const current = getRun(input.runId); if (!current) throw new Error("Run 不存在"); const recipient = input.recipientHuman ? { type: "human", id: "human_operator", name: "你" } : input.recipientAgentId ? runAgent(current, input.recipientAgentId) : { type: "team", id: "team", name: "全体团队" }; if (!recipient) throw new Error("消息接收者不属于当前 Run");
+        const item = { id: id("message"), runId: current.id, conversationId: input.conversationId || `conversation_${current.id}_${input.workflowNodeId || "general"}`, workflowNodeId: input.workflowNodeId || null, sender: input.sender || { type: "human", id: "human_operator", name: "你" }, recipient: { type: recipient.type || "agent", id: recipient.id, name: recipient.name }, traceId: input.traceId || null, replyToMessageId: input.replyToMessageId || null, questionType: input.questionType || null, routingReason: input.routingReason || null, consideredMemberIds: input.consideredMemberIds || [], kind: input.kind || "instruction", content: text(input.content, "消息内容"), createdAt: now() }; state.messages.push(item); addEvent({ type: "message.sent", runId: current.id, actor: item.sender, message: item.content, data: { messageId: item.id, conversationId: item.conversationId, workflowNodeId: item.workflowNodeId } }); return clone(item); }, waitForHuman(runId, nodeId, conversationId) { const current = getRun(runId); current.waitingNodeId = nodeId; current.waitingAgentId = null; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待人类澄清", updatedAt: now() }; current.status = "awaiting_human"; getTask(current.taskId).status = "awaiting_human"; save(); }, resumeHuman(runId, messageId) { const current = getRun(runId), message = find(state.messages, messageId); if (!current?.waitingNodeId || !message || message.conversationId !== current.waitingConversationId) throw new Error("当前 Run 没有匹配的人类澄清"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; current.status = "running"; getTask(current.taskId).status = "running"; save(); return clone(current); }, waitForAgent(runId, nodeId, agentId, conversationId) { const current = getRun(runId); if (!runAgent(current, agentId)) throw new Error("被咨询数字员工不属于当前 Run"); current.waitingNodeId = nodeId; current.waitingAgentId = agentId; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待角色协作答复", updatedAt: now() }; save(); }, resumeAgent(runId, conversationId) { const current = getRun(runId); if (!current?.waitingNodeId || !current.waitingAgentId || current.waitingConversationId !== conversationId) throw new Error("当前 Run 没有匹配的角色协作"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; save(); return clone(current); },
     requestReplan(runId, messageId) { const current = getRun(runId); current.pendingMessageIds.push(messageId); save(); }, pendingMessages(runId) { const current = getRun(runId); return clone(state.messages.filter((item) => current?.pendingMessageIds.includes(item.id))); }, consumePendingMessages(runId) { getRun(runId).pendingMessageIds = []; save(); }, noteReassessment(runId, nodeIds, reason = "项目经理确认变更影响") { const current = getRun(runId); for (const nodeId of nodeIds) assertNode(current, nodeId); addEvent({ type: "run.reassessment_requested", runId, message: reason, data: { nodeIds } }); save(); return clone(current); },
     listDefects(runId = null) { return clone(state.defects.filter((item) => !runId || item.runId === runId)); }, updateDefect(runId, defectId) { const current = find(state.defects, defectId); if (!current || current.runId !== runId) throw new Error("Defect 不存在"); throw new Error("Defect 是 Trace-bound 审计事实，不能直接修改；请通过修复和回归 Trace 更新状态"); },
     cancelRun(runId, reason) {

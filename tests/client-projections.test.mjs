@@ -264,6 +264,13 @@ test("shared client projections tolerate incomplete workspace read models", () =
   assert.deepEqual(collaborationRecords({}), []);
 });
 
+test('deleted employees leave current roster but their exact historical console identity remains resolvable',()=>{
+ const manager={id:'run-manager',sourceAgentId:'source-manager',type:'agent'},worker={id:'worker',type:'agent'};
+ const workspace={run:{manager,participants:[manager,worker]},deletedAgentIds:['source-manager','worker'],traces:[{agent:worker}]};
+ assert.deepEqual(workspaceAgents(workspace),[]);
+ assert.deepEqual(workspaceAgents(workspace,[],{includeDeleted:true}),[manager,worker]);
+});
+
 test("shared client role status lets a terminal Run override a stale active Trace", () => {
   const trace = { id: "trace-1", agentId: "analyst", workflowNodeId: "requirements", status: "running" };
   const active = roleExecutionStatus({ status: "running" }, [trace], "analyst");

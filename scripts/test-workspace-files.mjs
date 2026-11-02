@@ -42,10 +42,10 @@ try{
   const employee=(await create('agents',{name:'目录开发者',capabilities:['Node.js','代码实现'],systemPrompt:'实际实现并运行测试，不猜测命令结果。只在任务工作目录交付，不push、不修改配置凭据。',runtime:{profileId:profile.id}})).agent;
   const tester=(await create('agents',{name:'独立代码验证者',capabilities:['独立测试','Node.js'],systemPrompt:'独立读取实现与测试，不相信作者摘要；运行真实测试和额外边界，记录失败与未验证项，不替作者做实现。只在任务工作目录交付。',runtime:{profileId:profile.id}})).agent;
   const manager=(await create('agents',{name:'研发协调者',kind:'manager',systemPrompt:'工作流只有build和verify。先派工目录开发者执行build，收到交接后派工独立代码验证者执行verify，收到独立通过报告后提交人类验收。业务问题交回对应成员，不自己实现或测试。',runtime:{profileId:profile.id}})).agent;
-  const team=(await create('teams',{name:'全工作目录真实研发验收',managerAgentId:manager.id,memberAgentIds:[employee.id,tester.id]})).team;
+  const team=(await create('teams',{name:'全工作目录真实研发验收',memberAgentIds: [...new Set([employee.id,tester.id, manager.id])]})).team;
   const flow=(await create('workflows',{name:'自定义目录代码交付',nodes:[{id:'build',title:'实现工具',staffingGuidance:'选择目录开发者',artifactPaths:['src/','tests/','reports/','artifacts/preparation/assets/'],deliverable:`实现 src/title-index.mjs 导出 summarizeTitles(rows)，仅接受数组，每项必须为含非空字符串title的对象；返回按trim后title的首次出现顺序去重的标题数组。编写 tests/title-index.test.mjs，至少6个node:test覆盖合法与非法输入。先实际执行 node -e 'process.exit(7)'，作为预期失败记录；再执行真实 node --test。将样例结果写入根 summary.json，命令与结果写 reports/build.md。将现成真实1秒媒体 ${clip} 复制到 artifacts/preparation/assets/source.mp4，不重新下载。所有产物均在任务工作目录，不创建docs目录。`,dependsOn:[]},{id:'verify',title:'独立验证',staffingGuidance:'选择独立代码验证者，不得为代码作者',artifactPaths:['reports/'],deliverable:'独立读取src和tests中的实际文件，运行node --test，独立检查空数组、重复标题、保留顺序、中文、trim、非法对象/标题/非数组；可新增 tests/independent.test.mjs，但不能改实现以掩盖问题。写 reports/review.md，清楚记录真实命令、通过数、预期失败及未验证项；用ffprobe验证 artifacts/preparation/assets/source.mp4可读且约1秒。失败交回开发者，成功交接经理。',dependsOn:['build']}]})).workflowTemplate;
   assert.deepEqual(flow.nodes[0].artifactPaths,['src/','tests/','reports/','artifacts/preparation/assets/']);
-  task=(await create('tasks',{title:'WORKSPACE-85｜自定义目录代码开发与独立测试',objective:'按工作流交付可运行标题去重工具、独立测试报告、根结果文件及真实样例媒体；全部位于非docs目录，交付后等待人类确认。',teamId:team.id,workflowTemplateId:flow.id})).task;
+  task=(await create('tasks',{title:'WORKSPACE-85｜自定义目录代码开发与独立测试',objective:'按工作流交付可运行标题去重工具、独立测试报告、根结果文件及真实样例媒体；全部位于非docs目录，交付后等待人类确认。',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id})).task;
   run=(await cli(['tasks','start',task.id])).run;testerId=tester.id;
   }
   const state=()=>api('/api/runs/'+run.id+'/workspace?view=summary');

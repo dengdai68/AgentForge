@@ -308,7 +308,7 @@ async function runPackagedTask(page) {
   const connection = (await api(page,'/api/settings/runtime-profiles')).profiles.find(item=>item.provider==='claude-code');
   const worker = await api(page, "/api/agents", { method: "POST", body: { name: "打包验证员工", capabilities: ["本地文件交付"], kind: "business", runtime: { profileId: connection.id } } });
   const manager = await api(page, "/api/agents", { method: "POST", body: { name: "打包任务经理", kind: "manager", runtime: { profileId: connection.id } } });
-  const team = await api(page, "/api/teams", { method: "POST", body: { name: "打包 Beta 验证团队", memberAgentIds: [worker.agent.id], managerAgentId: manager.agent.id } });
+  const team = await api(page, "/api/teams", { method: "POST", body: { name: "打包 Beta 验证团队", memberAgentIds: [...new Set([worker.agent.id, manager.agent.id])] } });
   const workflow = await api(page, "/api/workflow-templates", { method: "POST", body: { name: "打包 Beta 单节点验证", nodes: [{ id: "packaged_verify", title: "打包交付验证", staffingGuidance: "选择能够生成并核验本地文件的业务成员", dependsOn: [], artifactPaths: ["docs/packaged/"] }] } });
   const title = "PACKAGE-E2E｜本机 Beta 交付闭环";
 
@@ -324,7 +324,8 @@ async function runPackagedTask(page) {
   await form.locator('.task-acceptance summary').click();
   await form.locator('[name="acceptanceCriteria"]').fill("生成可读取的 docs/packaged/report.md\n项目经理根据节点交接提交人类验收");
   await form.locator('[name="workflowTemplateId"]').selectOption(workflow.workflowTemplate.id);
-  await form.locator('[name="teamId"]').selectOption(team.team.id);
+  await form.locator('#task-members').fill(team.team.name);
+  await form.locator(`[data-add-extension="${team.team.id}"]`).click();
   assert.equal(await form.locator("#node-assignment-panel").count(), 0);
   assert.equal(await form.locator('[name^="nodeAssignment_"]').count(), 0);
   await form.getByRole("button", { name: "创建并开始", exact: true }).click();
@@ -568,17 +569,17 @@ async function runPackagedTask(page) {
   assert.ok(cliTasks.items.some(task => task.id === started.task.id));
   assert.ok(cliTasks.items.every(task => !Object.hasOwn(task, 'objective') && !Object.hasOwn(task, 'workflowSnapshot')));
   const detail = await packagedCli(['tasks', 'get', started.task.id]);
-  assert.deepEqual(detail.team, { id: team.team.id, name: team.team.name });
+  assert.equal(Object.hasOwn(detail, 'team'), false);
+  assert.deepEqual(detail.members.map(member=>member.id).sort(), team.team.memberAgentIds.slice().sort());
   assert.deepEqual(detail.workflow, { id: workflow.workflowTemplate.id, name: workflow.workflowTemplate.name });
   assert.deepEqual(detail.manager, { id: manager.agent.id, name: manager.agent.name });
   for (const key of ['memberSnapshots', 'managerSnapshot', 'managerRuntime', 'workflowSnapshot', 'repositoryBindings']) assert.equal(Object.hasOwn(detail, key), false, key);
   const textDetail = await packagedCli(['tasks', 'get', started.task.id], '', undefined, false);
-  assert.match(textDetail, new RegExp(`agentforge teams get ${team.team.id}`));
+  assert.match(textDetail, new RegExp(`agentforge agents get ${manager.agent.id}`));
   assert.doesNotMatch(textDetail, /memberSnapshots|systemPrompt|managerRuntime|allowedTools/);
-  assert.equal((await packagedCli(['teams', 'get', detail.team.id])).name, team.team.name);
   assert.equal((await packagedCli(['workflows', 'get', detail.workflow.id])).name, workflow.workflowTemplate.name);
   assert.equal((await packagedCli(['agents', 'get', detail.manager.id])).name, manager.agent.name);
-  const receipt = await packagedCli(['tasks', 'create', '--file', '-'], JSON.stringify({ title: 'CLI 创建回执验收', objective: '只创建元数据用于输出检查，不启动模型。', teamId: team.team.id, workflowTemplateId: workflow.workflowTemplate.id }));
+  const receipt = await packagedCli(['tasks', 'create', '--file', '-'], JSON.stringify({ title: 'CLI 创建回执验收', objective: '只创建元数据用于输出检查，不启动模型。', memberAgentIds: team.team.memberAgentIds, workflowTemplateId: workflow.workflowTemplate.id }));
   assert.deepEqual(Object.keys(receipt.task).sort(), ['id', 'status', 'title']);
   assert.equal(receipt.task.status, 'backlog');
   assert.equal((await packagedCli(['tasks', 'get', receipt.task.id])).objective, '只创建元数据用于输出检查，不启动模型。');

@@ -53,9 +53,9 @@ test('DeepSeek Harness has a fixed slot, its own effort vocabulary and frozen ro
     store.saveRuntimeProfile({ model: 'deepseek-official/deepseek-flash', effort: 'off' }, slot.id);
     const role = store.createRole({ name: 'DeepSeek Harness role', prompt: 'shared role instructions' });
     const worker = store.createAgent({ name: 'DeepSeek Harness worker', roleIds: [role.id], runtime: { profileId: slot.id } });
-    const team = store.createTeam({ name: 'DeepSeek Harness team', memberAgentIds: [worker.id] });
+    const team = store.createTeam({ name: 'DeepSeek Harness team', memberAgentIds: [worker.id,store.listAgents().find(item=>item.kind==='manager').id] });
     const flow = store.createWorkflowTemplate({ name: 'DeepSeek Harness flow', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'writer' }] });
-    const task = store.createTask({ title: 'DeepSeek Harness task', objective: 'Write', teamId: team.id, workflowTemplateId: flow.id });
+    const task = store.createTask({ title: 'DeepSeek Harness task', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
     store.saveRuntimeProfile({ model: 'next', effort: 'high', enabled: false }, slot.id);
     assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.effort, 'off');
     assert.equal(store.getTask(task.id).memberSnapshots[0].roleSnapshots[0].prompt, 'shared role instructions');

@@ -26,7 +26,7 @@ const initialRoute = routeFromLocation();
 const state = {
   agents: [], teams: [], tasks: [], runs: [], events: [], workflowTemplates: [], roles: [],
   workspace: null, selectedRunId: initialRoute.runId, selectedAgentId: null,
-  taskSearch: { name: "", status: "all", teamId: "" }, taskArchiveView: Boolean(initialRoute.taskArchiveView),
+  taskSearch: { name: "", status: "all" }, taskArchiveView: Boolean(initialRoute.taskArchiveView),
   currentView: initialRoute.view, manualPage: initialRoute.manualPage || "data-model",
   settingsPage: initialRoute.settingsPage || "general",
   selectedChatId: initialRoute.chatId || null,
@@ -373,7 +373,7 @@ function renderOverview() {
           <div><span class="member-name">${esc(agent.name)}</span><span class="member-role">${agent.type === "human" || agent.id === "human_operator" ? "本机人类" : providerLabel(agent)}</span></div>
           <span class="member-status">${agent.type === "human" || agent.id === "human_operator" ? "人类成员" : `● ${agent.status === "active" ? "可用" : "停用"}`}</span>
         </div>`).join("") || `<div class="directory-empty" role="status"><strong>还没有团队</strong>先创建业务数字员工，再组合成团队。</div>`}
-      ${team ? `<div class="sysrole-note">每次 Run 冻结团队成员与所选项目经理；最终交付由人类确认。</div>` : ""}
+      ${team ? `<div class="sysrole-note">团队用于批量选人；任务与群聊独立保存员工。</div>` : ""}
     </div>`;
 
   $("#task-panel").innerHTML = `
@@ -390,10 +390,9 @@ function renderOverview() {
 }
 
 /* ---------- 任务中心 ---------- */
-function taskMatchesSearch(task, { name = "", status = "all", teamId = "" } = {}) {
+function taskMatchesSearch(task, { name = "", status = "all" } = {}) {
   return String(task.title || "").toLocaleLowerCase().includes(name.trim().toLocaleLowerCase())
-    && (status === "all" || task.status === status)
-    && (!teamId || (task.teamId || task.team?.id) === teamId);
+    && (status === "all" || task.status === status);
 }
 
 function renderTasks() {
@@ -409,7 +408,6 @@ function renderTasks() {
     $("#task-filter-bar").innerHTML = `<form id="task-search-form" class="task-search-form" role="search" aria-label="搜索任务">
       <label class="task-search-name"><span class="sr-only">任务名称</span><input type="search" name="name" placeholder="任务名称" value="${esc(search.name || "")}" /></label>
       <label><span class="sr-only">任务状态</span><select name="status"><option value="all">全部状态</option>${["backlog", "planning", "running", "awaiting_human", "review", "awaiting_acceptance", "paused", "blocked", "failed", "done", "cancelled"].map((id) => `<option value="${id}" ${search.status === id ? "selected" : ""}>${statusText[id]}</option>`).join("")}</select></label>
-      <label><span class="sr-only">团队</span><select name="teamId"><option value="">全部团队</option></select></label>
       <button type="submit" class="primary-button">搜索</button><button type="reset" class="ghost-button">重置</button>
       <span class="task-directory-actions"></span>
     </form>`;
@@ -419,15 +417,6 @@ function renderTasks() {
     : `<button type="button" class="ghost-button" data-task-center-page="archive">归档历史</button><button type="button" class="primary-button" data-action="new-task">＋ 新建任务</button>`;
   const actionHost = $("#task-search-form .task-directory-actions");
   if (actionHost.innerHTML !== actionMarkup) actionHost.innerHTML = actionMarkup;
-  const teamSelect = $("#task-search-form select[name='teamId']");
-  const teams = new Map(state.tasks.map((task) => [task.teamId || task.team?.id, task.team?.name]).filter(([id]) => id));
-  const options = `<option value="">全部团队</option>${[...teams].map(([id, name]) => `<option value="${esc(id)}">${esc(name || "未命名团队")}</option>`).join("")}`;
-  if (teamSelect && teamSelect.innerHTML !== options) {
-    const selected = mountSearch ? state.taskSearch?.teamId || "" : teamSelect.value;
-    teamSelect.innerHTML = options;
-    if (selected && !teams.has(selected)) teamSelect.add(new Option("团队已不在当前列表", selected));
-    teamSelect.value = selected;
-  }
   const rows = (archiveView ? archivedTasks : activeTasks).filter((task) => taskMatchesSearch(task, state.taskSearch)).sort((left, right) => archiveView ? new Date(right.archivedAt) - new Date(left.archivedAt) : new Date(right.updatedAt) - new Date(left.updatedAt));
   if (!rows.length) {
     $("#tasks-table").innerHTML = `<div class="directory-empty" role="status"><strong>没有匹配的任务</strong>请调整搜索条件，或点击重置查看全部${archiveView ? "归档" : ""}任务。</div>`;
@@ -436,8 +425,8 @@ function renderTasks() {
   const pageKey = archiveView ? "archive" : "tasks";
   const page = paginate(rows, state.listPages[pageKey]);
   state.listPages[pageKey] = page.page;
- $("#tasks-table").innerHTML = `<table class="table task-inventory"><colgroup><col class="col-task" /><col class="col-team" /><col class="col-status" /><col class="col-updated" /><col class="col-actions" /></colgroup><thead><tr>
-      <th>任务名称</th><th>团队</th><th>状态</th><th>${archiveView ? "归档时间" : "更新"}</th><th style="text-align:right">操作</th>
+ $("#tasks-table").innerHTML = `<table class="table task-inventory"><colgroup><col class="col-task" /><col class="col-status" /><col class="col-updated" /><col class="col-actions" /></colgroup><thead><tr>
+      <th>任务名称</th><th>状态</th><th>${archiveView ? "归档时间" : "更新"}</th><th style="text-align:right">操作</th>
     </tr></thead><tbody>
     ${page.items.map((task) => {
       const run = runOfTask(task.id);
@@ -452,7 +441,6 @@ function renderTasks() {
       const action = `${openAction}${deletionNotice}${secondary}`;
       return `<tr>
         <td>${run ? `<button class="table-title task-title-link" data-open-task="${task.id}" title="${esc(task.title)}">${esc(task.title)}</button>` : `<span class="table-title">${esc(task.title)}</span>`}</td>
-        <td><span class="team-name" title="${esc(task.team?.name || "")}">${esc(task.team?.name || "—")}</span></td>
         <td>${pill(task.status)}</td>
         <td style="white-space:nowrap" title="${esc(archiveView ? exactTime(task.archivedAt) : exactTime(task.updatedAt))}">${archiveView ? exactTime(task.archivedAt) : timeAgo(task.updatedAt)}</td>
         <td><div class="table-actions">${action}</div></td>
@@ -480,7 +468,7 @@ function renderTeams() {
       <p>${esc(team.mission || "（未填写使命）")}</p>
       <div class="team-member-stack">${team.members.map((agent) => `<span class="stack-avatar ${roleColor(agent)}" title="${esc(agent.name)}">${esc(initialsOf(agent))}</span>`).join("")}</div>
       <div class="team-roles">${team.members.map((agent) => `<span class="capability">${esc(agent.name)}</span>`).join("")}</div>
-      <div class="team-footer"><span>${team.members.length} 名团队成员（含人类）</span><span>经理：${esc(team.members.find((member) => member.id === team.managerAgentId)?.name || "项目经理")}</span></div>
+      <div class="team-footer"><span>${team.members.length} 名数字员工</span></div>
     </div>`).join("") || (query ? `<div class="directory-empty" role="status"><strong>没有匹配的团队</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有团队</strong>点击右上角「创建团队」添加。</div>`);
   renderListPager("teams", page);
 }
@@ -683,7 +671,7 @@ function dataModelSvg() {
     <rect class="diagram-boundary" x="36" y="64" width="1518" height="765" rx="24" />
     <g class="diagram-edge"><path d="M422 211 L304 211" marker-end="url(#diagram-arrow)" /><text x="334" y="197">memberAgentIds[]</text>
       <path d="M700 211 L970 211" marker-end="url(#diagram-arrow)" /><text x="785" y="197">workflowSnapshot</text>
-      <path d="M422 293 L970 258" marker-end="url(#diagram-arrow)" /><text x="654" y="266">teamId</text>
+      <path d="M1175 120 L1175 88 L188 88 L188 120" marker-end="url(#diagram-arrow)" /><text x="440" y="80">memberSnapshots · managerSnapshot（不保存团队关联）</text>
       <path d="M1175 315 L1175 411" marker-end="url(#diagram-arrow)" /><text x="1190" y="368">taskId · 1:N</text>
       <path d="M1175 315 L1222 648" marker-end="url(#diagram-arrow)" /><text x="1200" y="500">nodeAssignments</text>
       <path d="M1072 532 L250 650" marker-end="url(#diagram-arrow)" /><text x="590" y="574">1:N · node / manager / consultation / reflection</text>
@@ -693,10 +681,10 @@ function dataModelSvg() {
       <path d="M1295 594 L1360 650" marker-end="url(#diagram-arrow)" /><text x="1323" y="633">1:N</text>
       <path d="M330 745 L1250 745" marker-end="url(#diagram-arrow)" /><text x="752" y="732">Trace.outputArtifactIds[] · Artifact.traceId</text>
       <path d="M1370 806 L1370 882" marker-end="url(#diagram-arrow)" /><text x="1382" y="856">storagePath</text></g>
-    <g class="diagram-node agent"><rect x="72" y="120" width="232" height="180" rx="16" /><text class="node-title" x="92" y="153">Agent</text><text class="node-field" x="92" y="182">id · name · status · kind</text><text class="node-field" x="92" y="205">runtime (Claude Code)</text><text class="node-field" x="92" y="228">skills / plugins / MCP paths</text><text class="node-note" x="92" y="270">提示词与能力定义员工工作方式</text></g>
-    <g class="diagram-node"><rect x="422" y="120" width="278" height="205" rx="16" /><text class="node-title" x="442" y="153">Team</text><text class="node-field" x="442" y="182">id · name · mission · status</text><text class="node-field" x="442" y="205">memberAgentIds[]</text><text class="node-note" x="442" y="258">仅业务数字员工；不含项目经理</text><text class="node-note" x="442" y="280">与 WorkflowTemplate 可复用</text></g>
+    <g class="diagram-node agent"><rect x="72" y="120" width="232" height="180" rx="16" /><text class="node-title" x="92" y="153">Agent</text><text class="node-field" x="92" y="182">id · name · status · kind</text><text class="node-field" x="92" y="205">runtime · roleIds[]</text><text class="node-field" x="92" y="228">skills / plugins / MCP paths</text><text class="node-note" x="92" y="270">提示词与能力定义员工工作方式</text></g>
+    <g class="diagram-node"><rect x="422" y="120" width="278" height="205" rx="16" /><text class="node-title" x="442" y="153">Team</text><text class="node-field" x="442" y="182">id · name · mission · status</text><text class="node-field" x="442" y="205">memberAgentIds[]</text><text class="node-note" x="442" y="258">数字员工集合；可无项目经理</text><text class="node-note" x="442" y="280">仅在选人时展开员工</text></g>
     <g class="diagram-node workflow"><rect x="700" y="120" width="270" height="205" rx="16" /><text class="node-title" x="720" y="153">WorkflowTemplate</text><text class="node-field" x="720" y="182">id · name · system · nodes[]</text><text class="node-field" x="720" y="205">dependsOn / handoffFrom</text><text class="node-field" x="720" y="228">deliverable · artifactPaths[]</text><text class="node-note" x="720" y="270">repositoryPath: repos/&lt;repo&gt;</text></g>
-    <g class="diagram-node task"><rect x="970" y="120" width="410" height="195" rx="16" /><text class="node-title" x="990" y="153">Task</text><text class="node-field" x="990" y="182">id · objective · workspacePath · status</text><text class="node-field" x="990" y="205">teamId · workflowTemplateId</text><text class="node-field" x="990" y="228">workflowSnapshot · nodeAssignments{}</text><text class="node-note" x="990" y="270">快照冻结历史工作流定义</text></g>
+    <g class="diagram-node task"><rect x="970" y="120" width="410" height="195" rx="16" /><text class="node-title" x="990" y="153">Task</text><text class="node-field" x="990" y="182">id · objective · workspacePath · status</text><text class="node-field" x="990" y="205">memberAgentIds[] · workflowTemplateId</text><text class="node-field" x="990" y="228">workflowSnapshot · nodeAssignments{}</text><text class="node-note" x="990" y="270">冻结成员与工作流定义</text></g>
     <g class="diagram-node run"><rect x="970" y="411" width="410" height="183" rx="16" /><text class="node-title" x="990" y="444">Run</text><text class="node-field" x="990" y="473">id · taskId · status · nodeStates{}</text><text class="node-field" x="990" y="496">manager · reflectionAgent</text><text class="node-field" x="990" y="519">waitingNode / waitingAgent / conversation</text><text class="node-note" x="990" y="557">一次真实交付的状态权威</text></g>
     <g class="diagram-node trace"><rect x="72" y="650" width="258" height="155" rx="16" /><text class="node-title" x="92" y="683">Trace</text><text class="node-field" x="92" y="712">runId · workflowNodeId · agentId</text><text class="node-field" x="92" y="735">type · status · tracePath</text><text class="node-note" x="92" y="770">每次 Claude Code 调用一条</text></g>
     <g class="diagram-node message"><rect x="390" y="650" width="254" height="155" rx="16" /><text class="node-title" x="410" y="683">Message</text><text class="node-field" x="410" y="712">runId · conversationId · nodeId</text><text class="node-field" x="410" y="735">sender · recipient · kind</text><text class="node-note" x="410" y="770">协作内容；不同于 Event</text></g>
@@ -873,12 +861,11 @@ function taskDescriptionMarkup(task, view) {
   return `<h5>任务描述</h5><div id="task-description-content" class="workspace-brief"><p>${esc(text)}</p></div>${long ? `<button class="text-action" data-toggle-task-description aria-expanded="${expanded}" aria-controls="task-description-content">${expanded ? "收起" : "展开"}</button>` : ""}`;
 }
 
-function workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, artifactCount, teamName }) {
+function workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, artifactCount }) {
   const { run } = workspace;
   return `<aside id="workspace-details" class="workspace-details" aria-label="任务详情" ${view.detailsOpen ? "" : "hidden"}>
       <h4>任务详情</h4>
       <dl class="workspace-properties">
-        <div><dt>团队</dt><dd>${esc(run.task.team?.name || teamName || "当前团队")}</dd></div>
         <div><dt>工作流</dt><dd><button class="text-action task-workflow-link" data-task-workflow-details>${esc(run.task.workflowSnapshot.name || "当前工作流")} ↗</button></dd></div>
         <div><dt>当前重心</dt><dd>${esc(currentFocusNode?.title || "暂无指定重心")}</dd></div>
         <div><dt>数字员工</dt><dd>${agents.length} 位</dd></div>
@@ -948,8 +935,9 @@ function renderWorkspace() {
   const focus = workflowFocus(run, traces, defects);
   const agents = workspaceAgents(workspace, state.agents);
   const tab = view.tab;
-  if (!agents.some((agent) => agent.id === state.selectedAgentId)) state.selectedAgentId = tab === 'console' ? latestExecutedAgentId(agents,traces) : null;
-  const selected = agents.find((agent) => agent.id === state.selectedAgentId);
+  const consoleAgents = tab === 'console' ? workspaceAgents(workspace, state.agents, { includeDeleted: true }) : agents;
+  if (!consoleAgents.some((agent) => agent.id === state.selectedAgentId)) state.selectedAgentId = tab === 'console' ? latestExecutedAgentId(agents,traces) : null;
+  const selected = consoleAgents.find((agent) => agent.id === state.selectedAgentId);
   const businessArtifacts = artifacts;
   const currentFocusNode = run.currentFocus?.nodeId ? run.task.workflowSnapshot.nodes.find((node) => node.id === run.currentFocus.nodeId) : null;
   const activeStatus = ["planning", "running", "awaiting_human", "review"].includes(run.status);
@@ -987,7 +975,6 @@ function renderWorkspace() {
     </div>
     <div class="workspace-grid" id="console-panel" role="tabpanel" aria-labelledby="console-mode" ${tab !== "console" ? "hidden" : ""}>
       <nav class="role-nav" aria-label="角色与执行">
-        <div class="role-nav-heading"><strong>${esc(run.task.team?.name || state.teams.find(team => team.id === run.task.teamId)?.name || "任务团队")}</strong><span>${agents.length}</span></div>
         <div class="role-list">
           ${agents.map((agent) => {
             const execution = roleExecutionStatus(run, traces, agent.id);
@@ -1012,7 +999,7 @@ function renderWorkspace() {
     <section id="working-diff-panel" class="working-diff-panel" role="tabpanel" aria-labelledby="directory-mode" ${tab !== "diff" ? "hidden" : ""}></section>
     <section class="collaboration-panel" id="collaboration-panel" role="tabpanel" aria-labelledby="collaboration-mode" ${tab !== "collaboration" ? "hidden" : ""}></section>
     </div>
-    ${view.detailsOpen ? workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, artifactCount: businessArtifacts.length, teamName: state.teams.find((team) => team.id === run.task.teamId)?.name }) : ""}
+    ${view.detailsOpen ? workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, artifactCount: businessArtifacts.length }) : ""}
     </div>`, tab === "console" && box.dataset.runId === run.id && box.dataset.agentId === selected?.id && !box.querySelector("#console-panel")?.hidden);
   box.dataset.runId = run.id;
   box.dataset.agentId = selected?.id || "";
@@ -1067,7 +1054,7 @@ function tracePromptFallbackMarkup(traceId) {
 
 function renderConsolePage({ prepend = false } = {}) {
   if (state.currentView !== "workspace" || workspaceView().tab !== "console") return;
-  const stream = $("#trace-stream"), agent = workspaceAgents(state.workspace, state.agents).find((item) => item.id === state.selectedAgentId);
+  const stream = $("#trace-stream"), agent = workspaceAgents(state.workspace, state.agents, { includeDeleted: true }).find((item) => item.id === state.selectedAgentId);
   if (!stream || !agent) return;
   const page = consolePage(state.selectedRunId, agent.id);
   const top = stream.scrollTop, height = stream.scrollHeight, following = height - top - stream.clientHeight < 48;
@@ -2070,7 +2057,7 @@ async function resumeWorkspaceRun(runId) {
 const pathList = (value) => String(value || "").split("\n").map((item) => item.trim()).filter(Boolean);
 
 function newTaskModal() {
-  if (!state.teams.length) { toast("还没有可用团队：请先创建业务数字员工和团队。", true); return; }
+  if (!state.agents.some(agent => agent.status === "active" && agent.kind === "manager")) { toast("请先创建或启用一位项目经理。", true); return; }
   if (!state.workflowTemplates.length) { toast("还没有工作流：请先创建工作流。", true); return; }
   openModal(`
     <h2>新建任务</h2>
@@ -2085,8 +2072,7 @@ function newTaskModal() {
       </details>
       <div class="form-actions task-form-footer">
         <div class="form-grid task-selectors">
-          <div class="form-field"><label for="task-team">业务团队 <b>*</b></label>
-            <select id="task-team" name="teamId">${state.teams.map((team) => `<option value="${team.id}">${esc(team.name)}</option>`).join("")}</select></div>
+          <div class="form-field"><div id="task-members-picker"></div><div class="field-error"></div></div>
           <div class="form-field"><label for="task-workflow">流程模板 <b>*</b></label>
             <select id="task-workflow" name="workflowTemplateId">${state.workflowTemplates.map((template) => `<option value="${template.id}">${esc(template.name)}</option>`).join("")}</select></div>
         </div>
@@ -2096,6 +2082,11 @@ function newTaskModal() {
     </form>`);
   $("#modal-content").closest(".modal").classList.add("task-create-modal");
   const form = $("#task-form");
+  const candidates = state.agents.filter(agent => agent.status === "active");
+  const teams = state.teams.filter(team => team.status === "active").map(team => ({ ...team, description: `${team.memberAgentIds.length} 位员工 · 团队`, selectionKind: "team" }));
+  let selectedMembers = [];
+  const expandMembers = item => item.selectionKind === 'team' ? item.memberAgentIds.filter(value => candidates.some(agent => agent.id === value)) : [item.id];
+  const memberSelection = createEmployeeMultiSelect($('#task-members-picker'), { id: 'task-members', label: '任务成员 *', placeholder: '添加团队或数字员工', esc, items: [...teams, ...candidates], detail: item => `<small>${esc(item.selectionKind === 'team' ? item.description : item.kind === 'manager' ? '项目经理' : item.description || '数字员工')}</small>`, expand: expandMembers, available: item => candidates.filter(agent => agent.kind === 'manager' && new Set([...selectedMembers, ...expandMembers(item)]).has(agent.id)).length <= 1, reason: () => '任务只允许一位项目经理，请单独添加该团队的其他员工', onChange: values => { selectedMembers = values; } });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     clearInvalid(form);
@@ -2106,10 +2097,13 @@ function newTaskModal() {
     const criteriaError = acceptanceCriteria.length > 20 ? "验收标准最多 20 条。" : acceptanceCriteria.some((criterion) => criterion.length > 500) ? "每条验收标准不能超过 500 字符。" : "";
     if (criteriaError) { form.querySelector(".task-acceptance").open = true; setInvalid(form.elements.acceptanceCriteria, criteriaError); valid = false; }
 
+    const memberAgentIds = memberSelection.value();
+    if (candidates.filter(agent => memberAgentIds.includes(agent.id) && agent.kind === "manager").length !== 1) { setInvalid($('#task-members'), "任务成员必须包含一位项目经理。"); valid = false; }
     if (!valid) return;
     try {
       const data = new FormData(form);
       const input = Object.fromEntries(data);
+      input.memberAgentIds = memberAgentIds;
       input.acceptanceCriteria = acceptanceCriteria;
       const created = await api("/api/tasks", { method: "POST", body: JSON.stringify(input) });
       closeModal();
@@ -2127,7 +2121,7 @@ function workflowNodeRow(node, index, allNodes) {
     <div class="form-field"><label>人员需求提示 <b>*</b></label><textarea name="nodeStaffingGuidance" placeholder="例如：熟悉测试方案设计、能复现问题并提供证据；由项目经理判断具体人选。">${esc(node.staffingGuidance || "")}</textarea></div></div>
     <div class="form-field"><label>交付定义 <b>*</b></label><textarea name="nodeDeliverable" placeholder="用自然语言说明此节点要交付什么、如何被下游使用。">${esc(node.deliverable || "")}</textarea><div class="field-hint">供负责该节点的员工理解目标和交接要求。</div></div>
     <div class="form-grid compact-grid"><div class="form-field"><label>建议交付位置（每行一条）</label><textarea name="nodeArtifactPaths" placeholder="artifacts/media/\nreports/">${esc((node.artifactPaths || []).join("\n"))}</textarea><div class="field-hint">工作目录内的相对路径，目录由工作流约定；可留空，不限定 docs，也不是文件操作或 Artifact 接纳白名单。</div></div>
-    <div class="form-field"><label>代码仓库</label><p class="field-hint">从节点分配的研发数字员工绑定配置派生，不由工作流指定。</p></div></div>
+    <div class="form-field"><label>代码仓库</label><p class="field-hint">由员工根据任务与提示词准备，不绑定工作流。</p></div></div>
     <div class="form-field"><label>依赖节点（可多选）</label><select name="nodeDependencies" multiple size="${Math.min(Math.max(candidates.length, 1), 3)}">${candidates.map((candidate) => `<option value="${esc(candidate.id)}" ${(node.dependsOn || []).includes(candidate.id) ? "selected" : ""}>${esc(candidate.id)} · ${esc(candidate.title || `节点 ${candidate.id}`)}</option>`).join("")}</select><div class="field-hint">供项目经理安排交接顺序时参考。</div></div>
   </details>`;
 }
@@ -2263,7 +2257,7 @@ function configurationDeletionModal(kind, id) {
   const label = kind === "agent" ? "数字员工" : kind === "role" ? "角色" : "团队";
   const hint = kind === "role"
     ? "仍有员工绑定（含停用员工）时会拒绝删除并列出绑定员工，请先在员工中解除绑定；已冻结任务中的角色提示词快照保留，历史仍可核验。"
-    : "仍被团队、任务或沟通历史引用时会拒绝删除；不会删除外部工作文件、Runtime 凭据或改写历史。";
+    : kind === "agent" ? "从当前员工、团队与群聊中移除；在途任务继续执行，历史对话保留。" : "仅删除团队标识，任务与已创建群聊的成员及历史保留。";
   openModal(`<h2>删除${label}</h2><p class="modal-intro">确认删除「${esc(item.name)}」？此操作不可恢复。</p><p class="field-hint">${hint}</p><p data-delete-error role="alert"></p><div class="form-actions"><button class="ghost-button" data-close-modal>取消</button><button class="small-button danger" data-confirm-configuration-delete>删除${label}</button></div>`);
   const button = $("[data-confirm-configuration-delete]"), message = $("[data-delete-error]");
   button.addEventListener("click", async () => {
@@ -2317,46 +2311,23 @@ function mountEmployeePicker(host, { agents, selectedIds, name, inputId, multipl
 }
 
 function teamModal(existing = null) {
-  const managers = state.agents.filter(agent => agent.kind === "manager" && agent.status === "active");
-  if (!managers.length) { toast("还没有可用项目经理，请先在数字员工中创建或启用一位项目经理。", true); return; }
-  const selectedManagerId = existing ? existing.managerAgentId : managers[0].id;
-  const managerOptions = state.agents.filter(agent => agent.kind === "manager" && (agent.status === "active" || agent.id === selectedManagerId));
-  const memberOptions = state.agents.filter(agent => agent.kind !== "manager" && (agent.status === "active" || existing?.memberAgentIds.includes(agent.id)));
   openModal(`
     <h2>${existing ? "编辑团队" : "创建团队"}</h2>
-    <p class="modal-intro">团队包含业务成员、你选择的项目经理和本机用户。项目经理负责人员协调和工作流收束，不判断业务结果。</p>
     <form id="team-form" novalidate>
-      <div class="form-field full"><label>团队名称 <b>*</b></label>
-        <input name="name" value="${esc(existing?.name || "")}" placeholder="例如：产品交付组" /><div class="field-error"></div></div>
-      <div class="form-field full"><label>团队使命</label>
-        <textarea name="mission" placeholder="这个团队负责什么类型的交付？（帮助后续任务分派）">${esc(existing?.mission || "")}</textarea></div>
-      <div class="form-field full"><label for="team-manager-search">团队项目经理</label><div id="team-manager-picker"></div><div class="field-error"></div></div>
-      <div class="form-field full"><label for="team-members-search">业务执行成员 <b>*</b>（至少 1 名）</label><div id="team-member-picker"></div><div class="field-error"></div></div>
-      <div class="form-actions">
-        <button type="button" class="ghost-button" data-close-modal>取消</button>
-        <button type="submit" class="primary-button">${existing ? "保存修改" : "创建团队"}</button>
-      </div>
+      <div class="form-field"><label>团队名称 <b>*</b></label><input name="name" value="${esc(existing?.name || "")}" placeholder="例如：产品交付组" /><div class="field-error"></div></div>
+      <div class="form-field"><label>团队使命</label><textarea name="mission">${esc(existing?.mission || "")}</textarea></div>
+      <div class="form-field"><div id="team-members-picker"></div><div class="field-error"></div></div>
+      <div class="form-actions"><button type="button" class="ghost-button" data-close-modal>取消</button><button type="submit" class="primary-button">${existing ? "保存修改" : "创建团队"}</button></div>
     </form>`);
-  const form = $("#team-form");
-  form.closest(".modal").classList.add("team-config-modal");
-  mountEmployeePicker($("#team-manager-picker"), { agents: managerOptions, selectedIds: selectedManagerId ? [selectedManagerId] : [], name: "managerAgentId", inputId: "team-manager-search", multiple: false });
-  mountEmployeePicker($("#team-member-picker"), { agents: memberOptions, selectedIds: existing?.memberAgentIds || [], name: "memberAgentIds", inputId: "team-members-search", multiple: true });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    clearInvalid(form);
-    const data = new FormData(form);
-    const memberAgentIds = data.getAll("memberAgentIds");
-    let valid = true;
-    if (!form.name.value.trim()) { setInvalid(form.name, "请填写团队名称。"); valid = false; }
-    if (!managers.some(agent => agent.id === data.get("managerAgentId"))) { setInvalid($("#team-manager-search"), "请选择一位可用的项目经理。"); valid = false; }
-    if (!memberAgentIds.some(id => state.agents.some(agent => agent.id === id && agent.status === "active" && agent.kind !== "manager"))) { setInvalid($("#team-members-search"), "至少选择一名可用业务数字员工。"); valid = false; }
-    if (!valid) return;
+  const form = $("#team-form"); form.closest('.modal').classList.add('team-config-modal');
+  const selection = createEmployeeMultiSelect($('#team-members-picker'), { id:'team-members', label:'团队员工', placeholder:'搜索并添加员工', esc, items:state.agents, selectedIds:existing?.memberAgentIds || [], detail: agent => `<small>${esc(agent.kind === 'manager' ? '项目经理' : agent.description || '数字员工')}</small>` });
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); clearInvalid(form);
+    if (!form.name.value.trim()) { setInvalid(form.name, '请填写团队名称。'); return; }
     try {
-      await api(existing ? `/api/teams/${existing.id}` : "/api/teams", { method: existing ? "PUT" : "POST", body: JSON.stringify({ name: data.get("name"), mission: data.get("mission"), managerAgentId: data.get("managerAgentId"), memberAgentIds }) });
-      closeModal();
-      toast(`团队「${data.get("name")}」${existing ? "已更新" : "已创建"}。`);
-      await refresh();
-    } catch (error) { toast(error.message, true); }
+      await api(existing ? `/api/teams/${existing.id}` : '/api/teams', { method:existing ? 'PUT' : 'POST', body:JSON.stringify({name:form.name.value,mission:form.mission.value,memberAgentIds:selection.value()}) });
+      closeModal(); toast('团队已保存。'); await refresh();
+    } catch(error) { toast(error.message,true); }
   });
 }
 
@@ -2395,18 +2366,17 @@ document.addEventListener("submit", (event) => {
   if (event.target.id !== "task-search-form") return;
   event.preventDefault();
   const fields = new FormData(event.target);
-  state.taskSearch = { name: String(fields.get("name") || ""), status: String(fields.get("status") || "all"), teamId: String(fields.get("teamId") || "") };
+  state.taskSearch = { name: String(fields.get("name") || ""), status: String(fields.get("status") || "all") };
   state.listPages[state.taskArchiveView ? "archive" : "tasks"] = 1;
   renderTasks();
 });
 document.addEventListener("reset", (event) => {
   if (event.target.id !== "task-search-form") return;
   event.preventDefault();
-  state.taskSearch = { name: "", status: "all", teamId: "" };
+  state.taskSearch = { name: "", status: "all" };
   state.listPages[state.taskArchiveView ? "archive" : "tasks"] = 1;
   event.target.elements.name.value = "";
   event.target.elements.status.value = "all";
-  event.target.elements.teamId.value = "";
   renderTasks();
 });
 

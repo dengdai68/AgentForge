@@ -25,20 +25,39 @@ export function communicationCommands(state, save) {
     if (!item) throw new Error("沟通投递不存在");
     return item;
   };
-  const members = (thread) => {
-    const team = state.teams.find((row) => row.id === thread.targetId);
-    const ids = thread.kind === "agent" ? [thread.targetId] : [...new Set([...(team?.memberAgentIds || []), team?.managerAgentId].filter(Boolean))];
-    return state.agents.filter((row) => ids.includes(row.id)).map((row) => ({ id: row.id, name: row.name, status: row.status, description: row.description }));
+  const rosterIds = thread => {
+    if (thread.kind === "agent") return [thread.targetId];
+    if (thread.memberAgentIds) return thread.memberAgentIds;
+    // Read saved legacy conversations without rewriting messages or sessions.
+    const recorded = state.communicationMessages.filter(row => row.conversationId === thread.id).flatMap(row => row.visibleToAgentIds || []);
+    const team = state.teams.find(row => row.id === thread.targetId);
+    return [...new Set(recorded.length ? recorded : [...(team?.memberAgentIds || []), team?.managerAgentId].filter(Boolean))];
+  };
+  const members = thread => rosterIds(thread).map(value => state.agents.find(row => row.id === value)).filter(row => row && row.status !== "deleted").map(row => ({
+    id: row.id, name: row.name, kind: row.kind, status: row.status, description: row.description,
+    systemPrompt: row.systemPrompt, capabilities: copy(row.capabilities || []),
+    roles: (row.roleIds || []).map(value => state.roles.find(role => role.id === value)).filter(Boolean).map(role => ({ id: role.id, name: role.name, prompt: role.prompt }))
+  }));
+  const validateMembers = ids => {
+    if (!Array.isArray(ids) || ids.some(value => typeof value !== "string") || new Set(ids).size !== ids.length) throw new Error("群聊成员必须是不重复的数字员工 ID 数组");
+    if (ids.some(value => !state.agents.some(row => row.id === value && row.status !== "deleted"))) throw new Error("群聊成员不存在或已删除");
+    return [...ids];
+  };
+  const groupName = value => { if (typeof value !== "string" || !value.trim() || value.trim().length > 100) throw new Error("群聊名称需为 1–100 字符"); return value.trim(); };
+  const detachTeam = teamId => {
+    for (const thread of state.communicationConversations.filter(row => row.kind === "team" && row.targetId === teamId)) {
+      thread.memberAgentIds = rosterIds(thread); thread.kind = "group"; delete thread.targetId;
+    }
   };
   // A failed delivery remains actionable while its scheduled backoff can retry it.
   const pending = (item) => !["done", "cancelled"].includes(item.status);
-  const summary = (thread) => {
-    const target = (thread.kind === "agent" ? state.agents : state.teams).find((row) => row.id === thread.targetId);
+  const summary = (thread, details = false) => {
+    const target = thread.kind === "agent" ? state.agents.find(row => row.id === thread.targetId) : null;
     const last = state.communicationMessages.filter((row) => row.conversationId === thread.id).at(-1);
     const rows = state.communicationMessages.filter(row => row.conversationId === thread.id);
     const readIndex = rows.findIndex(row => row.id === thread.humanReadThroughMessageId);
     const unreadCount = rows.slice(readIndex + 1).filter(row => row.sender.type === "agent").length;
-    return { id: thread.id, kind: thread.kind, targetId: thread.targetId, name: target?.name || thread.name, unreadCount, createdAt: thread.createdAt, updatedAt: thread.updatedAt, members: members(thread), preview: last?.content.slice(0, 100) || last?.attachments?.map(row => row.name).join('、').slice(0, 100) || "", pending: state.communicationDeliveries.filter((row) => row.conversationId === thread.id && pending(row)).length };
+    return { id: thread.id, kind: thread.kind === "agent" ? "agent" : "group", ...(thread.kind === "agent" ? { targetId: thread.targetId } : {}), name: target?.name || thread.name, unreadCount, createdAt: thread.createdAt, updatedAt: thread.updatedAt, members: members(thread).map(({systemPrompt,roles,...member}) => details ? { ...member, systemPrompt, roles } : member), preview: last?.content.slice(0, 100) || last?.attachments?.map(row => row.name).join('、').slice(0, 100) || "", pending: state.communicationDeliveries.filter((row) => row.conversationId === thread.id && pending(row)).length };
   };
   const page = (rows, before, limit) => {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error("分页大小必须为 1–200");
@@ -74,18 +93,44 @@ export function communicationCommands(state, save) {
       state.communicationAttachments.push(item); save(); return copy(item);
     },
     getCommunicationAttachment(key, attachmentId) { return copy(attachment(key, attachmentId)); },
-    openCommunication({ kind, targetId } = {}) {
-      if (!["agent", "team"].includes(kind)) throw new Error("请选择数字员工或团队");
-      const target = (kind === "agent" ? state.agents : state.teams).find((row) => row.id === targetId);
-      if (!target) throw new Error("沟通对象不存在");
-      let thread = state.communicationConversations.find((row) => row.kind === kind && row.targetId === targetId);
-      if (!thread) {
-        thread = { id: id("chat"), kind, targetId, name: target.name, createdAt: now(), updatedAt: now(), sessions: {}, humanReadThroughMessageId: null };
-        state.communicationConversations.push(thread); save();
+    openCommunication(input = {}) {
+      const { kind, targetId } = input;
+      if (kind === "agent") {
+        const target = state.agents.find(row => row.id === targetId && row.status !== "deleted");
+        if (!target) throw new Error("沟通对象不存在或已删除");
+        let thread = state.communicationConversations.find(row => row.kind === "agent" && row.targetId === targetId);
+        if (!thread) { thread = { id: id("chat"), kind, targetId, name: target.name, createdAt: now(), updatedAt: now(), sessions: {}, humanReadThroughMessageId: null }; state.communicationConversations.push(thread); save(); }
+        return summary(thread);
       }
-      return summary(thread);
+      if (kind !== "group" || Object.hasOwn(input, "targetId")) throw new Error("群聊独立创建，请提交 kind=group、name 和 memberAgentIds，不再绑定团队");
+      const memberAgentIds = validateMembers(input.memberAgentIds);
+      if (!memberAgentIds.length) throw new Error("新群聊至少选择一位数字员工");
+      const thread = { id: id("chat"), kind: "group", name: groupName(input.name), memberAgentIds, createdAt: now(), updatedAt: now(), sessions: {}, humanReadThroughMessageId: null };
+      state.communicationConversations.push(thread); save(); return summary(thread);
     },
-    listCommunications() { return state.communicationConversations.map(summary).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); },
+    updateCommunication(key, input = {}) {
+      const thread = conversation(key);
+      if (thread.kind === "agent") throw new Error("私聊不能编辑群名称或成员");
+      if (!input || !Object.keys(input).length || Object.keys(input).some(value => !["name", "memberAgentIds"].includes(value))) throw new Error("仅可更新群聊名称与 memberAgentIds");
+      const name = input.name === undefined ? thread.name : groupName(input.name), ids = input.memberAgentIds === undefined ? rosterIds(thread) : validateMembers(input.memberAgentIds);
+      return this.transaction(() => {
+        thread.kind = "group"; delete thread.targetId; thread.name = name; thread.memberAgentIds = ids; thread.updatedAt = now();
+        for (const item of state.communicationDeliveries.filter(row => row.conversationId === key && !ids.includes(row.agentId) && ["queued", "failed"].includes(row.status))) {
+          item.status = "cancelled"; item.nextAttemptAt = null; item.updatedAt = now(); event(item, "cancelled", "成员已离开群聊，待回复取消；历史保留");
+        }
+        save(); return summary(thread);
+      });
+    },
+    detachCommunicationTeam(teamId) { detachTeam(teamId); },
+    detachCommunicationMember(agentId) {
+      for (const thread of state.communicationConversations.filter(row => row.kind !== "agent" && rosterIds(row).includes(agentId))) {
+        thread.memberAgentIds = rosterIds(thread).filter(value => value !== agentId); thread.kind = "group"; delete thread.targetId;
+      }
+      for (const item of state.communicationDeliveries.filter(row => row.agentId === agentId && ["queued", "failed"].includes(row.status))) {
+        item.status = "cancelled"; item.nextAttemptAt = null; item.updatedAt = now(); event(item, "cancelled", "员工已删除，待回复取消；历史保留");
+      }
+    },
+    listCommunications() { return state.communicationConversations.filter(thread => thread.kind !== "agent" || state.agents.some(row => row.id === thread.targetId && row.status !== "deleted")).map(thread => summary(thread)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); },
     markCommunicationRead(key, messageId) {
       const thread = conversation(key), rows = state.communicationMessages.filter(message => message.conversationId === key);
       const next = rows.findIndex(message => message.id === messageId);
@@ -97,7 +142,7 @@ export function communicationCommands(state, save) {
     getCommunication(key, { before = null, limit = 100 } = {}) {
       const thread = conversation(key), result = page(state.communicationMessages.filter((row) => row.conversationId === key), before, limit);
       const messageIds = new Set(result.items.map((row) => row.id));
-      return { conversation: summary(thread), messages: result.items, hasMore: result.hasMore, nextBefore: result.nextBefore,
+      return { conversation: summary(thread, true), messages: result.items, hasMore: result.hasMore, nextBefore: result.nextBefore,
         deliveries: copy(state.communicationDeliveries.filter((row) => row.conversationId === key && (messageIds.has(row.messageId) || row.status !== "done"))).map(({ agentSnapshot, invocations, ...row }) => row) };
     },
     sendCommunication(key, { content = '', mentionAgentIds = [], attachmentIds = [], clientRequestId } = {}) {
@@ -114,18 +159,20 @@ export function communicationCommands(state, save) {
       }
       if (!Array.isArray(mentionAgentIds) || mentionAgentIds.some((item) => typeof item !== "string")) throw new Error("@ 成员列表无效");
       const mentioned = [...new Set(mentionAgentIds)], roster = members(thread);
-      if (mentioned.some((key) => !roster.some((member) => member.id === key && member.status === "active"))) throw new Error("@ 成员不在当前团队或已停用");
+      if (mentioned.some((key) => !roster.some((member) => member.id === key && member.status === "active"))) throw new Error("@ 成员不在当前群聊或已停用");
       const recipients = thread.kind === "agent" ? [thread.targetId] : mentioned.length ? mentioned : roster.filter((member) => member.status === "active").map((member) => member.id);
       if (recipients.some((key) => !roster.some((member) => member.id === key && member.status === "active"))) throw new Error("数字员工已停用");
+      if (!recipients.length) throw new Error("没有可回复的群聊成员，请先添加可用员工");
       for (const agentId of recipients) this.assertRuntimeEnabled(state.agents.find(row => row.id === agentId).runtime);
       const message = { id: id("chat_message"), conversationId: key, clientRequestId, sender: { type: "human", id: "human_operator", name: "你" }, content, attachments, mentionAgentIds: mentioned, visibleToAgentIds: roster.map(member => member.id), createdAt: now(), replyToMessageId: null };
-      const deliveries = recipients.map((agentId) => ({ id: id("chat_delivery"), conversationId: key, messageId: message.id, agentId, agentSnapshot: withRole(state.agents.find((row) => row.id === agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null }));
+      const deliveries = recipients.map((agentId) => ({ id: id("chat_delivery"), conversationId: key, messageId: message.id, rootMessageId: message.id, agentId, agentSnapshot: withRole(state.agents.find((row) => row.id === agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null }));
       state.communicationMessages.push(message); state.communicationDeliveries.push(...deliveries); thread.updatedAt = now(); save();
       return copy(message);
     },
     claimCommunication(key) {
       const thread = conversation(key), queue = state.communicationDeliveries.filter((row) => row.conversationId === key && !["done", "cancelled"].includes(row.status));
       // FIFO per member; an unavailable member must not block other group members.
+      for (const candidate of queue) if (["queued", "failed"].includes(candidate.status) && !members(thread).some(member => member.id === candidate.agentId && member.status === "active")) { candidate.status = "cancelled"; candidate.nextAttemptAt = null; event(candidate, "cancelled", "成员已离开或不可用，待回复取消"); save(); }
       const seen = new Set();
       const item = queue.find((candidate) => {
         if (seen.has(candidate.agentId)) return false;
@@ -145,7 +192,7 @@ export function communicationCommands(state, save) {
       const messages = all.filter((row, index) => communicationVisibility(state, thread, row).includes(item.agentId) &&
         (row.id === item.messageId || row.id === all[cutoff].replyToMessageId ||
           (index > previous && index <= cutoff && row.sender.id !== item.agentId)));
-      return { conversation: summary(thread), messages: copy(messages), message: copy(all[cutoff]) };
+      return { conversation: summary(thread, true), messages: copy(messages), message: copy(all[cutoff]) };
     },
     prepareCommunicationSession(key, deliveryId, cwd) {
       const thread = conversation(key), item = delivery(key, deliveryId);
@@ -177,20 +224,26 @@ export function communicationCommands(state, save) {
     appendCommunicationEvent(key, deliveryId, input) {
       const item = delivery(key, deliveryId); event(item, input.providerEventType || "output", input.message || "", input.data || {}); save();
     },
-    completeCommunication(key, deliveryId, content, ...retiredRouting) {
-      if(retiredRouting.length)throw new Error("普通沟通不支持转交参数");
+    completeCommunication(key, deliveryId, content, mentionAgentIds = []) {
+      if (!Array.isArray(mentionAgentIds) || mentionAgentIds.some(value => typeof value !== "string") || new Set(mentionAgentIds).size !== mentionAgentIds.length) throw new Error("群聊 @ 必须是不重复的员工 ID 数组，不支持转交参数");
       return this.transaction(() => {
         const item = delivery(key, deliveryId), thread = conversation(key);
         if (item.status === "done") return;
         if (item.status !== "running" || typeof content !== "string" || !content.trim() || content.length > 128000) throw new Error("沟通回复无效");
-        const source = state.communicationMessages.find((row) => row.id === item.messageId && row.conversationId === key);
-        const rosterIds = members(thread).map((member) => member.id);
-        const visible = item.parentDeliveryId ? communicationVisibility(state, thread, source).filter((agentId) => rosterIds.includes(agentId)) : rosterIds;
-        const message = { id: id("chat_message"), conversationId: key, sender: { type: "agent", id: item.agentId, name: item.agentSnapshot.name }, content, mentionAgentIds: [], visibleToAgentIds: [...new Set([...visible, item.agentId])], createdAt: now(), replyToMessageId: item.messageId, deliveryId };
+        const roster = members(thread), rootMessageId = item.rootMessageId || item.messageId;
+        if (mentionAgentIds.length && thread.kind === "agent") throw new Error("私聊不能 @ 其他员工");
+        if (mentionAgentIds.some(value => value === item.agentId || !roster.some(member => member.id === value && member.status === "active"))) throw new Error("@ 对象必须是群聊中其他可用员工");
+        const message = { id: id("chat_message"), conversationId: key, sender: { type: "agent", id: item.agentId, name: item.agentSnapshot.name }, content, mentionAgentIds, visibleToAgentIds: [...new Set([...roster.map(member => member.id), item.agentId])], createdAt: now(), replyToMessageId: item.messageId, deliveryId, rootMessageId };
         state.communicationMessages.push(message); item.status = "done"; item.error = null; item.nextAttemptAt = null; item.updatedAt = now(); thread.updatedAt = now();
         if (thread.sessions[item.agentId]) thread.sessions[item.agentId].inputThroughMessageId = item.messageId;
-        event(item, "completed", "回复已保存");
-        save();
+        const senderPresent = roster.some(member => member.id === item.agentId && member.status === "active");
+        // A human message starts one discussion round. Each member may be
+        // explicitly awakened once in that round; plain replies never fan out.
+        for (const agentId of senderPresent ? mentionAgentIds : []) {
+          if (state.communicationDeliveries.some(row => row.conversationId === key && (row.rootMessageId || row.messageId) === rootMessageId && row.agentId === agentId)) { event(item, "mention_recorded", "该成员已参与本轮，公开消息保留，不重复唤醒", { recipientAgentId: agentId, messageId: message.id }); continue; }
+          state.communicationDeliveries.push({ id: id("chat_delivery"), conversationId: key, messageId: message.id, rootMessageId, agentId, agentSnapshot: withRole(state.agents.find(row => row.id === agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null });
+        }
+        event(item, "completed", "回复已保存"); save();
       });
     },
     failCommunication(key, deliveryId, reason, resetSession = false) {
@@ -206,7 +259,9 @@ export function communicationCommands(state, save) {
       const item = delivery(key, deliveryId);
       if (item.status !== "failed") throw new Error("只能重试失败回复");
       const current = state.agents.find((row) => row.id === item.agentId);
-      if (current) item.agentSnapshot = withRole(current);
+      if (!current || current.status !== "active" || !members(conversation(key)).some(member => member.id === current.id)) throw new Error("成员已离开群聊、停用或删除，不能重试");
+      this.assertRuntimeEnabled(current.runtime);
+      item.agentSnapshot = withRole(current);
       item.status = "queued"; item.nextAttemptAt = null; event(item, "retry", "请求重试"); save();
     },
     cancelCommunication(key, deliveryId) {
@@ -224,7 +279,7 @@ export function communicationCommands(state, save) {
     getCommunicationConsole(key, { agentId, before = null, limit = 50 } = {}) {
       const thread = conversation(key), deliveries = state.communicationDeliveries.filter(row => row.conversationId === key);
       const roster = new Map(members(thread).map(row => [row.id, { id: row.id, name: row.name }]));
-      for (const row of deliveries) roster.set(row.agentId, { id: row.agentId, name: row.agentSnapshot.name, runtime: { provider: row.agentSnapshot.runtime.provider } });
+      for (const row of deliveries.filter(item => state.agents.some(agent => agent.id === item.agentId && agent.status !== "deleted"))) roster.set(row.agentId, { id: row.agentId, name: row.agentSnapshot.name, runtime: { provider: row.agentSnapshot.runtime.provider } });
       const agents = [...roster.values()].map(row => ({ ...row, running: deliveries.some(item => item.agentId === row.id && item.status === 'running') }));
       if (agentId && !roster.has(agentId)) throw new Error('控制台成员不属于当前会话');
       const records = state.communicationEvents.filter(row => row.conversationId === key && (!agentId || row.agentId === agentId));

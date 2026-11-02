@@ -11,7 +11,7 @@ import { scheduleManagerFollowup } from '../server/orchestrator.mjs';
 
 const taskInput = () => ({
   task: { title: '目标', objective: 'TASK_OBJECTIVE', workspacePath: '/work', repositorySources: [], repositoryBindings: {}, acceptanceCriteria: [], workflowSnapshot: { nodes: [{ id: 'first', title: 'CURRENT_WORK', deliverable: 'CURRENT_DELIVERY' }, { id: 'second', title: 'OTHER_NODE_SECRET' }] } },
-  run: { id: 'run-one' }, node: { id: 'first', title: 'CURRENT_WORK', deliverable: 'CURRENT_DELIVERY', artifactPaths: ['docs/first'] },
+  run: { id: 'run-one', manager:{id:'coordinator'} }, node: { id: 'first', title: 'CURRENT_WORK', deliverable: 'CURRENT_DELIVERY', artifactPaths: ['docs/first'] },
   trace: { id: 'trace-one' }, agent: { id: 'worker', name: '员工', kind: 'business', systemPrompt: 'PERSONA_RULE' }, directory: '/trace', cwd: '/work',
   workspace: { traces: [], pendingQuestions: [], defects: [], decisions: [], artifacts: [] }, messages: [], roster: [{ id: 'worker', name: '员工' }], mode: 'node', delivery: { messageIds: [], attempts: 1 }, session: { resume: false }
 });
@@ -24,7 +24,7 @@ test('workflow is manager-only system context; environment and persona never ent
   assert.match(worker.systemPrompt, /可咨询角色：/);
   assert.doesNotMatch(worker.prompt, /可咨询角色：/);
   assert.match(worker.prompt, /CURRENT_DELIVERY|TASK_OBJECTIVE/);
-  const manager = taskPrompt({ ...input, agent: { ...input.agent, kind: 'manager' }, mode: 'manager' });
+  const manager = taskPrompt({ ...input, agent: { ...input.agent, id:'coordinator', kind: 'manager' }, mode: 'manager' });
   assert.match(manager.systemPrompt, /OTHER_NODE_SECRET/);
   assert.doesNotMatch(manager.prompt, /OTHER_NODE_SECRET|CURRENT_DELIVERY|workflowNodeId/);
   const continued = taskPrompt({ ...input, session: { resume: true, inputContext: worker.inputContext } });
@@ -175,5 +175,5 @@ test('task input keeps actionable message provenance and omits routing/storage n
   assert.match(result.prompt, /question-one|consultation_reply|manager/);
   // Staffing guidance is preserved in the manager's full workflow definition.
   input.task.workflowSnapshot.nodes[0].staffingGuidance = 'MANAGER_STAFFING_ONLY';
-  assert.match(taskPrompt({...input,agent:{...input.agent,kind:'manager'},mode:'manager'}).systemPrompt,/MANAGER_STAFFING_ONLY/);
+  assert.match(taskPrompt({...input,agent:{...input.agent,id:'coordinator',kind:'manager'},mode:'manager'}).systemPrompt,/MANAGER_STAFFING_ONLY/);
 });

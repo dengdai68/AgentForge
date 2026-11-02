@@ -78,7 +78,7 @@ test('all task commands progressively disclose their own data and compact relate
   const f = await fixture(), marker = 'INTERNAL_EMPLOYEE_PROMPT_MUST_NOT_EXPAND';
   const employee = { id: 'agent_one', name: '作者', systemPrompt: marker, runtime: { profileId: 'runtime_one', extensions: marker } };
   const manager = { ...employee, id: 'manager_one', name: '经理' };
-  const task = { id: 'task_one', title: '简报任务', objective: '完整用户目标', acceptanceCriteria: ['核对真实产物'], status: 'awaiting_human', priority: 'medium', teamId: 'team_one', team: { id: 'team_one', name: '内容组', members: [employee], secretInternal: marker }, memberSnapshots: [employee], managerAgentId: manager.id, managerSnapshot: manager, managerRuntime: { profileId: 'runtime_one', internal: marker }, workflowTemplateId: 'flow_one', workflowSnapshot: { id: 'flow_one', name: '写作流程', nodes: [{ id: 'write', title: '撰写', deliverable: marker }] }, repositoryBindings: { internal: marker }, futureNestedField: marker };
+  const task = { id: 'task_one', title: '简报任务', objective: '完整用户目标', acceptanceCriteria: ['核对真实产物'], status: 'awaiting_human', priority: 'medium', memberAgentIds: [employee.id, manager.id], team: { id: 'team_one', name: '内容组', members: [employee], secretInternal: marker }, memberSnapshots: [employee], managerAgentId: manager.id, managerSnapshot: manager, managerRuntime: { profileId: 'runtime_one', internal: marker }, workflowTemplateId: 'flow_one', workflowSnapshot: { id: 'flow_one', name: '写作流程', nodes: [{ id: 'write', title: '撰写', deliverable: marker }] }, repositoryBindings: { internal: marker }, futureNestedField: marker };
   const question = { id: 'question_one', content: '报告使用什么标题？', questionType: '标题', recipient: { id: 'human_operator', name: '你', type: 'human' }, sender: manager, consideredMemberIds: [marker], routingReason: marker, createdAt: '2026-10-23T00:00:00Z' };
   const run = { id: 'run_one', taskId: task.id, status: 'awaiting_human', task, manager, participants: [employee, manager], currentFocus: { nodeId: 'write', reason: marker }, deliveryReview: { verdict: 'pass', findings: [marker] }, summary: marker };
   const workspace = { run, pendingQuestions: [question], traces: [], dispatches: [], messages: [{ ...question, sender: { id: manager.id, name: manager.name, type: 'agent' } }], artifacts: [{ id: 'artifact_one', name: 'docs/report.md', sha256: 'abc' }], defects: [], events: [] };
@@ -91,12 +91,12 @@ test('all task commands progressively disclose their own data and compact relate
   const args = operation => ['tasks', operation, ...(['list', 'create'].includes(operation) ? [] : [task.id]), '--session-file', f.sessionFile];
   const invoke = (operation, value) => execute([...args(operation), ...(value ? ['--file', '-'] : [])], { fetcher, stdin: input(value ?? '') });
   const detail = await invoke('get');
-  assert.deepEqual(detail.team, { id: 'team_one', name: '内容组' });
+  assert.equal(detail.team, undefined);assert.deepEqual(detail.members,[{id:employee.id,name:employee.name},{id:manager.id,name:manager.name}]);
   assert.deepEqual(detail.workflow, { id: 'flow_one', name: '写作流程' });
   assert.deepEqual(detail.manager, { id: manager.id, name: manager.name });
   assert.equal(detail.objective, task.objective); assert.deepEqual(detail.acceptanceCriteria, task.acceptanceCriteria);
   for (const operation of ['get', 'list', 'progress', 'create', 'start', 'message', 'reply', 'questions']) {
-    const value = operation === 'create' ? { title: task.title, objective: task.objective, teamId: task.teamId, workflowTemplateId: task.workflowTemplateId } : operation === 'message' ? { content: '追加资料', recipientAgentId: manager.id } : operation === 'reply' ? { content: '标题采用知识简报', replyToMessageId: question.id } : undefined;
+    const value = operation === 'create' ? { title: task.title, objective: task.objective, memberAgentIds: task.memberAgentIds, workflowTemplateId: task.workflowTemplateId } : operation === 'message' ? { content: '追加资料', recipientAgentId: manager.id } : operation === 'reply' ? { content: '标题采用知识简报', replyToMessageId: question.id } : undefined;
     const result = await invoke(operation, value);
     assert.ok(!JSON.stringify(result).includes(marker), operation);
     assert.ok(!JSON.stringify(result).includes('memberSnapshots'), operation);
@@ -110,7 +110,7 @@ test('all task commands progressively disclose their own data and compact relate
   assert.equal(defaultMessage.message.recipient.id, manager.id);
   assert.deepEqual(resources.tasks.operationInputs.message.schema.required, ['content']);
   const text = await captured(args('get'), { fetcher });
-  assert.match(text.stdout, /agentforge teams get team_one/); assert.match(text.stdout, /agentforge workflows get flow_one/); assert.match(text.stdout, /agentforge agents get manager_one/);
+  assert.doesNotMatch(text.stdout,/agentforge teams get/); assert.match(text.stdout, /agentforge workflows get flow_one/); assert.match(text.stdout, /agentforge agents get manager_one/);
   assert.doesNotMatch(text.stdout, /systemPrompt|memberSnapshots|workflowSnapshot|runtime|INTERNAL_EMPLOYEE/);
   const json = await captured([...args('get'), '--json'], { fetcher });
   assert.deepEqual(JSON.parse(json.stdout).data, JSON.parse(JSON.stringify(detail)));
@@ -133,7 +133,7 @@ test('task CLI queries scoped progress, filters and collaboration and rejects st
     return new Response(JSON.stringify(data));
   };
   const invoke = (args, value) => execute(['tasks', ...args, '--session-file', f.sessionFile], { fetcher, stdin: input(value ?? '') });
-  assert.equal((await invoke(['list', '--search', '知识', '--status', 'awaiting_human', '--team', 'team_one'])).total, 1);
+  assert.equal((await invoke(['list', '--search', '知识', '--status', 'awaiting_human'])).total, 1);
   assert.equal((await invoke(['list', '--archived'])).items[0].id, 'archived');
   assert.equal((await invoke(['get', task.id])).objective, '完整目标');
   const progress = await invoke(['progress', task.id]);

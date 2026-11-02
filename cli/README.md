@@ -1,5 +1,9 @@
 # CLI
 
+任务从团队与员工 ID 合并成独立成员集合，必须恰好有一位可用项目经理；团队不拥有任务或群聊。领域规则见 [领域模型](../docs/03-domain-model.md)，CLI 输入输出见 [CLI 指南](../docs/21-configuration-cli.md)。
+
+任务写入使用 memberAgentIds；移除 --team。团队 managerAgentId 废弃，成员可空；员工删除保留持久标记及历史。详情只输出成员 ID/名称引用，不包含员工提示词/扩展配置。长期群聊仍不属于 CLI 命令覆盖范围。
+
 协作读模型以消息/事件为主线，按 sourceMessageId 或唯一的已有定向消息、Dispatch/Trace 引用关联真实派工；不按正文、名字或时间猜测，不回填历史。deliveries 明示投递当前状态，history 保留每次执行与重试的实际时间，经理协调为全流程范围。CLI 保留完整投递/执行事实、验收关联及有界文件 ID/名称引用（files 最多8项、fileCount 为总数）；完整文件列表用 artifacts 查询。已知员工交接结果信封从 rawResponse 提取已记录的报告正文，去除重复结构化结果，原始消息和控制台事实不变。客户端协作区展示成员总结、沟通和关键人类状态，保留单一“本轮控制台”入口；不自动附加投递状态、技术失败/重试通知、验收文件清单或平台验收说明。长消息全文一次渲染 Markdown，超过5行仅收起区域，展开不重建 DOM，Run 内保留阅读状态。控制台无顶部错误摘要，失败记录在日志内标红；员工状态按自己的最新 Trace 显示错误/执行中/正常，重试成功后清除旧错误。未验证事项保留员工原文，不自动判定交付质量；存储、调度、模型输入和人类确认规则不变。
 
 任务协作时间线合并同一 Run 的全部 Message、实际 Dispatch 与协调事件。接收人表示处理对象，不表示私密级别：经理派工指向接手员工，工作交接指向经理，咨询/答复保留双方，没有处理对象的发言只显示发送者。sourceMessageId 仅关联同 Run 来源消息，正文与首个实际投递合并；同源额外投递归入同一消息；无法用已存引用关联的投递独立注明，不猜测历史来源。显示节点、尝试次数、重试/错误和真实投递状态；发言与接手执行提供独立控制台入口。任务确认、取消、暂停、恢复等事件按时间保留，不输出原始 Provider 帧或提示词。
@@ -57,4 +61,4 @@ tasks message 的 recipientAgentId 可省略，默认发给当前 Run 的项目�
 
 插件 import 的 warnings 明确列出跳过组件；文本 ⚠️、JSON 结构化结果和插件 get 共享相对路径/原因。路径或完整性失败仍拒绝批次。
 
-员工 kind 只接受 business/manager，schema/help 移除 repository 与 developer；仓库说明放 systemPrompt。当前员工 get 不展示废弃仓库字段。普通沟通不属于 CLI 配置/任务命令，reply-only 协议没有新增 CLI 能力。
+员工 kind 只接受 business/manager，schema/help 移除 repository 与 developer；仓库说明放 systemPrompt。当前员工 get 不展示废弃仓库字段。普通沟通不属于 CLI 配置/任务命令，私聊/群聊输出协议没有新增 CLI 能力。

@@ -395,7 +395,7 @@ test("content delivery workflow freezes boundaries and never resurrects deleted 
     { id: "content_creation", title: "内容创作与编辑", dependsOn: ["content_brief"], artifactPaths: ["docs/content/"] },
     { id: "content_review", title: "内容审校与质量核查", dependsOn: ["content_creation"], artifactPaths: ["docs/content-review/"] }
   ]);
-  const task = store.createTask({ title: "交付试用邀请文案", objective: "形成可审校的本地邮件文案。", workspacePath: process.cwd(), teamId: "team_product_delivery", workflowTemplateId: template.id });
+  const task = store.createTask({ title: "交付试用邀请文案", objective: "形成可审校的本地邮件文案。", workspacePath: process.cwd(), memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: template.id });
   assert.deepEqual(task.nodeAssignments, {});
   assert.ok(task.workflowSnapshot.nodes.every((node) => node.staffingGuidance));
   assert.deepEqual(task.workflowSnapshot.nodes.map(({ id, artifactPaths, repositoryPath }) => ({ id, artifactPaths, repositoryPath })), [
@@ -403,8 +403,8 @@ test("content delivery workflow freezes boundaries and never resurrects deleted 
     { id: "content_creation", artifactPaths: ["docs/content/"], repositoryPath: null },
     { id: "content_review", artifactPaths: ["docs/content-review/"], repositoryPath: null }
   ]);
-  const incompleteTeam = store.createTeam({ name: "缺少审校角色的内容团队", memberAgentIds: ["agent_analyst", "agent_designer"] });
-  const flexibleTask = store.createTask({ title: "按能力安排审校", objective: "项目经理从现有成员中选择合适的人。", workspacePath: process.cwd(), teamId: incompleteTeam.id, workflowTemplateId: template.id });
+  const incompleteTeam = store.createTeam({ name: "缺少审校角色的内容团队", memberAgentIds: ["agent_analyst", "agent_designer", "system_project_manager"] });
+  const flexibleTask = store.createTask({ title: "按能力安排审校", objective: "项目经理从现有成员中选择合适的人。", workspacePath: process.cwd(), memberAgentIds: incompleteTeam.memberAgentIds, workflowTemplateId: template.id });
   assert.deepEqual(flexibleTask.nodeAssignments, {});
 
   const root = await mkdtemp(join(tmpdir(), "agentforge-content-workflow-")), path = join(root, "state.sqlite"), persistence = createSqlitePersistence(path);
@@ -578,11 +578,12 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   }
 });
 
-test("task form selects team and workflow without expanded staffing details or preassignments", async () => {
+test("task form combines employee selections and workflow without expanded staffing details or preassignments", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const modal = source.slice(source.indexOf("function newTaskModal()"), source.indexOf("function workflowNodeRow("));
   assert.match(modal, /name="workflowTemplateId"/);
-  assert.match(modal, /name="teamId"/);
+  assert.match(modal, /id: 'task-members'/);
+  assert.doesNotMatch(modal, /name="teamId"/);
   assert.doesNotMatch(modal, /node-assignment-panel|staffingGuidance|nodeAssignment_/);
   assert.doesNotMatch(source, /input.nodeAssignments =/);
 });
@@ -930,20 +931,20 @@ test("new tasks do not need delivery authorization", () => {
   assert.equal(store.createRun(task.id).participants.some((member) => member.type === "human"), true);
 });
 
-test("teams select managers, include humans, and freeze Run member responsibilities", () => {
+test("tasks select their manager, include humans, and freeze independent member responsibilities", () => {
   const store = createStore(), worker = store.createAgent({ name: "通用成员", role: "任意职责", systemPrompt: "整理事实", capabilities: ["检索"] });
   const pm = store.createAgent({ name: "自定义经理", role: "协调者", kind: "manager", systemPrompt: "协调通用任务" });
-  const team = store.createTeam({ name: "团队", managerAgentId: pm.id, memberAgentIds: [worker.id] });
+  const team = store.createTeam({ name: "团队", memberAgentIds: [...new Set([worker.id, pm.id])] });
   const flow = store.createWorkflowTemplate({ name: "不匹配名称仍可显式分配", nodes: [{ id: "work", title: "工作", staffingGuidance: "资料整理", dependsOn: [] }] });
-  const task = store.createTask({ title: "任务", objective: "交付", workspacePath: process.cwd(), teamId: team.id, workflowTemplateId: flow.id, nodeAssignments: { work: worker.id } });
+  const task = store.createTask({ title: "任务", objective: "交付", workspacePath: process.cwd(), memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { work: worker.id } });
   const run = store.createRun(task.id);
   assert.equal(run.manager.sourceAgentId, pm.id);
   assert.equal(worker.kind, "business");
   const inferred = store.createTeam({ name: "直接加入经理", memberAgentIds: [worker.id, pm.id] });
-  assert.equal(inferred.managerAgentId, pm.id); assert.deepEqual(inferred.memberAgentIds, [worker.id]);
+  assert.equal(inferred.managerAgentId, undefined); assert.deepEqual(inferred.memberAgentIds, [worker.id, pm.id]);
   assert.equal(store.listTeams().find(item => item.id === inferred.id).members.filter(item => item.kind === "manager").length, 1);
-  assert.equal(store.createTeam({ name: "无经理", memberAgentIds: [worker.id] }).managerAgentId, "system_project_manager");
-  assert.throws(() => store.createTeam({ name: "冲突", memberAgentIds: [worker.id, pm.id, "system_project_manager"] }), /一名/);
+  assert.equal(store.createTeam({ name: "无经理", memberAgentIds: [worker.id] }).managerAgentId, undefined);
+  assert.equal(store.createTeam({ name: "多个经理的人员池", memberAgentIds: [worker.id, pm.id, "system_project_manager"] }).memberAgentIds.length,3);
   assert.equal(run.participants.filter((member) => member.kind === "manager").length, 1);
   assert.equal(run.participants.find((member) => member.type === "human").runtime, undefined);
   store.updateAgent(worker.id, { systemPrompt: "全新职责" });
@@ -952,7 +953,7 @@ test("teams select managers, include humans, and freeze Run member responsibilit
   assert.equal(store.getRunAgent(run.id, outsider.id), null);
   assert.throws(() => store.createTrace(run.id, { agentId: "human_operator", workflowNodeId: "work" }), /不属于/);
   assert.throws(() => store.updateTeam(team.id, { managerAgentId: worker.id }), /项目经理/);
-  assert.throws(() => store.updateTeam(team.id, { memberAgentIds: [] }), /业务/);
+  assert.deepEqual(store.updateTeam(team.id, { memberAgentIds: [] }).memberAgentIds, []);
 });
 
 test("durable dispatch deduplicates, retries, preserves queue on pause, and rolls back transactions", () => {
@@ -1300,7 +1301,7 @@ test("task properties render safe recorded facts independently of the active tab
   for (const tab of ["collaboration", "artifacts", "directory", "console"]) {
     const markup = details(workspace, { agents: [{ id: "a" }], currentFocusNode: { title: "核验交付" }, view: { tab, disclosures: { brief: true } }, artifactCount: 2 });
     assert.match(markup, /^<aside[^>]+aria-label="任务详情"/);
-    assert.match(markup, /A&amp;B/);
+    assert.doesNotMatch(markup, /A&amp;B|<dt>团队<\/dt>/);
     assert.match(markup, /核验交付/);
     assert.match(markup, /<dd>2 项<\/dd>/);
     assert.ok(markup.includes(risk));
@@ -1322,7 +1323,7 @@ test("task properties render safe recorded facts independently of the active tab
   assert.match(expanded, /尾部😀/);
   assert.match(expanded, /aria-expanded="true" aria-controls="task-description-content">收起/);
   const legacy = details({ run: { id: "legacy", task: { objective: "旧任务", workspacePath: "/tmp/legacy", workflowSnapshot: {} } } }, { agents: [], view: { disclosures: {} }, artifactCount: 0 });
-  assert.match(legacy, /当前团队/);
+  assert.doesNotMatch(legacy, /当前团队|<dt>团队<\/dt>/);
   assert.match(legacy, /暂无指定重心/);
   assert.match(legacy, /<dd>0 项<\/dd>/);
   assert.doesNotMatch(legacy, /data-workspace-disclosure="brief" open|undefined/);
@@ -1515,9 +1516,9 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     const store = createStore();
     const tester = store.createAgent({ name: "测试", role: "测试工程师", kind: "business", systemPrompt:"在任务工作目录完成测试；需要仓库时自行准备。", runtime: { provider: "claude-code", executable } });
     const reviewer = store.createAgent({ name: "独立验证", runtime: { provider: "claude-code", executable } });
-    const team = store.createTeam({ name: "团队", memberAgentIds: [tester.id, reviewer.id] });
+    const team = store.createTeam({ name: "团队", memberAgentIds: [tester.id, reviewer.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "开发与测试", nodes: [{ id: "verify", title: "开发", staffingGuidance: "研发工程师", dependsOn: [] }, { id: "testing", title: "独立测试", staffingGuidance: "非作者验证", artifactPaths: ["docs/testing/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "真实运行", objective: "验证 Trace", acceptanceCriteria: ["验收口径必须进入项目经理复核"], workspacePath: root, teamId: team.id, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id, testing: reviewer.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({ title: "真实运行", objective: "验证 Trace", acceptanceCriteria: ["验收口径必须进入项目经理复核"], workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id, testing: reviewer.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
     await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });
     const workspace = store.getRunWorkspace(run.id);
@@ -1573,9 +1574,9 @@ if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
 }
 console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 `); await chmod(executable, 0o755);
-    const team = store.createTeam({ name: "咨询团队", memberAgentIds: [analyst.id, architect.id] });
+    const team = store.createTeam({ name: "咨询团队", memberAgentIds: [analyst.id, architect.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "咨询流程", nodes: [{ id: "architecture", title: "架构", staffingGuidance: "系统架构师", artifactPaths: ["docs/architecture/", "docs/testing/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "咨询续跑", objective: "验证立即答复", workspacePath: root, teamId: team.id, workflowTemplateId: flow.id, nodeAssignments: { architecture: architect.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({ title: "咨询续跑", objective: "验证立即答复", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { architecture: architect.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id); await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") }); const workspace = store.getRunWorkspace(run.id);
     assert.equal(workspace.run.status, "awaiting_acceptance"); store.confirmRunCompletion(run.id); assert.equal(store.getRun(run.id).status, "completed"); assert.equal(workspace.run.waitingAgentId, null); assert.ok(workspace.messages.some((message) => message.kind === "agent_consultation")); assert.ok(workspace.messages.some((message) => message.kind === "consultation_answer")); assert.ok(workspace.traces.some((trace) => trace.type === "consultation" && trace.status === "completed")); assert.equal(workspace.traces.filter((trace) => trace.workflowNodeId === "architecture" && trace.type === "node").length, 2);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -1610,9 +1611,9 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     await chmod(executable, 0o755);
     const store = createStore();
     const tester = store.createAgent({ name: "验证", role: "验证工程师", runtime: { provider: "claude-code", executable } });
-    const team = store.createTeam({ name: "重试团队", memberAgentIds: [tester.id] });
+    const team = store.createTeam({ name: "重试团队", memberAgentIds: [tester.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "重试流程", nodes: [{ id: "verify", title: "验证", staffingGuidance: "验证工程师", artifactPaths: ["docs/verify/", "docs/testing/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "人工立即重试", objective: "保留失败事实并继续", workspacePath: root, teamId: team.id, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({ title: "人工立即重试", objective: "保留失败事实并继续", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
     await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });
     const waiting = store.getRunWorkspace(run.id), failedTrace = waiting.traces.find((trace) => trace.status === "failed"), waitingDispatch = waiting.dispatches.find((item) => item.nextRetryAt);
@@ -1668,9 +1669,9 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     await writeFile(join(root, "docs/development/obsolete.md"), "# Remove me\n");
     let store = createStore({ databasePath });
     const developer = store.createAgent({ name: "开发", runtime: { provider: "claude-code", executable } });
-    const team = store.createTeam({ name: "失败重试团队", memberAgentIds: [developer.id] });
+    const team = store.createTeam({ name: "失败重试团队", memberAgentIds: [developer.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "失败重试流程", nodes: [{ id: "develop", title: "开发", staffingGuidance: "开发", artifactPaths: ["docs/development/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "失败写入后重试", objective: "源码和测试均应接纳", workspacePath: root, teamId: team.id, workflowTemplateId: flow.id, nodeAssignments: { develop: developer.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({ title: "失败写入后重试", objective: "源码和测试均应接纳", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { develop: developer.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
     await executeRun(store, run.id, { runFilesRoot });
     const first = store.getRunWorkspace(run.id), failed = first.traces.find((trace) => trace.type === "node" && trace.status === "failed");
@@ -1743,9 +1744,9 @@ test("termination records Run and Trace cancellation facts without a false failu
     await chmod(executable, 0o755);
     store = createStore();
     const tester = store.createAgent({ name: "慢", role: "测试工程师", runtime: { provider: "claude-code", executable } });
-    const team = store.createTeam({ name: "慢团队", memberAgentIds: [tester.id] });
+    const team = store.createTeam({ name: "慢团队", memberAgentIds: [tester.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "慢流程", nodes: [{ id: "verify", title: "验证", staffingGuidance: "测试工程师", dependsOn: [] }] });
-    const task = store.createTask({ title: "终止", objective: "验证", workspacePath: root, teamId: team.id, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({ title: "终止", objective: "验证", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
     run = store.createRun(task.id);
     execution = executeRun(store, run.id, { runFilesRoot: join(root, "files") });
     execution.then(() => { executionSettled = true; }, (error) => { executionSettled = true; executionError = error; });

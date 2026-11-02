@@ -10,7 +10,7 @@ import { collaborationRecords } from '../client/console-projections.mjs';
 function parse(argv) {
   const args = [], flags = {};
   const switches = new Set(['help', 'yes', 'all', 'password-stdin', 'json', 'archived']);
-  const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'team', 'run']);
+  const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'run']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { args.push(arg); continue; }
@@ -46,7 +46,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (['delete', 'terminate', 'test'].includes(operation)) allowed.push('yes');
     if (group === 'tasks') {
       if (['message', 'reply'].includes(operation)) allowed.push('file');
-      if (operation === 'list') allowed.push('status', 'team', 'archived');
+      if (operation === 'list') allowed.push('status', 'archived');
       if (['progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'terminate'].includes(operation)) allowed.push('run');
       if (['collaboration', 'questions', 'artifacts'].includes(operation)) allowed.push('page', 'all');
     }
@@ -80,6 +80,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
   const readList = async () => {
     const result = await client.request(path);
     if (!Array.isArray(result[resource.key])) throw new CliError('RESPONSE_UNCERTAIN', '服务返回的配置列表结构无法确认', '检查CLI与服务版本是否一致，不继续写入。', 5);
+    if (group === 'teams') result[resource.key] = result[resource.key].map(item=>({...keyFields(item,['id','name','mission','status','memberAgentIds','createdAt']),members:(item.members || []).map(({id,name})=>({id,name}))}));
     if (group === 'agents') result[resource.key] = result[resource.key].map(item => ({...item, runtime: keyFields(item.runtime || {}, ['profileId', 'extensionSelection'])}));
     return result;
   };
@@ -119,10 +120,11 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
 
 const reference = (id, name) => id ? { id, name: name || null } : null;
 function taskView(task, { summary = false } = {}) {
-  const base = { id: task.id, title: task.title, status: task.status, team: reference(task.teamId, task.team?.name), updatedAt: task.updatedAt, archivedAt: task.archivedAt };
+  const base = { id: task.id, title: task.title, status: task.status, memberCount: task.memberAgentIds?.length || (task.memberSnapshots?.length || 0) + (task.managerSnapshot ? 1 : 0), updatedAt: task.updatedAt, archivedAt: task.archivedAt };
   if (summary) return base;
   return { ...base, priority: task.priority, objective: task.objective, acceptanceCriteria: task.acceptanceCriteria,
     workspacePath: task.workspacePath, workflow: reference(task.workflowTemplateId, task.workflowSnapshot?.name),
+    members: [...(task.memberSnapshots || []), task.managerSnapshot].filter(Boolean).map(({id,name}) => reference(id,name)),
     manager: reference(task.managerAgentId, task.managerSnapshot?.name), createdAt: task.createdAt };
 }
 function runReceipt(run) {
@@ -153,7 +155,7 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     if (!Array.isArray(tasks)) throw new CliError('RESPONSE_UNCERTAIN', '任务列表响应无法确认', '检查服务版本后重新查询。', 5);
     return paginate(tasks.filter(task => (flags.archived ? Boolean(task.archivedAt) : !task.archivedAt)
       && (!flags.search || task.title.toLocaleLowerCase().includes(flags.search.toLocaleLowerCase()))
-      && (!flags.status || task.status === flags.status) && (!flags.team || task.teamId === flags.team)).map(task => taskView(task, { summary: true })));
+      && (!flags.status || task.status === flags.status)).map(task => taskView(task, { summary: true })));
   }
   if (operation === 'get') {
     const { tasks } = await client.request('/api/tasks');

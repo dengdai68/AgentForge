@@ -13,9 +13,9 @@ test('missing Runtime is effectively disabled and locked without rewriting prefe
   const store = createStore({ workspaceRoot: join(tmpdir(), 'agentforge-missing-runtime'), runtimeInstalled: provider => provider !== 'dsh' || installed });
   const profile = store.listRuntimeProfiles().find(item => item.provider === 'dsh');
   const worker = store.createAgent({ name: 'Worker', runtime: { profileId: profile.id } });
-  const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id] });
+  const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id, store.createAgent({name:'Manager',kind:'manager',runtime:worker.runtime}).id] });
   const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
-  const task = store.createTask({ title: 'Frozen', objective: 'Write', teamId: team.id, workflowTemplateId: flow.id });
+  const task = store.createTask({ title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   const chat = store.openCommunication({ kind: 'agent', targetId: worker.id });
   const frozen = store.getTask(task.id).memberSnapshots;
   installed = false;
@@ -47,9 +47,9 @@ test('fixed Runtime slots retain IDs, gate new work and preserve frozen snapshot
   const profile = defaults.find(item => item.provider === 'claude-code');
   store.saveRuntimeProfile({ model: 'frozen' }, profile.id);
   const worker = store.createAgent({ name: 'Worker', runtime: { profileId: profile.id } });
-  const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id] });
+  const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id, store.createAgent({name:'Manager',kind:'manager',runtime:worker.runtime}).id] });
   const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
-  const task = store.createTask({ title: 'Frozen', objective: 'Write', teamId: team.id, workflowTemplateId: flow.id });
+  const task = store.createTask({ title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   const chat = store.openCommunication({ kind: 'agent', targetId: worker.id });
   store.saveRuntimeProfile({ enabled: false, model: 'next' }, profile.id);
   assert.throws(() => store.createRun(task.id), /已停用/);
@@ -80,9 +80,9 @@ test('central runtime edits update bound employees but preserve queued work and 
   const profile = store.saveRuntimeProfile({ model: 'test-model' }, store.listRuntimeProfiles().find(item => item.provider === 'claude-code').id);
   const a = store.createAgent({ name: 'A', role: 'writer', runtime: { profileId: profile.id } });
   const b = store.createAgent({ name: 'B', role: 'writer', runtime: { profileId: profile.id, skillPaths: [join(root, 'skill.md')] } });
-  const team = store.createTeam({ name: 'Test', memberAgentIds: [a.id, b.id] });
+  const team = store.createTeam({ name: 'Test', memberAgentIds: [a.id, b.id, store.createAgent({name:'Manager',kind:'manager',runtime:a.runtime}).id] });
   const flow = store.createWorkflowTemplate({ name: 'Write', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'writer', dependsOn: [] }] });
-  const task = store.createTask({ title: 'Frozen', objective: 'Write a document', teamId: team.id, workflowTemplateId: flow.id });
+  const task = store.createTask({ title: 'Frozen', objective: 'Write a document', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   store.saveRuntimeProfile({ model: 'next-model' }, profile.id);
   assert.equal(store.listAgents().find(item => item.id === a.id).runtime.model, 'next-model');
   assert.deepEqual(store.listAgents().find(item => item.id === b.id).runtime.skillPaths, [join(root, 'skill.md')]);
@@ -173,9 +173,9 @@ test('runtime effort is validated per provider, reprojected to employees and fro
   ]) assert.throws(() => store.saveRuntimeProfile(input, claude.id), pattern);
   const worker = store.createAgent({ name: 'W', runtime: { profileId: claude.id } });
   assert.equal(store.listAgents().find(item => item.id === worker.id).runtime.effort, 'high');
-  const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id] });
+  const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id, store.createAgent({name:'Manager',kind:'manager',runtime:worker.runtime}).id] });
   const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
-  const task = store.createTask({ title: 'Frozen', objective: 'Write', teamId: team.id, workflowTemplateId: flow.id });
+  const task = store.createTask({ title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   store.saveRuntimeProfile({ model: 'opus', effort: 'max' }, claude.id);
   assert.equal(store.listAgents().find(item => item.id === worker.id).runtime.effort, 'max', 'profile edit reprojects effort to bound employees');
   assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.effort, 'high', 'frozen task snapshot keeps the previous effort');

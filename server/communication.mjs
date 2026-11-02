@@ -5,14 +5,16 @@ import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
 import { communicationPrompt } from "./prompts.mjs";
 import { runClaudeCodeCli, runCodexCli, runDshCli, RuntimeSessionMissingError, redactExternalText, separateRuntimeSession, promptSnapshot } from "./runtime/local-cli.mjs";
 
-// Ordinary communication has one reply payload and no member-routing fields.
-const schema = {type:"object",additionalProperties:false,properties:{reply:{type:"string"}},required:["reply"]};
+// Private replies have one body; groups may explicitly address peer members.
+const replySchema = {type:"object",additionalProperties:false,properties:{reply:{type:"string"}},required:["reply"]};
 
 export function createCommunicationService(store, { root, invoke, files } = {}) {
   const active = new Map();
   async function execute(key, item) {
       try {
-        if (!item.available) throw new Error("被 @ 的成员已离开团队或停用，请恢复成员后重试");
+        if (!item.available) throw new Error("被 @ 的成员已离开群聊、停用或删除");
+        const group = store.getCommunication(key, { limit: 1 }).conversation.kind === "group";
+        const schema = group ? { ...replySchema, properties: { ...replySchema.properties, mentionAgentIds: { type: "array", items: { type: "string" } } }, required: ["reply", "mentionAgentIds"] } : replySchema;
         const agent = item.agentSnapshot, cwd = resolve(root, key, agent.id);
         store.assertRuntimeEnabled(agent.runtime);
         await mkdir(cwd, { recursive: true, mode: 0o700 });
@@ -49,9 +51,10 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
         let parsed;
         try { parsed = JSON.parse(result.finalText); } catch (error) { diagnostic("communication.result_parse_error", { error }); throw new Error("Agent 未返回有效的沟通回复 JSON"); }
         if (!parsed || typeof parsed.reply !== "string" || !parsed.reply.trim()) throw new Error("Agent 沟通回复为空");
-        if(Array.isArray(parsed) || Object.keys(parsed).some(key=>key!=="reply"))throw new Error("Agent 沟通回复只接受 reply 正文");
+        if(Array.isArray(parsed) || Object.keys(parsed).some(key=>key!=="reply" && !(group && key==="mentionAgentIds")))throw new Error(group ? "群聊回复只接受 reply 和 mentionAgentIds" : "沟通回复只接受 reply");
+        if (group && !Array.isArray(parsed.mentionAgentIds)) throw new Error("群聊回复须提供 mentionAgentIds，普通答复用 []");
         const reply = redactExternalText(parsed.reply);
-        store.completeCommunication(key, item.id, reply);
+        store.completeCommunication(key, item.id, reply, group ? parsed.mentionAgentIds : []);
         diagnostic("communication.completed");
       } catch (error) {
         diagnostic("communication.failed", { error });

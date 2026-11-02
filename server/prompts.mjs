@@ -19,7 +19,7 @@ function persona(agent) {
 }
 
 export function taskPrompt({ task, run, node, trace, agent, directory, cwd, workspace, messages, roster, mode, delivery, session }) {
-  const manager = agent.kind === "manager";
+  const manager = agent.id === run.manager?.id;
   const systemPrompt = [
     truth, persona(agent), taskRules, consultationRules,
     `可咨询角色：${JSON.stringify(roster)}`,
@@ -56,7 +56,10 @@ export function taskPrompt({ task, run, node, trace, agent, directory, cwd, work
 }
 
 export function communicationPrompt({ agent, context, root, cwd, messages }) {
-  const systemPrompt = [truth, persona(agent), chatRules, chatOutput,
+  const group = context.conversation.kind === "group";
+  const groupOutput = '这是公开群聊。可回复人类或成员；所有回复都公开。只输出 JSON {"reply":"完整回复","mentionAgentIds":[]}；确需其他成员回答时在 mentionAgentIds 填真实员工 ID，并在正文写清问题，普通答复填 []。这不是转交：不代替他人回答，不声称已经收到答复。同一人类消息发起的一轮讨论中，每位成员最多被唤醒一次，已参与者可看到公开记录，不重复召唤。';
+  const systemPrompt = [truth, persona(agent), chatRules, group ? groupOutput : chatOutput,
+    ...(group ? [`当前群聊成员：${JSON.stringify(context.conversation.members.map(({id,name,description,capabilities})=>({id,name,description,capabilities})))}`] : []),
     `执行环境：\n会话主目录：${root}\n本次运行目录：${cwd}\n上传附件位于会话主目录的 attachments 子目录，实际文件路径由当前消息提供。`
   ].join("\n\n");
   const additional = messages.filter(item => item.id !== context.message.id);

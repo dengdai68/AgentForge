@@ -19,6 +19,7 @@ assert.equal(dirname(root), resolve('.data')); assert.match(basename(root), /^pr
 const packaged = process.env.AGENTFORGE_PROMPT_E2E_PACKAGED === '1';
 const nativeSkills = process.env.AGENTFORGE_NATIVE_SKILLS_REAL === '1';
 const taskOnly = process.env.AGENTFORGE_PROMPT_E2E_TASK_ONLY === '1';
+const membership = process.env.AGENTFORGE_MEMBERSHIP_REAL === '1';
 const home = join(root, 'home'), data = packaged ? join(home, '.agentforge/desktop') : join(root, 'client'); await mkdir(home, { recursive: true, mode: 0o700 });
 const password = randomBytes(24).toString('hex');
 const auth = createAuth({ databasePath: join(data, 'auth.sqlite') }); await auth.setAdministrator('prompt-qa', password); auth.close();
@@ -39,11 +40,11 @@ const codex = employee({ name: 'Codex 原生会话验证', systemPrompt: cc.syst
 const developer = employee({ name: '实现者', capabilities: ['Node.js', '代码实现'], systemPrompt: '实际实现代码并运行 node --test。在 docs/develop/ 中保存代码、测试和 report.md。报告写出实际命令、结果及错误。业务交接用普通文字即可，不编排流程。', runtime: { profileId: profiles['claude-code'] } });
 const tester = employee({ name: '独立测试者', capabilities: ['独立测试', 'Node.js'], systemPrompt: '必须独立读取并实际运行实现者的代码和测试，在 docs/verify/report.md 写真实结果。不要仅信任实现者摘要。完成后以普通文字说明结果，不编排流程。', runtime: { profileId: profiles['claude-code'] } });
 const manager = employee({ name: '调度者', kind: 'manager', systemPrompt: '协调本次真实验收。首次调用先向 human consultation 提问“是否按简体中文标题整理器的范围执行？”；得到精确回答后安排 develop，再根据真实交接安排 verify，最后提交人类验收。必须返回有效 managerDecision 并明确 nextAgentId；不自行开发、审校或测试，不凭口头派工声称员工已运行。', runtime: { profileId: profiles['claude-code'] } });
-const team = store.listTeams().find(item => item.name === '提示词真实验收') || store.createTeam({ name: '提示词真实验收', managerAgentId: manager.id, memberAgentIds: [developer.id, tester.id] });
+const team = store.listTeams().find(item => item.name === '提示词真实验收') || store.createTeam({ name: '提示词真实验收', memberAgentIds: [...new Set([developer.id, tester.id, manager.id])] });
 const absentCli = join(root, 'not-installed-claude');
 const failureProfile = {id:profiles['claude-code']};
 const failureManager = employee({ name:'启动失败验证经理', kind:'manager', runtime:{profileId:failureProfile.id} });
-const failureTeam = store.listTeams().find(item => item.name === '启动失败验证') || store.createTeam({ name:'启动失败验证', managerAgentId:failureManager.id, memberAgentIds:[developer.id] });
+const failureTeam = store.listTeams().find(item => item.name === '启动失败验证') || store.createTeam({ name:'启动失败验证', memberAgentIds: [...new Set([tester.id, failureManager.id])] });
 const flow = store.listWorkflowTemplates().find(item => item.name === '实现与独立验证') || store.createWorkflowTemplate({ name: '实现与独立验证', nodes: [
   { id: 'develop', title: '实现标题整理器', staffingGuidance: '选择具备 Node.js 代码实现能力的成员。', deliverable: '在 docs/develop/normalize.mjs 导出 normalizeTitle(value)：字符串 trim、将连续空白折叠为单空格；非字符串抛 TypeError。在 docs/develop/normalize.test.mjs 使用 node:test 覆盖中文、英文、换行、多空白、空串和非法输入，不修改输入；至少六个用例。先单独执行 node -e "process.exit(7)" 记录预期失败，再以另一条命令运行真实测试。写 report.md。', artifactPaths: ['docs/develop/'], dependsOn: [] },
   { id: 'verify', title: '独立验证', staffingGuidance: '选择具备独立测试能力且不是作者的成员。', deliverable: '读取 docs/develop/ 源码及测试，独立运行 node --test docs/develop/normalize.test.mjs；再独立验证至少两个边界。报告放 docs/verify/report.md，写实际命令、退出码、问题和未验证项。', artifactPaths: ['docs/verify/'], dependsOn: ['develop'] }
@@ -118,7 +119,7 @@ try {
     consoleLog('PASS native memory and system instructions: ' + agent.runtime.provider);
   }
   if(nativeSkills)await api('/api/agents/'+developer.id,{systemPrompt:developer.systemPrompt+' 开发前执行原生能力验证，输出 docs/develop/native-proof.json。',runtime:{profileId:profiles['claude-code'],extensionSelection:{pluginIds:[nativePlugin.id],mcpIds:[]}}},'PUT');
-  const created = existingTask || await api('/api/tasks', { title: 'PROMPT-E2E｜真实代码与独立测试', objective: '执行完整的标题整理器开发与独立测试，不只写方案。先由经理向人类澄清范围，得到回答再派工。禁止修改外部项目、凭据或远程发布。实现者先执行预期失败探针并记录，再完成真实代码与测试；独立测试者实际测试后交接，经理提交人类验收。', teamId: team.id, workflowTemplateId: flow.id });
+  const created = existingTask || await api('/api/tasks', { title: 'PROMPT-E2E｜真实代码与独立测试', objective: '执行完整的标题整理器开发与独立测试，不只写方案。先由经理向人类澄清范围，得到回答再派工。禁止修改外部项目、凭据或远程发布。实现者先执行预期失败探针并记录，再完成真实代码与测试；独立测试者实际测试后交接，经理提交人类验收。', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   const task = created.task || created; const started = existingRun ? { run: existingRun } : await api('/api/tasks/' + task.id + '/run', {}); const runId = started.run?.id || started.id;
   evidence.task = { taskId: task.id, runId };
   const state = () => api('/api/runs/' + runId + '/workspace?view=summary');
@@ -126,6 +127,12 @@ try {
   const blocked = await wait('human clarification', async () => { const w = await state(); if (w.run.status === 'failed') throw new Error(JSON.stringify(w.run.failure)); if(w.run.status === 'awaiting_acceptance')throw new Error('Manager skipped required human clarification and requested acceptance'); return w.run.status === 'awaiting_human' ? w : null; });
   const question = blocked.pendingQuestions.find(item => item.recipient.type === 'human'); assert.ok(question);
   await new Promise(done => setTimeout(done, 2500)); assert.equal((await state()).traces.length, blocked.traces.length);
+  if(membership) {
+    await api('/api/teams/'+team.id,{},'DELETE');await api('/api/agents/'+developer.id,{},'DELETE');
+    const after=await state();assert.equal(after.run.participants.some(member=>member.id===developer.id),true);assert.ok(after.deletedAgentIds.includes(developer.id));
+    assert.equal((await api('/api/agents')).agents.some(member=>member.id===developer.id),false);assert.equal(Object.hasOwn(after.run.task,'teamId'),false);
+    evidence.teamDeletedAndEmployeeDeletedMidRun=true;
+  }
   await api('/api/runs/' + runId + '/messages', { replyToMessageId: question.id, content: '确认，按此范围执行。请完成实现和独立测试，最后等待我确认。' });
   evidence.clarificationBlocked = true;
   }
@@ -159,27 +166,41 @@ try {
   const completed = await wait('visible human confirmation', async () => { const w = await state(); return w.run.status === 'completed' ? w : null; }); assert.equal(completed.run.confirmedBy, 'human_operator');
   evidence.task = { ...evidence.task, independentTestOutput: output, humanConfirmation: completed.run.confirmedBy, traceCount: completed.traces.length };
   await page.screenshot({ path: join(root, 'task-completed.png') });
-  await api('/api/runs/' + runId + '/messages', { recipientAgentId: developer.id, content: '只答疑，不修改文件或恢复业务流程。请实际使用平台历史工具 search_task_activity 查询本任务“PROMPT-E2E”，回复本任务 ID、当前状态和你的交付文件路径。' });
+  await api('/api/runs/' + runId + '/messages', { recipientAgentId: membership ? tester.id : developer.id, content: '只答疑，不修改文件或恢复业务流程。请实际使用平台历史工具 search_task_activity 查询本任务“PROMPT-E2E”，回复本任务 ID、当前状态和你的交付文件路径。' });
   const answered = await wait('completed task real history inquiry', async () => { const w = await state(); return w.dispatches.every(d => ['done', 'cancelled'].includes(d.status)) && w.messages.some(m => m.kind === 'inquiry_answer' && m.content.includes(task.id)) ? w : null; });
   assert.equal(answered.run.status, 'completed');
+  if(membership) {
+    await assert.rejects(api('/api/runs/'+runId+'/messages',{recipientAgentId:developer.id,content:'已删除员工不可重新唤醒'}),/已删除/);
+    assert.ok(answered.messages.some(message=>message.sender.id===developer.id),'frozen employee handoff remains visible');
+  }
   const full = await api('/api/runs/' + runId + '/workspace');
   assert.ok(full.events.some(e => e.data?.toolResultId && e.data?.toolName?.endsWith('search_task_activity')));
   await page.reload(); await page.locator('.collaboration-row.from-human').last().waitFor();
   assert.equal(await page.locator('.collaboration-review, [data-stop-inquiries]').count(), 0);
   assert.equal(await page.locator('#instruction-text').isEnabled(), true);
+  if(membership) {
+    const trace=answered.traces.find(item=>item.agentId===developer.id&&item.type==='node'&&item.status==='completed');
+    await page.locator(`[data-open-collaboration-trace="${trace.id}"]`).first().click();
+    await page.locator('.console-heading strong').filter({hasText:developer.name}).waitFor();
+    assert.equal(await page.locator(`[data-select-agent="${developer.id}"]`).count(),0,'deleted employee stays out of the employee tabs');
+    await page.locator('#trace-stream .log-row').first().waitFor();
+    await page.screenshot({path:join(root,'deleted-employee-historical-console.png')});
+    await page.locator('[data-ws-tab="collaboration"]').click();
+    evidence.task.deletedEmployeeHistoricalConsole=true;
+  }
   await page.screenshot({ path: join(root, 'completed-task-inquiry.png') });
-  if (app) await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(760, 600));
-  else await page.setViewportSize({ width: 760, height: 600 });
-  await page.waitForFunction(() => innerWidth === 760 && innerHeight === 600);
+  if (app) await app.evaluate(({ BrowserWindow }, origin) => BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().startsWith(origin)).setContentSize(760, 700),origin);
+  else await page.setViewportSize({ width: 760, height: 700 });
+  await page.waitForFunction(() => innerWidth === 760 && innerHeight === 700);
   await page.screenshot({ path: join(root, 'completed-task-inquiry-narrow.png') });
   await api('/api/tasks/' + task.id + '/archive', {}); await page.reload();
   await page.locator('#instruction-text:disabled').waitFor();
   await assert.rejects(api('/api/runs/' + runId + '/messages', { recipientAgentId: developer.id, content: '此请求应因归档被拒绝' }), /归档/);
-  evidence.task.completedInquiry = true; evidence.task.archivedReadOnly = true;
+  evidence.task.completedInquiry = true; evidence.task.archivedReadOnly = true; evidence.task.lifecyclePassed = true;
   // Controlled failure of the fixed CLI command in this isolated PATH.
   const savedWrapper = await readFile(join(root,'claude'));
   await writeFile(join(root,'claude'), '#!/bin/sh\nexec ' + JSON.stringify(absentCli) + ' "$@"\n', {mode:0o700});
-  const failureTaskResult=await api('/api/tasks',{title:'CLI 缺失原始错误验证',objective:'仅验证缺失可执行文件，不执行任何业务。',teamId:failureTeam.id,workflowTemplateId:flow.id});
+  const failureTaskResult=await api('/api/tasks',{title:'CLI 缺失原始错误验证',objective:'仅验证缺失可执行文件，不执行任何业务。',memberAgentIds: failureTeam.memberAgentIds,workflowTemplateId:flow.id});
   const failureTask=failureTaskResult.task || failureTaskResult;
   const failureStarted=await api('/api/tasks/'+failureTask.id+'/run',{});
   const failureRunId=failureStarted.run?.id || failureStarted.id;
@@ -188,9 +209,9 @@ try {
   assert.equal(failed.dispatches[0].status,'cancelled');assert.equal(failed.dispatches[0].nextRetryAt,null);
   await assert.rejects(api('/api/runs/'+failureRunId+'/retry-now',{}),/没有等待退避/);
   await page.goto(origin+'/runs/'+failureRunId);await page.locator('#console-mode').click();
-  await page.locator('#trace-stream .log-row:visible').filter({hasText:/ENOENT/}).first().waitFor();
+  await page.locator('#trace-stream .log-row:visible').filter({hasText:/ENOENT|not-installed-claude/}).first().waitFor();
   await page.screenshot({path:join(root,'original-runtime-error-narrow.png')});
-  if(app)await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1400,950));else await page.setViewportSize({width:1400,height:950});
+  if(app)await app.evaluate(({BrowserWindow},origin)=>BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().startsWith(origin)).setContentSize(1400,950),origin);else await page.setViewportSize({width:1400,height:950});
   await page.waitForFunction(()=>innerWidth===1400 && innerHeight===950);
   await page.screenshot({path:join(root,'original-runtime-error.png')});
   await writeFile(join(root,'claude'),savedWrapper,{mode:0o700});

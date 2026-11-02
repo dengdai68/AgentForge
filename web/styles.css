@@ -100,7 +100,8 @@
 .extension-picker-search:has(.extension-picker-options:not([hidden]))::after { content:""; position:absolute; left:0; right:0; top:100%; height:5px; z-index:10; }
 .extension-picker-control { display:flex; align-items:center; flex-wrap:wrap; gap:5px; min-height:38px; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--paper); cursor:text; }
 .extension-picker-control:focus-within { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-line); }
-#agent-form .extension-picker-control > input { flex:1 1 100px; width:100px; min-width:70px; min-height:26px; padding:2px 0; margin:0; border:0; border-radius:0; background:transparent; box-shadow:none; outline:none; font:inherit; }
+/* The chip control owns focus; override generic form skins in both hosts. */
+:is(html:root,html:root[data-theme]) .extension-picker .extension-picker-control > input,:is(html:root,html:root[data-theme]) .extension-picker .extension-picker-control > input:focus { flex:1 1 100px; width:100px; min-width:70px; min-height:26px; padding:2px 0; margin:0; border:0; border-radius:0; background:transparent; box-shadow:none; outline:none; font:inherit; }
 .extension-picker-options { position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:10; max-height:190px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:4px; background:var(--paper); box-shadow:var(--shadow); }
 .extension-picker-options button { display:block; text-align:left; width:100%; padding:8px; border:0; border-radius:4px; background:transparent; color:var(--ink); font-size:12px; }
 .extension-picker-options button:hover,.extension-picker-options button:focus-visible { background:var(--selection-bg); }.extension-picker-options small { display:block; color:var(--muted); margin-top:3px; overflow-wrap:anywhere; }
@@ -2015,3 +2016,44 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 .task-create-modal .task-selectors { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .task-workspace-hint { color:var(--muted); font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
 .task-submit-actions { display:flex; justify-content:flex-end; gap:8px; }
+
+/* Conversations own their roster; the execution console opens at the far right. */
+.communication-panes { position:relative; grid-template-columns:minmax(0,1fr) 180px; }
+.communication-panes.console-open { grid-template-columns:minmax(240px,1fr) 156px minmax(280px,1fr); }
+.communication-roster { min-width:0; overflow:auto; border-left:1px solid var(--line); background:var(--paper); padding:12px; }
+.communication-roster > header,.communication-member-detail > header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-bottom:12px; font-size:13px; }
+.communication-roster header button { font-size:11px; }
+.communication-roster-member { display:flex; align-items:center; gap:8px; min-height:38px; }
+.communication-roster-member > button:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; text-align:left; font-size:12px; }
+.member-console-icon { flex:none; display:inline-flex; padding:5px; color:var(--muted); }
+.communication-member-detail { position:absolute; z-index:8; right:0; top:0; bottom:0; width:min(360px,95%); overflow:auto; padding:18px; background:var(--paper); border-left:1px solid var(--line); box-shadow:var(--shadow); }
+.communication-member-detail dt { margin-top:16px; color:var(--muted); font-size:12px; }
+.communication-member-detail dd { margin:6px 0 0; overflow-wrap:anywhere; font-size:13px; }
+.communication-member-prompt { white-space:pre-wrap; line-height:1.6; }
+.communication-member-prompt h4 { margin:12px 0 4px; font-size:12px; }
+.communication-console-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.communication-console-toolbar > strong { min-width:0; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.communication-console-actions { flex:none; }
+.communication-addressed { display:block; margin-bottom:6px; color:var(--muted); }
+[data-toggle-chat-members] { display:none; }
+@media(max-width:1200px) {
+  .communication-panes.console-open { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .console-open .communication-roster { display:none; }
+  [data-toggle-chat-members] { display:inline-block; }
+  .communication-panes.members-open .communication-roster { display:block; position:absolute; z-index:7; right:0; top:0; bottom:0; width:200px; box-shadow:var(--shadow); }
+}
+@media(max-width:760px) {
+  .communication-panes { grid-template-columns:minmax(0,1fr); }
+  .communication-roster { display:none; }
+  .communication-panes.console-open { grid-template-columns:minmax(0,1fr); }
+  .console-open .communication-chat { display:none; }
+  .communication-picker .extension-picker-options { position:relative; top:0; margin-top:4px; max-height:190px; }
+}
+
+.task-selectors .extension-picker-control { max-height:96px; overflow:auto; }
+.task-selectors .extension-picker-options { top:auto; bottom:calc(100% + 4px); max-height:min(240px,40dvh); }
+.task-selectors .extension-picker-search:has(.extension-picker-options:not([hidden]))::after { top:auto; bottom:100%; }
+.communication-picker .extension-picker-options { position:relative; top:0; margin-top:4px; }
+
+[data-close-chat-members] { display:none; }
+.members-open [data-close-chat-members] { display:inline-block; }

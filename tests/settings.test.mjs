@@ -38,7 +38,7 @@ test('task console defaults to the latest executed known member, not the last fi
   assert.equal(select(agents,[]),null);
   assert.equal(select(agents,[{agentId:'worker',startedAt:'2026-10-01',endedAt:'2026-10-05'},{agentId:'manager',startedAt:'2026-10-02',endedAt:'2026-10-03'},{agentId:'unknown',startedAt:'2026-10-06'}]),'manager');
   assert.equal(select(agents,[{agentId:'manager',startedAt:'2026-10-02'},{agentId:'worker',startedAt:'2026-10-03',status:'running'}]),'worker');
-  assert.match(source,/if \(!agents.some\(\(agent\) => agent.id === state.selectedAgentId\)\) state.selectedAgentId = tab === 'console' \? latestExecutedAgentId/);
+  assert.match(source,/if \(!consoleAgents.some\(\(agent\) => agent.id === state.selectedAgentId\)\) state.selectedAgentId = tab === 'console' \? latestExecutedAgentId/);
 });
 test('workspace HTTP save creates missing directories, preserves existing files and never persists invalid paths',async t=>{
   await mkdir('.data',{recursive:true});const root=await mkdtemp(resolve('.data/workspace-create-'));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -137,61 +137,18 @@ test("Runtime headings stay subordinate and General uses an explicit native radi
   assert.doesNotMatch(settings, /profile && !profile\.system/);
 });
 
-test("team editing preserves inactive selections and requires an available manager and business member", async () => {
-  const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const controller = source.slice(source.indexOf("function teamModal("), source.indexOf("const newTeamModal ="));
-  const agents = [
-    { id: "manager-active", kind: "manager", status: "active", name: "可用经理" },
-    { id: "manager-inactive", kind: "manager", status: "inactive", name: "原经理" },
-    { id: "member-active", kind: "business", status: "active", name: "可用员工" },
-    { id: "member-inactive", kind: "business", status: "inactive", name: "原员工" },
-  ];
-  const handlers = {}, errors = [], calls = [], notices = [];
-  const managerField = {}, membersField = {}, pickers = {};
-  const form = {
-    closest: () => ({ classList: { add() {} } }),
-    name: { value: "仅改团队名" }, elements: { managerAgentId: managerField },
-    querySelector: selector => selector === ".check-grid" ? membersField : null,
-    addEventListener: (event, callback) => { handlers[event] = callback; },
-  };
-  let html = "", values = { name: "仅改团队名", mission: "", managerAgentId: "manager-inactive", memberAgentIds: ["member-active", "member-inactive"] };
-  const context = {
-    state: { agents }, toast: (...args) => notices.push(args), esc: String, roleColor: () => "", initialsOf: () => "",
-    openModal: value => { html = value; }, $: selector => selector === "#team-manager-search" ? managerField : selector === "#team-members-search" ? membersField : form, clearInvalid() {},
-    mountEmployeePicker: (host, options) => { pickers[options.name] = options; },
-    setInvalid: (field, message) => errors.push({ field, message }),
-    FormData: class { get(name) { return values[name]; } getAll(name) { return values[name]; } },
-    api: async (path, options) => calls.push({ path, input: JSON.parse(options.body) }), closeModal() {}, refresh: async () => {},
-  };
-  vm.runInNewContext(`${controller}; teamModal({id:'team',name:'原团队',managerAgentId:'manager-inactive',memberAgentIds:['member-active','member-inactive']});`, context);
-  assert.deepEqual(Array.from(pickers.managerAgentId.selectedIds), ["manager-inactive"]);
-  assert.deepEqual(Array.from(pickers.memberAgentIds.selectedIds), ["member-active", "member-inactive"]);
-  assert.ok(pickers.memberAgentIds.agents.some(agent => agent.id === "member-inactive"));
-  await handlers.submit({ preventDefault() {} });
-  assert.equal(calls.length, 0);
-  assert.equal(errors[0].field, managerField);
-  assert.match(errors[0].message, /可用的项目经理/);
-
-  values = { ...values, managerAgentId: "manager-active", memberAgentIds: ["member-inactive"] };
-  errors.length = 0;
-  await handlers.submit({ preventDefault() {} });
-  assert.equal(calls.length, 0);
-  assert.equal(errors[0].field, membersField);
-  assert.match(errors[0].message, /可用业务数字员工/);
-
-  values.memberAgentIds = ["member-active", "member-inactive"];
-  errors.length = 0;
-  await handlers.submit({ preventDefault() {} });
-  assert.equal(errors.length, 0);
-  assert.equal(calls[0].path, "/api/teams/team");
-  assert.deepEqual(calls[0].input.memberAgentIds, ["member-active", "member-inactive"], "saving a name does not silently discard inactive members");
-  assert.equal(calls[0].input.managerAgentId, "manager-active", "replacement is an explicit selection, never an implicit first option");
-
-  context.state.agents = agents.filter(agent => agent.id !== "manager-active");
-  html = "";
-  vm.runInNewContext("teamModal();", context);
-  assert.equal(html, "");
-  assert.match(notices.at(-1)[0], /创建或启用一位项目经理/);
+test("team edits preserve inactive members and allow an empty manager-free roster", async () => {
+  const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8');
+  const controller=source.slice(source.indexOf('function teamModal('),source.indexOf('const newTeamModal ='));
+  const agents=[{id:'active',status:'active',kind:'business',name:'员工'},{id:'inactive',status:'inactive',kind:'business',name:'停用员工'}];
+  const handlers={},calls=[],errors=[];let selected=['active','inactive'],picker;
+  const form={name:{value:'更新团队名'},mission:{value:'使命'},closest:()=>({classList:{add(){}}}),addEventListener:(name,handler)=>{handlers[name]=handler;}};
+  const context={state:{agents},esc:String,openModal(){},$:selector=>selector==='#team-form'?form:{},createEmployeeMultiSelect:(host,options)=>{picker=options;return{value:()=>selected};},clearInvalid(){},setInvalid:(field,error)=>errors.push(error),api:async(path,options)=>calls.push({path,input:JSON.parse(options.body)}),closeModal(){},toast(){},refresh:async()=>{}};
+  vm.runInNewContext(`${controller};teamModal({id:'team',memberAgentIds:['active','inactive']});`,context);
+  assert.deepEqual(Array.from(picker.selectedIds),['active','inactive']);assert.equal(picker.items,agents);
+  await handlers.submit({preventDefault(){}});assert.deepEqual(calls[0],{path:'/api/teams/team',input:{name:'更新团队名',mission:'使命',memberAgentIds:['active','inactive']}});
+  selected=[];await handlers.submit({preventDefault(){}});assert.deepEqual(calls[1].input.memberAgentIds,[]);
+  form.name.value=' ';await handlers.submit({preventDefault(){}});assert.equal(calls.length,2);assert.equal(errors.length,1);
 });
 
 test("configuration deletion responses cannot close or contaminate a replacement modal", async () => {
@@ -615,7 +572,7 @@ test("workspace settings persist and affect only new Tasks with atomic audit", a
   const directory = await mkdtemp(resolve(".data/workspace-settings-test-"));
   const databasePath = join(directory, "state.sqlite");
   const store = createStore({ databasePath, workspaceRoot: join(directory, "original") });
-  const input = { title: "目录验收", objective: "保存新任务路径", teamId: store.listTeams()[0].id, workflowTemplateId: store.listWorkflowTemplates()[0].id };
+  const input = { title: "目录验收", objective: "保存新任务路径", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: store.listWorkflowTemplates()[0].id };
   const old = store.createTask(input), run = store.createRun(old.id);
   for (const invalid of ["/", "relative", "", null, "/invalid\0path"]) assert.throws(() => store.updateWorkspaceSettings({ workspaceRoot: invalid }));
   assert.equal(store.getWorkspaceSettings().source, "startup");
@@ -676,14 +633,13 @@ test("Runtime settings keep the shared card spacing container during loading fai
   assert.equal(context.runtimeLoaded, false);
 });
 
-test("task search combines name, exact status and stable team identity", async () => {
+test("task search combines name and exact status without a team relation", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const matches = vm.runInNewContext(`${source.slice(source.indexOf("function taskMatchesSearch("), source.indexOf("function renderTasks()"))}; taskMatchesSearch`);
-  const task = { title: "验收 Alpha 门户", status: "awaiting_acceptance", teamId: "team-a", team: { id: "team-a", name: "交付团队" } };
-  assert.equal(matches(task, { name: " ALPHA ", status: "awaiting_acceptance", teamId: "team-a" }), true);
-  for (const query of [{ name: "不存在" }, { status: "done" }, { teamId: "team-b" }, { name: "门户", status: "running", teamId: "team-a" }]) assert.equal(matches(task, query), false);
+  const task = { title: "验收 Alpha 门户", status: "awaiting_acceptance" };
+  assert.equal(matches(task, { name: " ALPHA ", status: "awaiting_acceptance" }), true);
+  for (const query of [{ name: "不存在" }, { status: "done" }, { name: "门户", status: "running" }]) assert.equal(matches(task, query), false);
   assert.equal(matches(task), true);
-  assert.equal(matches({ title: "旧任务", status: "done", team: { id: "old-team" } }, { teamId: "old-team" }), true);
   assert.equal(matches({}, { name: "任务" }), false);
   assert.equal(task.status, "awaiting_acceptance");
   assert.match(source, /name="runtimeProfileId"/);

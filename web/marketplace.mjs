@@ -93,7 +93,7 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
 export const createMcpMarketplaceUI = options => marketUI(options,'mcp');
 // Shared employee picker: chips and search live inside one field boundary.
 // IDs remain the saved values; display order is not a priority control.
-export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items=[],selectedIds=[],available=()=>true,reason=()=>'',detail=()=>'',emptyMessage=()=> '没有可添加的匹配项'}) {
+export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items=[],selectedIds=[],available=()=>true,reason=()=>'',detail=()=>'',emptyMessage=()=> '没有可添加的匹配项',expand=item=>[item.id],onChange=()=>{}}) {
   const selected=new Set(selectedIds);let catalog=items;
   target.classList.add('extension-picker');
   target.innerHTML=`<label for="${esc(id)}">${esc(label)}</label><div class="extension-picker-search"><div class="extension-picker-control"><div class="extension-picked"></div><input id="${esc(id)}" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${esc(id)}-options" autocomplete="off" placeholder="${esc(placeholder)}"></div><div class="extension-picker-options" id="${esc(id)}-options" role="listbox" hidden></div></div>`;
@@ -111,16 +111,16 @@ export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items
   input.onkeydown=event=>{
     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}
     if(event.key==='ArrowDown'){event.preventDefault();open();list.querySelector('button:not(:disabled)')?.focus();}
-    if(event.key==='Backspace' && !input.value && selected.size){selected.delete([...selected].at(-1));paint();}
+    if(event.key==='Backspace' && !input.value && selected.size){selected.delete([...selected].at(-1));paint();onChange([...selected]);}
   };
   list.onkeydown=event=>{const buttons=[...list.querySelectorAll('button:not(:disabled)')],index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;buttons[next]?.focus();}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(true);}};
-  list.onclick=event=>{const button=event.target.closest('[data-add-extension]');if(!button || button.disabled)return;selected.add(button.dataset.addExtension);input.value='';paint();input.focus();close();};
-  chips.onclick=event=>{const button=event.target.closest('[data-remove-extension]');if(button){selected.delete(button.dataset.removeExtension);paint();input.focus();close();}};
+  list.onclick=event=>{const button=event.target.closest('[data-add-extension]');if(!button || button.disabled)return;expand(catalog.find(item=>item.id===button.dataset.addExtension)).forEach(value=>selected.add(value));input.value='';paint();onChange([...selected]);input.focus();close();};
+  chips.onclick=event=>{const button=event.target.closest('[data-remove-extension]');if(button){selected.delete(button.dataset.removeExtension);paint();onChange([...selected]);input.focus();close();}};
   target.addEventListener('focusout',event=>{if(!search.contains(event.relatedTarget))close();});
   target.onpointerleave=event=>{if(event.pointerType==='mouse')close(true);};
   (target.closest('form') || target).addEventListener('pointerdown',event=>{if(!target.contains(event.target))close(true);});
   paint();
-  return {refresh(items=catalog){catalog=items;paint();},value(){return [...selected];}};
+  return {refresh(items=catalog){catalog=items;paint();},value(){return [...selected];},setValue(values){selected.clear();values.forEach(value=>selected.add(value));paint();onChange([...selected]);}};
 }
 
 export function createMarketplaceUI(options) {

@@ -1,5 +1,7 @@
 # 工程脚本
 
+任务/团队验收夹具使用显式 memberAgentIds，团队选人仅作为 UI 展开来源；真实任务按冻结成员运行。test-task-creation 与 test-communication-workbench 覆盖独立成员和群聊，test-prompt-e2e 验证真实完整任务与人类验收。
+
 客户端专用验收：源码/安装包均操作 Electron，自有服务随机端口。test-prompt-e2e 验证真实任务和历史；test-communication-workbench 验证沟通；已移除固定端口 Web 设置/历史脚本和独立浏览器分支。
 
 test-roles-ui.mjs 在隔离 Electron 验收角色目录：导航入口、创建/编辑、搜索、每页20条分页、员工单选绑定/清空、绑定角色删除拒绝就地列出员工及窄窗口工具栏；不调用模型。AGENTFORGE_ROLES_REAL=1 node scripts/test-roles-real.mjs 以真实 Claude Code/Codex 验证角色提示词进入沟通与任务的应用系统/developer 指令并生效（随机探针前缀），对照未绑定员工与经理不受污染，覆盖解绑/编辑后的后续投递与任务冻结原文；只使用已有 CLI 登录，证据写 .data/roles-real-*。

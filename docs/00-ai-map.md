@@ -1,8 +1,12 @@
 # 代码导航
 
+任务成员与删除：`server/store.mjs` 负责独立 `memberAgentIds`、唯一经理、员工逻辑删除及冻结任务；契约见 [领域模型](03-domain-model.md)。`client/console-projections.mjs` 过滤当前员工 Tab，历史控制台仍可按 Trace 打开。
+
+群聊：`server/communication-store.mjs` 管理独立名字/成员与定向投递，`communication.mjs` 调用 Runtime，`web/communication.js` 展示成员详情及最右侧控制台。创建/编辑 API、公开交流与轮次规则见 [长期沟通](17-communication.md)。
+
 Runtime 恢复结算：local-cli 仅在原生明确成功完成且进程正常退出时让早期错误退为历史；Codex 后续输出不继承旧错误展示。runtime-configuration 覆盖恢复、缺少完成、非零退出及后续新失败；test-roles-ui 覆盖八行提示词和 MCP 卡片隐藏短 ID，CLI 协议不变。
 
-任务创建：app.js 的 newTaskModal 只保留标题、内容、可选折叠验收标准和底部团队/流程，移除人员说明生成器；task-create-modal 复用弹框分组与样式。test-task-creation 使用隔离 Electron 验证两主题三种窗口尺寸及真实 HTTP 创建；明确拒绝启动，不将展示测试当 Provider 证据。
+任务创建：app.js 的 newTaskModal 只保留标题、内容、可选折叠验收标准和底部成员/流程，移除人员说明生成器；task-create-modal 复用弹框分组与样式。test-task-creation 使用隔离 Electron 验证两主题三种窗口尺寸及真实 HTTP 创建；明确拒绝启动，不将展示测试当 Provider 证据。
 
 设置二级分组密度由 compact.css 统一收紧 Runtime/仓库访问；app.js 的 renderTasks 直接展示允许的操作，移除菜单与全局菜单监听。test-runtime-settings 覆盖两主题宽窄展示、删除确认及归档/恢复往返；API/CLI/Store 不变。
 

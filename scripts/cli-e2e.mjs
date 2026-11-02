@@ -96,13 +96,13 @@ export async function setupCliConfiguration({ root, api, page, username, passwor
   await cli(['agents','update',auxiliary.id,'--file','-'],{runtime:{extensionSelection:{pluginIds:[],mcpIds:[],skillIds:[]}}},2);
   await write('agents','update',{runtime:{extensionSelection:{pluginIds:[],mcpIds:[]}}},auxiliary.id);
   await cli(['runtimes','delete',connection.id,'--yes'],undefined,2);
-  assert.equal((await cli(['runtimes','list','--all'])).total,2);
+  assert.equal((await cli(['runtimes','list','--all'])).total,3);
   const employee = (name, responsibility) => write('agents', 'create', { name, kind: 'business', capabilities: ['Node.js ESM', '真实测试', '内容工具'], systemPrompt: `仓库工作说明：${repository.url}（基线 ${repository.ref}）；由你根据任务需要在 Run 工作目录准备，共享文件。${responsibility}：实际执行、核验文件与测试，明确说明失败。只提交本地commit，不push或部署。`, runtime: { profileId: connection.id, extensionSelection: { mcpIds: [], pluginIds: [] } } });
   const { agent: developer } = await employee('CLI真实代码开发', '研发工程师');
   const { agent: tester } = await employee('CLI独立代码核验', '测试工程师');
-  const { team } = await write('teams', 'create', { name: 'CLI代码开发实测团队', managerAgentId: defaultManager.id, memberAgentIds: [developer.id, tester.id] });
+  const { team } = await write('teams', 'create', { name: 'CLI代码开发实测团队', memberAgentIds: [...new Set([developer.id, tester.id, defaultManager.id])] });
   await write('teams', 'update', { mission: '通过CLI配置，真实开发并独立核验' }, team.id);
-  assert.equal((await cli(['teams', 'get', team.id])).memberAgentIds.length, 2);
+  assert.equal((await cli(['teams', 'get', team.id])).memberAgentIds.length, 3);
   const definition = { name: 'CLI真实开发与独立测试', nodes: [
     { id: 'develop', title: '实现任务搜索工具', staffingGuidance: '选择擅长Node.js ESM、内容工具、真实执行测试的开发成员', dependsOn: [], artifactPaths: ['docs/development/'], deliverable: '在绑定仓库实现 task-search.mjs 和 task-search.test.mjs，实际node --test和本地commit（不push），docs/development/report.md记录命令/SHA/失败探针。' },
     { id: 'verify', title: '独立边界验证', staffingGuidance: '选择非作者、能独立执行Node.js测试的成员', dependsOn: ['develop'], handoffFrom: ['develop'], artifactPaths: ['docs/verification/'], deliverable: '独立读取源码并实际运行测试，核验空数组、非法输入、中文、状态/团队交集，docs/verification/report.md记录证据。' }
@@ -121,10 +121,9 @@ export async function setupCliConfiguration({ root, api, page, username, passwor
   const { workflowTemplate: scratch } = await write('workflows', 'create', { ...definition, name: 'CLI临时删除验证' });
   await cli(['workflows', 'delete', scratch.id, '--yes']);
   const { agent: scratchAgent } = await write('agents', 'create', { name: 'CLI可删除员工', runtime: { profileId: connection.id } });
-  const { team: scratchTeam } = await write('teams', 'create', { name: 'CLI可删除团队', managerAgentId: defaultManager.id, memberAgentIds: [scratchAgent.id] });
-  await cli(['agents', 'delete', scratchAgent.id, '--yes'], undefined, 4);
-  await cli(['teams', 'delete', scratchTeam.id, '--yes']);
+  const { team: scratchTeam } = await write('teams', 'create', { name: 'CLI可删除团队', memberAgentIds: [...new Set([scratchAgent.id, defaultManager.id])] });
   await cli(['agents', 'delete', scratchAgent.id, '--yes']);
+  await cli(['teams', 'delete', scratchTeam.id, '--yes']);
   await cli(['agents', 'get', scratchAgent.id], undefined, 4);
   await page.goto(origin + '/settings/runtime');
   await page.locator(`[data-runtime-profile="${connection.id}"]`).waitFor();
@@ -132,7 +131,7 @@ export async function setupCliConfiguration({ root, api, page, username, passwor
   assert.equal(await page.locator('[data-settings-page="runtime"]').innerText(), 'Runtime');
   assert.equal(await page.getByText('本机执行说明与版本', { exact: true }).count(), 0);
   const card = page.locator(`[data-runtime-profile="${connection.id}"]`);
-  assert.equal(await page.locator('[data-runtime-profile]').count(),2);
+  assert.equal(await page.locator('[data-runtime-profile]').count(),3);
   await card.locator('summary').click();
   const drawer = page.locator('.runtime-inline-editor'); assert.equal(await drawer.locator('input,select').count(),2);
   await drawer.locator('..').locator('summary').click();

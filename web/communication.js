@@ -1,3 +1,4 @@
+import { createEmployeeMultiSelect } from "./marketplace.mjs";
 import { paginate, paginationMarkup } from "./pagination.mjs";
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const date = (value) => new Date(value).toLocaleString("zh-CN", { hour12: false });
@@ -68,7 +69,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   }
   function renderList() {
     const page = paginate(conversations, listPage); listPage = page.page;
-    query(".communication-list").innerHTML = page.items.map((item) => `<button class="communication-contact ${item.id === currentId ? "selected" : ""}" data-chat-id="${escapeHtml(item.id)}"><span class="communication-avatar">${item.kind === "team" ? "群" : escapeHtml(item.name.slice(0, 1))}</span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.preview || (item.kind === "team" ? "团队群聊" : "数字员工私聊"))}</small></span>${item.unreadCount ? `<span class="communication-unread" aria-label="${item.unreadCount} 条未读">${item.unreadCount}</span>` : ""}</button>`).join("") || `<div class="directory-empty" role="${listError ? "alert" : "status"}">${listError ? "会话列表读取失败，正在重连。" : listLoaded ? "<strong>还没有会话</strong>点击 ＋ 选择员工或团队开始。" : "正在读取会话…"}</div>`;
+    query(".communication-list").innerHTML = page.items.map((item) => `<button class="communication-contact ${item.id === currentId ? "selected" : ""}" data-chat-id="${escapeHtml(item.id)}"><span class="communication-avatar">${item.kind !== "agent" ? "群" : escapeHtml(item.name.slice(0, 1))}</span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.preview || (item.kind !== "agent" ? "群聊" : "数字员工私聊"))}</small></span>${item.unreadCount ? `<span class="communication-unread" aria-label="${item.unreadCount} 条未读">${item.unreadCount}</span>` : ""}</button>`).join("") || `<div class="directory-empty" role="${listError ? "alert" : "status"}">${listError ? "会话列表读取失败，正在重连。" : listLoaded ? "<strong>还没有会话</strong>点击 ＋ 新建群聊，或从数字员工发起私聊。" : "正在读取会话…"}</div>`;
     query(".communication-pager").innerHTML = paginationMarkup(page, "communications");
     queryAll("[data-chat-id]").forEach((button) => button.onclick = () => navigate(button.dataset.chatId));
   }
@@ -82,7 +83,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     try {
       const result = await api(`/api/communications/${key}/read`, { method: "POST", body: JSON.stringify({ messageId: state.latestVisibleMessageId }) });
       if (!isCurrent(key, token)) return;
-      state.conversation = result.conversation;
+      state.conversation = { ...result.conversation, members: result.conversation.members.map(member => ({ ...state.conversation.members.find(previous => previous.id === member.id), ...member })) };
       conversations = conversations.map(item => item.id === key ? result.conversation : item);
       renderList(); onRead();
     } catch { /* A failed acknowledgement keeps the messages unread; retry on the next poll. */ }
@@ -95,9 +96,9 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     const top = list.scrollTop, height = list.scrollHeight;
     const messages = [...state.messages.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const html = messages.map((message) => {
-      const original = state.conversation?.kind === "team" && state.messages.get(message.replyToMessageId);
+      const addressed = (message.mentionAgentIds || []).map(id => state.conversation.members.find(member => member.id === id)?.name).filter(Boolean);
       const attachments = (message.attachments || []).map(file => `<a class="communication-attachment" href="/api/communications/${encodeURIComponent(currentId)}/attachments/${encodeURIComponent(file.id)}" download="${escapeHtml(file.name)}" data-attachment-download><span aria-hidden="true">↧</span><span>${escapeHtml(file.name)}</span><small>${file.bytes} B</small></a>`).join('');
-      return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header>${original ? `<blockquote>回复 ${escapeHtml(original.sender.name)}：${escapeHtml(original.content.slice(0, 100))}</blockquote>` : ""}<div class="communication-body communication-markdown">${renderContent(message.content, (state.conversation?.members || []).map(member => member.name))}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}</article>`;
+      return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header>${addressed.length ? `<small class="communication-addressed">→ ${escapeHtml(addressed.join("、"))}</small>` : ""}<div class="communication-body communication-markdown">${renderContent(message.content, (state.conversation?.members || []).map(member => member.name))}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}</article>`;
     }).join("") || `<div class="communication-empty">${state.latestError ? "聊天记录读取失败，正在重连。" : state.loaded ? "从一句话开始沟通。消息将持续保留。" : "正在读取聊天记录…"}</div>`;
     if (list.innerHTML !== html) {
       list.innerHTML = html;
@@ -133,15 +134,21 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         state.olderRequest = null;
         state.olderError = "";
       }
-      if (!older) { state.conversation = result.conversation; state.latestVisibleMessageId = result.messages.at(-1)?.id; }
+      if (!older) {
+        if (state.consoleAgentId && state.conversation?.members.some(member => member.id === state.consoleAgentId) && !result.conversation.members.some(member => member.id === state.consoleAgentId)) {
+          state.consoleOpen = false; state.consoleAgentId = null; state.consoleMembers = []; state.consoleRequest = null; state.consoleRenderKey = null; state.consoleError = '';
+          renderConsolePanel();
+        }
+        state.conversation = result.conversation; state.latestVisibleMessageId = result.messages.at(-1)?.id;
+      }
       result.messages.forEach((message) => { state.messages.set(message.id, message); state.readMessageIds.add(message.id); });
       result.deliveries.forEach((delivery) => state.deliveries.set(delivery.id, delivery));
       if (!state.loaded || older) { state.before = result.nextBefore; state.hasMore = result.hasMore; }
       state.loaded = true; state.loadingOlder = older;
       state[errorSlot] = "";
       query(".communication-heading").textContent = state.conversation.name;
-      query(".communication-subtitle").textContent = state.conversation.kind === "team" ? "团队群聊 · 不 @ 全员回复，@ 可指定成员 · 支持成员单次转交" : "长期私聊 · 与任务执行上下文隔离";
-      renderMessages(); state.loadingOlder = false;
+      query(".communication-subtitle").textContent = state.conversation.kind !== "agent" ? "群聊 · @ 指定成员，不 @ 全员回复" : "长期私聊 · 与任务执行上下文隔离";
+      renderRoster(); renderMessages(); state.loadingOlder = false;
       if (!older) void markVisibleRead();
       renderReadErrors();
     } catch (error) {
@@ -191,6 +198,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     query('[data-communication-console-older]').disabled = Boolean(state.consoleRequest);
     const stream = query('[data-communication-stream]');
     const agent = state.consoleMembers.find(row => row.id === state.consoleAgentId);
+    query("[data-chat-console-name]").textContent = agent?.name || "控制台";
     if (!agent) { stream.textContent = state.consoleRequest ? '正在读取控制台…' : '此会话尚无执行记录。'; return; }
     const key = JSON.stringify([agent.id, [...page.events.keys()], page.traces]);
     if (state.consoleRenderKey === key) return;
@@ -243,7 +251,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     const input = query("textarea"), state = view(currentId), menu = query(".communication-mentions");
     state.mentions = state.mentions.filter((member) => input.value.includes("@" + member.name));
     const match = activeMention(input.value, input.selectionStart, state.mentions);
-    if (!match || state.conversation?.kind !== "team") { menu.hidden = true; return; }
+    if (!match || state.conversation?.kind !== "group") { menu.hidden = true; return; }
     const members = state.conversation.members.filter((member) => member.status === "active" && member.name.toLowerCase().includes(match[1].toLowerCase()));
     menu.innerHTML = members.map((member, index) => `<button type="button" role="option" aria-selected="${index === 0}" data-chat-mention="${escapeHtml(member.id)}">${escapeHtml(member.name)}</button>`).join("") || "<p>没有匹配成员</p>";
     menu.hidden = false;
@@ -256,23 +264,30 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   }
   function setupConversation() {
     const area = query(".communication-main");
-    if (!currentId) { area.innerHTML = '<div class="communication-empty"><h2>沟通</h2><p>选择数字员工开始私聊，或进入团队群聊。</p><small>历史长期保存 · 不受任务归档影响</small></div>'; return; }
+    if (!currentId) { area.innerHTML = '<div class="communication-empty"><h2>沟通</h2><p>选择数字员工开始私聊，或新建一个群聊。</p><small>历史长期保存 · 不受任务归档影响</small></div>'; return; }
     const state = view(currentId);
     state.consoleRenderKey = null;
     area.innerHTML = `<div class="communication-panes">
       <section class="communication-chat">
-        <header class="communication-header"><div><h2 class="communication-heading"></h2><p class="communication-subtitle"></p></div><button type="button" class="text-action communication-console-toggle" data-toggle-communication-console aria-controls="communication-console-panel" aria-expanded="${state.consoleOpen}">控制台 ›</button></header>
+        <header class="communication-header"><div><h2 class="communication-heading"></h2><p class="communication-subtitle"></p></div><button type="button" class="text-action" data-toggle-chat-members aria-expanded="false">成员</button><button type="button" class="text-action communication-console-toggle" data-toggle-communication-console aria-controls="communication-console-panel" aria-expanded="${state.consoleOpen}">控制台 ›</button></header>
         <button class="small-button communication-older" hidden>加载更早消息</button><div class="communication-messages" aria-label="聊天记录"></div>
         <form class="communication-composer"><div class="communication-mentions" role="listbox" aria-label="@ 成员" hidden></div><textarea id="communication-input" aria-label="输入消息" placeholder="输入消息；群聊输入 @ 选择成员" rows="3">${escapeHtml(state.draft)}</textarea><div class="communication-draft-attachments" data-chat-attachments></div><p class="field-hint" data-chat-upload-status role="status"></p><input type="file" multiple data-chat-file hidden><div class="communication-composer-actions"><button type="button" class="small-button" data-chat-attach aria-label="添加附件"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>附件</span></button><span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" type="submit">发送</button></div></form>
       </section>
+      <aside class="communication-roster" aria-label="聊天成员"><header><strong>成员</strong><button type="button" class="text-action" data-edit-chat-group>编辑群聊</button><button type="button" class="text-action" data-close-chat-members aria-label="关闭成员列表">×</button></header><div data-chat-roster></div></aside>
+      <aside class="communication-member-detail" aria-label="员工详细信息" hidden></aside>
       <aside id="communication-console-panel" class="communication-console" data-communication-console hidden>
-        <div class="communication-console-toolbar"><div class="communication-console-actions"><button type="button" class="text-action" data-communication-console-latest>↓ 最新</button><button type="button" class="text-action" data-communication-console-refresh>刷新</button></div></div><div class="communication-console-members" data-communication-members aria-label="控制台成员" hidden></div><button type="button" class="text-action communication-console-older" data-communication-console-older hidden>加载更早记录</button><p class="communication-console-error" data-communication-console-error role="alert"></p><div class="communication-trace-stream" data-communication-stream tabindex="0" role="log" aria-label="沟通控制台"></div>
+        <div class="communication-console-toolbar"><strong data-chat-console-name></strong><div class="communication-console-actions"><button type="button" class="text-action" data-communication-console-latest>↓ 最新</button><button type="button" class="text-action" data-communication-console-refresh>刷新</button><button type="button" class="text-action" data-close-chat-console aria-label="关闭控制台">×</button></div></div><div class="communication-console-members" data-communication-members aria-label="控制台成员" hidden></div><button type="button" class="text-action communication-console-older" data-communication-console-older hidden>加载更早记录</button><p class="communication-console-error" data-communication-console-error role="alert"></p><div class="communication-trace-stream" data-communication-stream tabindex="0" role="log" aria-label="沟通控制台"></div>
       </aside>
     </div>`;
     query(".communication-heading").textContent = state.conversation?.name || (state.latestError ? "会话读取失败" : "加载会话…");
-    query(".communication-subtitle").textContent = state.conversation ? (state.conversation.kind === "team" ? "团队群聊 · 不 @ 全员回复，@ 可指定成员 · 支持成员单次转交" : "长期私聊 · 与任务执行上下文隔离") : "";
+    query(".communication-subtitle").textContent = state.conversation ? (state.conversation.kind !== "agent" ? "群聊 · @ 指定成员，不 @ 全员回复" : "长期私聊 · 与任务执行上下文隔离") : "";
     renderMessages();
-    renderAttachments(); renderConsolePanel();
+    renderAttachments(); renderRoster(); renderConsolePanel();
+    query('[data-toggle-chat-members]').onclick = () => setMembersOpen(!query('.communication-panes').classList.contains('members-open'));
+    query('[data-close-chat-members]').onclick = () => { setMembersOpen(false); query('[data-toggle-chat-members]').focus(); };
+    query('.communication-roster').onkeydown = event => { if(event.key === 'Escape') { event.preventDefault(); setMembersOpen(false); query('[data-toggle-chat-members]').focus(); } };
+    query('[data-edit-chat-group]').onclick = () => showGroupEditor(state.conversation);
+    query('[data-close-chat-console]').onclick = () => { state.consoleOpen = false; renderConsolePanel(); };
     query('[data-toggle-communication-console]').onclick = () => { state.consoleOpen = !state.consoleOpen; state.consoleRequest = null; state.consoleRenderKey = null; renderConsolePanel(); if (state.consoleOpen) void loadConsole(); };
     query('[data-communication-console-older]').onclick = () => void loadConsole(true);
     query('[data-communication-console-refresh]').onclick = () => { state.consoleRenderKey = null; state.consoleRefresh = true; void loadConsole(); };
@@ -347,33 +362,62 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       finally { state.sending = false; if (host && currentId === key) { query('form [type="submit"]').disabled = false; query('[data-chat-upload-status]').textContent = ''; renderAttachments(); } }
     };
   }
-  function showContactPicker(open) {
-    const trigger = query("[data-new-chat]");
-    const dialog = document.createElement("dialog");
-    dialog.className = "communication-picker";
-    dialog.setAttribute("aria-labelledby", "communication-picker-title");
-    dialog.innerHTML = '<header><div><h2 id="communication-picker-title">发起对话</h2><p>选择数字员工私聊，或进入团队群聊</p></div><button type="button" class="small-button" aria-label="关闭选择">关闭</button></header><label for="communication-search">搜索员工或团队</label><input id="communication-search" type="search" placeholder="搜索名称、能力简介或团队" autocomplete="off"><div class="communication-picker-list"></div><div class="communication-picker-pager"></div>';
-    host.append(dialog);
-    const input = dialog.querySelector("input"), list = dialog.querySelector(".communication-picker-list"), pager = dialog.querySelector(".communication-picker-pager");
-    let pickerPage = 1;
-    const render = () => {
-      const term = input.value.trim().toLowerCase();
-      const matches = contacts.filter((item) => [item.name, item.description, item.mission].some((value) => String(value || "").toLowerCase().includes(term)));
-      const page = paginate(matches, pickerPage); pickerPage = page.page;
-      list.innerHTML = page.items.map((item) => `<button type="button" class="communication-contact" data-kind="${item.kind}" data-target="${escapeHtml(item.id)}"><span class="communication-avatar">${item.kind === "team" ? "群" : escapeHtml(item.name.slice(0, 1))}</span><span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "team" ? "团队群聊" : "数字员工"}</small></span></button>`).join("") || '<div class="directory-empty" role="status"><strong>没有匹配的员工或团队</strong>请调整搜索条件。</div>';
-      pager.innerHTML = paginationMarkup(page, "contacts");
-      list.querySelectorAll("button").forEach((button) => button.onclick = () => { dialog.close(); open(button.dataset.kind, button.dataset.target); });
+  function setMembersOpen(open) { query('.communication-panes').classList.toggle('members-open',open);query('[data-toggle-chat-members]').setAttribute('aria-expanded',String(open)); }
+  function openMemberConsole(agentId) {
+    const state = view(currentId); state.consoleAgentId = agentId; state.consoleOpen = true; state.consoleRequest = null; state.consoleRenderKey = null;
+    query('.communication-member-detail').hidden = true; setMembersOpen(false); renderConsolePanel(); void loadConsole();
+  }
+  function renderRoster() {
+    const state = view(currentId), container = query('[data-chat-roster]'); if (!container || !state.conversation) return;
+    query('[data-edit-chat-group]').hidden = state.conversation.kind === 'agent';
+    const html = (state.conversation.members || []).map(member => `<div class="communication-roster-member"><button type="button" class="text-action" data-chat-member-detail="${escapeHtml(member.id)}">${escapeHtml(member.name)}</button><button type="button" class="text-action member-console-icon" data-chat-member-console="${escapeHtml(member.id)}" aria-label="查看 ${escapeHtml(member.name)} 的控制台"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m7 9 3 3-3 3m6 0h4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>`).join('') || '<p class="field-hint">暂无员工</p>';
+    if (container.innerHTML !== html) container.innerHTML = html;
+    container.onclick = event => {
+      const detail = event.target.closest('[data-chat-member-detail]'), consoleButton = event.target.closest('[data-chat-member-console]');
+      if (consoleButton) return openMemberConsole(consoleButton.dataset.chatMemberConsole);
+      if (!detail) return;
+      renderMemberDetail(detail.dataset.chatMemberDetail, true);
     };
-    input.oninput = () => { pickerPage = 1; render(); };
-    pager.onclick = (event) => { const button = event.target.closest("[data-page]"); if (button) { pickerPage = Number(button.dataset.page); render(); } };
-    dialog.querySelector('[aria-label="关闭选择"]').onclick = () => dialog.close();
+    const panel = query('.communication-member-detail');
+    if (!panel.hidden) renderMemberDetail(panel.dataset.memberId);
+  }
+  function renderMemberDetail(memberId, focus = false) {
+    const member = view(currentId).conversation?.members?.find(row => row.id === memberId), panel = query('.communication-member-detail');
+    if (!member) { panel.hidden = true; return; }
+    const roles = member.roles || [];
+    const html = `<header><strong>员工详细信息</strong><button type="button" class="text-action" data-close-member-detail aria-label="关闭员工详情">×</button></header><dl><dt>名称</dt><dd>${escapeHtml(member.name)}</dd><dt>角色</dt><dd>${roles.map(role=>escapeHtml(role.name)).join('、') || '未绑定'}</dd><dt>提示词</dt><dd class="communication-member-prompt">${escapeHtml(member.systemPrompt || '未填写')}${roles.map(role=>`<h4>${escapeHtml(role.name)}</h4>${escapeHtml(role.prompt)}`).join('')}</dd><dt>能力与简介</dt><dd>${escapeHtml((member.capabilities || []).join('、'))}<p>${escapeHtml(member.description || '未填写')}</p></dd></dl>`;
+    if (panel.innerHTML !== html) panel.innerHTML = html;
+    panel.dataset.memberId = memberId; panel.hidden = false;
+    const close = () => { panel.hidden = true; query(`[data-chat-member-detail="${CSS.escape(memberId)}"]`)?.focus(); };
+    panel.querySelector('[data-close-member-detail]').onclick = close;
+    panel.onkeydown = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } };
+    if (focus) panel.querySelector('button').focus();
+  }
+
+  function showGroupEditor(existing = null, initialIds = [], initialName = '') {
+    const trigger = query('[data-new-chat]'), key = currentId;
+    const dialog = document.createElement('dialog'); dialog.className = 'communication-picker'; dialog.setAttribute('aria-labelledby','communication-picker-title');
+    dialog.innerHTML = `<header><h2 id="communication-picker-title">${existing ? '编辑群聊' : '新建群聊'}</h2><button type="button" class="small-button" data-close-group>关闭</button></header><form><div class="form-field"><label for="chat-group-name">群聊名称</label><input id="chat-group-name" name="name" maxlength="100" required value="${escapeHtml(existing?.name || initialName || '新群聊')}"></div><div class="form-field" data-group-member-picker></div><p role="alert" data-group-error></p><div class="form-actions"><button type="submit" class="primary-button">${existing ? '保存' : '创建群聊'}</button></div></form>`;
+    host.append(dialog);
+    const employees = contacts.filter(item => item.contactKind === 'agent'), teams = contacts.filter(item => item.contactKind === 'team');
+    const selection = createEmployeeMultiSelect(dialog.querySelector('[data-group-member-picker]'), { id:'chat-group-members', label:'群聊员工', placeholder:'添加团队或数字员工', esc:escapeHtml, items:[...teams,...employees], selectedIds:existing?.members.map(member=>member.id) || initialIds, detail:item=>`<small>${escapeHtml(item.contactKind === 'team' ? '团队 · '+item.memberAgentIds.length+' 位员工' : item.description || '数字员工')}</small>`, expand:item=>item.contactKind === 'team' ? item.memberAgentIds.filter(id=>employees.some(member=>member.id===id)) : [item.id] });
+    dialog.querySelector('[data-close-group]').onclick = () => dialog.close();
     dialog.onclose = () => { dialog.remove(); trigger?.focus(); };
-    dialog.onclick = (event) => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } };
-    input.onkeydown = (event) => { if (event.key === "Enter") { event.preventDefault(); list.querySelector("button")?.click(); } };
-    render(); dialog.showModal(); input.focus();
+    dialog.querySelector('form').onsubmit = async event => {
+      event.preventDefault(); const button = dialog.querySelector('[type=submit]'); button.disabled = true;
+      try {
+        const input = { name:dialog.querySelector('[name=name]').value, memberAgentIds:selection.value() };
+        const result = await api(existing ? `/api/communications/${key}` : '/api/communications', { method:existing ? 'PUT' : 'POST', body:JSON.stringify(existing ? input : {kind:'group',...input}) });
+        dialog.close(); if (existing && key === currentId) { view(key).conversation = result.conversation; await loadMessages(); } else navigate(result.conversation.id); void poll();
+      } catch(error) { dialog.querySelector('[data-group-error]').textContent = error.message; button.disabled = false; }
+    };
+    dialog.showModal(); dialog.querySelector('input').focus();
   }
   return {
     async open(kind, targetId) {
+      if (kind === 'team') {
+        try { const team = (await api('/api/teams')).teams.find(item => item.id === targetId); if (!team) throw new Error('团队不存在'); const result = await api('/api/communications', { method:'POST', body:JSON.stringify({kind:'group',name:team.name,memberAgentIds:team.memberAgentIds}) }); navigate(result.conversation.id); } catch(error) { notify(error.message,true); } return;
+      }
       const existing = conversations.find((item) => item.kind === kind && item.targetId === targetId);
       if (existing) { navigate(existing.id); return; }
       try { const result = await api("/api/communications", { method: "POST", body: JSON.stringify({ kind, targetId }) }); navigate(result.conversation.id); }
@@ -381,10 +425,10 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     },
     mount(element, state, selectedId) {
       const fresh = host !== element; host = element;
-      contacts = [...state.agents.map((item) => ({ ...item, kind: "agent" })), ...state.teams.map((item) => ({ ...item, kind: "team" }))];
+      contacts = [...state.agents.map((item) => ({ ...item, contactKind: "agent" })), ...state.teams.map((item) => ({ ...item, contactKind: "team" }))];
       if (fresh) {
         host.innerHTML = '<div class="communication-error" role="status"></div><div class="communication-layout"><aside class="communication-sidebar"><div class="communication-sidebar-heading"><h2>沟通</h2><button type="button" class="small-button" data-new-chat aria-label="新建对话"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg></button></div><div class="communication-list"></div><div class="communication-pager"></div></aside><section class="communication-main"></section></div>';
-        query("[data-new-chat]").onclick = () => showContactPicker((kind, id) => this.open(kind, id));
+        query("[data-new-chat]").onclick = () => showGroupEditor();
         query(".communication-pager").onclick = (event) => { const button = event.target.closest("[data-page]"); if (button) { listPage = Number(button.dataset.page); renderList(); } };
       }
       const changed = fresh || currentId !== selectedId;

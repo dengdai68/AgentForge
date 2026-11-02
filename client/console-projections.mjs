@@ -325,7 +325,7 @@ export function isRoutineConsoleEvent(event = {}) {
   return ["Provider 会话已初始化", "成员会话已连接", "Provider 已返回结构化结果", "模型已更新执行进展", "模型正在整理执行方案"].includes(summary);
 }
 
-export function workspaceAgents(workspace = {}, agents = []) {
+export function workspaceAgents(workspace = {}, agents = [], { includeDeleted = false } = {}) {
   const run = workspace.run;
   if (!run) return [];
   const assigned = Array.isArray(run.participants)
@@ -333,7 +333,8 @@ export function workspaceAgents(workspace = {}, agents = []) {
     : Object.values(run.task?.nodeAssignments || {}).map((agentId) => asArray(agents).find((agent) => agent.id === agentId));
   const members = new Map();
   for (const agent of [run.manager, ...assigned, ...asArray(workspace.traces).map((trace) => trace.agent)].filter(Boolean)) if (!members.has(agent.id)) members.set(agent.id, agent);
-  return [...members.values()];
+  const deleted = new Set(workspace.deletedAgentIds || []);
+  return [...members.values()].filter(member => includeDeleted || !deleted.has(member.sourceAgentId || member.id));
 }
 
 // A running Trace is an invocation fact, but a terminal Run is the lifecycle

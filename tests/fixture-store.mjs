@@ -39,7 +39,7 @@ export function createFixtureStore(options) {
   if (!existing && !store.listTasks().length) store.createTask({
     title: "Fixture task", objective: "Test-only task created through Store commands",
     ...(!store.getWorkspaceSettings().workspaceRoot ? { workspacePath: mkdtempSync(join(tmpdir(), "af-domain-fixture-")) } : {}),
-    teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery",
+    memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery",
     nodeAssignments: { requirements: "agent_analyst", design: "agent_designer", development: "agent_engineer", testing: "agent_tester", bug_fix: "agent_engineer", regression: "agent_tester" }
   });
   return store;
