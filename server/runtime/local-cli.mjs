@@ -219,9 +219,9 @@ function claudeTerminalFailure(event) {
   const { text } = claudeDetails(event);
   const message = text || "";
   const subtype = String(event.subtype || "").toLowerCase();
-  const explicitFailure = event.type === "error" || /(?:error|fail)/.test(subtype);
+  const explicitFailure = event.type === "error" || event.is_error === true || /(?:error|fail)/.test(subtype);
   if (explicitFailure) {
-    const detail = event.error?.message || event.message?.error?.message || event.result?.error?.message || message;
+    const detail = event.error?.message || event.message?.error?.message || event.result?.error?.message || (typeof event.result === "string" ? event.result : null) || message;
     return detail || `Claude Code ${event.type}: ${subtype}`;
   }
   // Claude can finish a JSONL stream with a non-zero exit and no stderr after
@@ -367,7 +367,7 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
     // Codex can write a specific terminal failure to JSONL, then append a generic
     // stdin notice to stderr while exiting non-zero. Prefer the structured reason
     // after preserving the two session-recovery signals above.
-    const terminalFailure = getTerminalFailure();
+    const terminalFailure = getTerminalFailure(exit);
     if (terminalFailure) throw new Error(terminalFailure);
     if (exit.code !== 0) throw new Error(`${provider} exit=${exit.code ?? exit.signal}\n${stderr.trim() || '(stderr empty)'}`);
     const finalText = await getFinal();
@@ -415,7 +415,7 @@ async function invokeClaudeCodeCli(input) {
   if (input.historyMcp) args.push("--mcp-config",input.historyMcp.configPath);
   // --mcp-config/--plugin-dir are variadic; separate the positional prompt.
   args.push("--", prompt);
-  let finalText = "", terminalFailure = null;
+  let finalText = "", terminalFailure = null, recovered = false;
   let turnComplete = false;
   const backgroundTasks = new Set();
   return executeJsonl({
@@ -440,7 +440,9 @@ async function invokeClaudeCodeCli(input) {
       if (event.type === "system" && event.subtype === "thinking_tokens") return null;
       if (event.type === "stream_event") return null;
       const normalized = claudeEvent(event, [input.systemPrompt, prompt].filter(Boolean).join("\n"));
-      terminalFailure ||= claudeTerminalFailure(event);
+      const failure = claudeTerminalFailure(event);
+      if (failure) { terminalFailure = failure; recovered = false; }
+      else if (event.type === "result" && event.subtype === "success" && !event.is_error) recovered = true;
       if (event.type === 'system' && event.subtype === 'init') {
         const allowed = new Set([...Object.keys(extensions), ...(input.historyMcp ? ['agentforge_history'] : [])]);
         if ((event.mcp_servers || []).some(server => !allowed.has(server.name))) throw new Error('运行时加载了未选择的 MCP，已停止执行');
@@ -464,7 +466,9 @@ async function invokeClaudeCodeCli(input) {
       }
       return normalized;
     },
-    getTerminalFailure: () => terminalFailure,
+    // Historical diagnostics stay in the console. They cease to be the final
+    // outcome only after native success AND a normal process exit.
+    getTerminalFailure: exit => exit.code === 0 && recovered ? null : terminalFailure,
     getFinal: async () => {
       await readFile(finalPath, "utf8").catch(error => { diagnostic("provider.final_file_error", { error }); return null; });
       return finalText;
@@ -505,7 +509,7 @@ async function invokeCodexCli(input) {
     args.push("-c", `model_reasoning_effort=${JSON.stringify(runtime.effort)}`);
   }
   args.push(prompt);
-  let finalText = "", terminalFailure = null;
+  let finalText = "", terminalFailure = null, recovered = false;
   const toolInputs = new Map();
   const transport = {
     runId, command: runtime.executable || "codex", args, cwd: workspacePath, env: cliEnvironment(runtime.executable || "codex", { AGENTFORGE_TRACE_OUTPUT_DIR: `${traceDirectory}/output` }), provider: "Codex",
@@ -518,10 +522,11 @@ async function invokeCodexCli(input) {
         return { providerEventType: "thread.started", message: "成员会话已连接", data: { auditVersion: 2, presentation: "system", sessionId } };
       }
       const rawFailure = event.type === "turn.failed" || event.type === "error" ? event.error?.message || event.message || "Codex 执行失败" : null;
-      if (rawFailure) terminalFailure ||= rawFailure;
+      if (rawFailure) { terminalFailure = rawFailure; recovered = false; }
+      else if (event.type === "turn.completed") recovered = true;
       const item = event.item || {}, tool = ["command_execution", "mcp_tool_call", "file_change", "web_search"].includes(item.type), completed = event.type === "item.completed";
       if (completed && item.type === "agent_message") finalText = item.text || "";
-      const presentation = tool ? (completed ? "tool_result" : "tool") : item.type === "reasoning" ? "thinking" : rawFailure || terminalFailure ? "error" : "output";
+      const presentation = tool ? (completed ? "tool_result" : "tool") : item.type === "reasoning" ? "thinking" : rawFailure ? "error" : "output";
       const providerEventType = publicEventType(event.type, "codex.event");
       let toolInput = item.command ?? item.arguments ?? item.changes ?? item.query ?? item.action;
       if (tool && item.id) {
@@ -534,12 +539,12 @@ async function invokeCodexCli(input) {
       }
       return {
         providerEventType,
-        message: runtimeMessage({ providerEventType, presentation, failure: rawFailure || (presentation === "error" ? terminalFailure : null) }),
+        message: runtimeMessage({ providerEventType, presentation, failure: rawFailure }),
         data: compact({ auditVersion: 2, presentation, toolName: tool ? publicIdentifier(item.tool || item.type) || "本机工具" : null, toolUseId: tool && !completed ? publicIdentifier(item.id) : null, toolResultId: tool && completed ? publicIdentifier(item.id) : null, status: tool ? (item.status === "failed" || (Number.isInteger(item.exit_code) && item.exit_code !== 0) ? "failed" : completed ? "completed" : "running") : undefined }),
         content: executionContent(tool ? { input: toolInput, output: completed ? item.aggregated_output ?? item.result ?? item.error : null } : completed && item.type === "agent_message" ? { text: item.text } : completed && item.type === "reasoning" ? { thinking: item.text } : {}, [input.systemPrompt, prompt].filter(Boolean).join("\n"))
       };
     },
-    getTerminalFailure: () => terminalFailure,
+    getTerminalFailure: exit => exit.code === 0 && recovered ? null : terminalFailure,
     async getFinal() { return (await readFile(finalPath, "utf8").catch(error => { diagnostic("provider.final_file_error", { error }); return ""; })) || finalText; }
   };
   return runtime.skillPaths?.length

@@ -33,6 +33,11 @@ try {
   const origin = new URL(page.url()).origin;
   const api = (path, body, method = 'POST') => page.evaluate(async ({ path, body, method }) => { const r = await fetch(path, body ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : body === null ? { method } : {}); const result = await r.json().catch(() => ({})); return { status: r.status, ...result }; }, { path, body, method });
 
+  const assertPromptRows = async selector => {
+    const size=await page.locator(selector).evaluate(node=>{const style=getComputedStyle(node);return {rows:node.rows,content:node.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom),line:parseFloat(style.lineHeight)};});
+    assert.equal(size.rows,8);assert.ok(size.content>=8*size.line-1,'prompt shows at least eight text lines');
+  };
+
   // The roles API is authenticated like every other configuration resource.
   const anonymous = await page.evaluate(async () => (await fetch('/api/roles')).status);
   assert.equal(anonymous, 401, 'roles API requires authentication');
@@ -73,6 +78,7 @@ try {
 
   // Create through the modal; only name + plain-text prompt are requested.
   await page.locator('#roles-view .directory-toolbar [data-action="new-role"]').click();
+  await assertPromptRows('#role-form [name=prompt]');
   await page.locator('#role-form [name=name]').fill('界面验收角色');
   await page.locator('#role-form [name=prompt]').fill('UI_ROLE_MARK 第一行只写证据编号。');
   await page.locator('#role-form [type=submit]').click();
@@ -93,6 +99,7 @@ try {
 
   // Edit the prompt in place.
   await page.locator(`[data-edit-role="${role.id}"]`).click();
+  await assertPromptRows('#role-form [name=prompt]');
   await page.locator('#role-form [name=prompt]').fill('UI_ROLE_MARK_V2 更新后的角色提示词。');
   await page.locator('#role-form [type=submit]').click();
   await page.locator('#role-form').waitFor({ state: 'detached' });
@@ -147,6 +154,10 @@ try {
     pickerPlugins.push((await api('/api/runtime/marketplace',{path:source})).plugins[0]);
     const mcp=await api('/api/runtime/mcp-marketplace',{name:'多选框验证 MCP '+index,description:'布局验证，不执行',content:JSON.stringify({mcpServers:{['picker_'+index]:{command:'node',args:['--version']}}})});pickerMcps.push(mcp.entry || mcp);
   }
+  await page.goto(origin+'/mcp-marketplace');await page.locator('[data-market-list] .installed-extension-card').first().waitFor();
+  assert.equal(await page.locator('[data-market-list] .extension-card-meta').count(),0,'MCP cards do not display internal IDs');
+  const mcpText=await page.locator('[data-market-list]').innerText();for(const item of pickerMcps){assert.ok(mcpText.includes(item.name));assert.ok(!mcpText.includes(item.id.slice(0,8)));}
+  await page.goto(origin+'/agents');
   // All three fields share one inline token/search control, without role priority UI.
   await page.locator('.nav-item[data-view="agents"]').click();
   await page.locator(`[data-edit-agent="${employee.id}"]`).click();
@@ -173,6 +184,7 @@ try {
     await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;},theme);
     await app.evaluate(({BrowserWindow},{origin,width})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,850),{origin,width});
     await page.waitForFunction(expected=>innerWidth===expected,width);
+    await assertPromptRows('#agent-form [name=systemPrompt]');
     const geometry=await page.locator('#agent-form .extension-picker').evaluateAll(pickers=>pickers.map(picker=>{
       const control=picker.querySelector('.extension-picker-control'),r=control.getBoundingClientRect(),style=getComputedStyle(control),inner=getComputedStyle(picker.querySelector('input')),chips=[...picker.querySelectorAll('.extension-chip')];
       return {innerBorder:inner.borderWidth,innerShadow:inner.boxShadow,count:chips.length,inside:chips.every(chip=>{const c=chip.getBoundingClientRect();return c.left>=r.left && c.right<=r.right+1 && c.top>=r.top && c.bottom<=r.bottom+1;}),border:style.border,background:style.backgroundColor,radius:style.borderRadius,outside:picker.querySelectorAll(':scope > .extension-picked').length};
@@ -260,6 +272,7 @@ try {
   const old=await page.evaluate(async id=>{const r=await fetch('/api/agents/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({roleId:null})});return r.status;},employee.id);assert.equal(old,400);
 
   await page.goto(origin+'/agents');await page.locator('[data-action="new-agent"]').click();
+  await assertPromptRows('#agent-form [name=systemPrompt]');
   assert.deepEqual(await page.locator('#agent-form [name=kind] option').evaluateAll(options=>options.map(option=>option.value)),['business','manager']);
   assert.equal(await page.locator('#agent-form [name=repositoryUrl],#employee-repository-fields').count(),0);
   await page.locator('#agent-form [name=name]').fill('框内多选新建员工');

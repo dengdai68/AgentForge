@@ -1,5 +1,7 @@
 # 代码导航
 
+Runtime 恢复结算：local-cli 仅在原生明确成功完成且进程正常退出时让早期错误退为历史；Codex 后续输出不继承旧错误展示。runtime-configuration 覆盖恢复、缺少完成、非零退出及后续新失败；test-roles-ui 覆盖八行提示词和 MCP 卡片隐藏短 ID，CLI 协议不变。
+
 任务创建：app.js 的 newTaskModal 只保留标题、内容、可选折叠验收标准和底部团队/流程，移除人员说明生成器；task-create-modal 复用弹框分组与样式。test-task-creation 使用隔离 Electron 验证两主题三种窗口尺寸及真实 HTTP 创建；明确拒绝启动，不将展示测试当 Provider 证据。
 
 设置二级分组密度由 compact.css 统一收紧 Runtime/仓库访问；app.js 的 renderTasks 直接展示允许的操作，移除菜单与全局菜单监听。test-runtime-settings 覆盖两主题宽窄展示、删除确认及归档/恢复往返；API/CLI/Store 不变。
@@ -125,7 +127,7 @@ Runtime 安装状态：cli-environment.runtimeInstalled 按实际执行 PATH 只
 
 跨 Runtime 插件源标准与冻结执行计划见 [docs/26](26-runtime-plugin-compatibility.md)；入口 `server/runtime/plugin-compatibility.mjs`，DeepSeek 原生组件物化 `dsh-extensions.mjs`。已有安装兼容性由当前适配器派生，不能依赖历史 providers。
 
-市场卡片在 web/marketplace.mjs 只保留版本/ID 与详情；Runtime 兼容信息保留在详情和员工选择器。三 Runtime、两源格式与三种 MCP 传输的真实兼容验证入口为 scripts/test-plugin-runtimes-real.mjs。
+市场卡片在 web/marketplace.mjs 只保留真实插件版本与详情，不显示 MCP 短 ID；Runtime 兼容信息保留在详情和员工选择器。三 Runtime、两源格式与三种 MCP 传输的真实兼容验证入口为 scripts/test-plugin-runtimes-real.mjs。
 
 正式安装包回归 scripts/test-packaged-electron.mjs 在隔离 HOME/PATH 验证 Codex 缺失时关闭并拒绝启用，再安装只供检查存在的可执行夹具验证开关更新；不依赖或调用操作者的 Codex。
 

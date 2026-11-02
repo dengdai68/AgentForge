@@ -932,7 +932,8 @@
       "backgroundLifecycle": "Claude native background tasks and successful completed-turn waits suspend the platform idle watchdog; later active turns rearm it. Native process exit and failure/cancel/API retry gates remain authoritative.",
       "dshTransport": "dsh.mjs adapts installed DeepSeek Harness 0.2.1-rc.2 SDK over JSON-RPC; dsh-plugin.mjs is materialized as a private native Cordis plugin for literal system-role instructions and the real model catalog. Per-session AgentForge-owned DeepSeek Harness homes retain native history while the native credentials service references the operator DeepSeek Harness credential file. No global plugin/config writes; selected Skills/MCP only; session/wait owns descendant completion. Native rendered system messages contribute only a boolean instruction-delivery audit; no system body is persisted.",
       "installationState": "cli-environment.runtimeInstalled checks executable presence through the invocation PATH without starting a CLI or reading credentials. HTTP injects the fact into Store; installed=false forces effective enabled=false, locks UI switches and rejects enabled writes/new invocations. No stored preference/frozen snapshot rewrite; DeepSeek Harness is the display name, dsh remains the protocol ID.",
-      "componentImportIsolation": "Import skips only typed component-definition errors (Markdown schema/YAML, Hook JSON/events/groups/handlers); returns private-source-free warnings. Raw source retained, executable tree excludes invalid Markdown and materializes valid per-dialect manifests/hooks. Runtime plans/integrity stay strict; path/link/manifest/MCP failures abort batch."
+      "componentImportIsolation": "Import skips only typed component-definition errors (Markdown schema/YAML, Hook JSON/events/groups/handlers); returns private-source-free warnings. Raw source retained, executable tree excludes invalid Markdown and materializes valid per-dialect manifests/hooks. Runtime plans/integrity stay strict; path/link/manifest/MCP failures abort batch.",
+      "nativeRecovery": "An explicit native successful completion plus zero process exit supersedes earlier errors for the current outcome only; preserve immutable diagnostics, latest failure and nonzero/incomplete failure. Codex presentation labels only the error event, never later content."
     },
     {
       "id": "server.orchestrator",
@@ -1098,7 +1099,8 @@
       "incrementalReading": "Stable event/Trace rows append or update in place; workspace summary reconciliation preserves the current console subtree, hydrated content, selection and scroll. History pagination preserves the reading anchor.",
       "applicationUpdates": "One Settings/updates tab directly contains application and plugin configuration sections using the standard settings heading level, without a repeated Updates title. Application state/progress/actions are inline only; download percent follows the native progress bar on one unboxed row and the separate note is hidden while downloading; a compact GitHub text link follows the current version and survives status refreshes. Plugin settings preserve drafts and pause hidden-page polling. No notification cards, renderer URL/path arguments or CLI expansion.",
       "employeeMultiSelect": "marketplace.mjs createEmployeeMultiSelect is shared by roles/plugins/MCP: removable chips and searchable input share one field border, wrap inside it, and use continuous hover/focus/keyboard behavior; no role numbering or priority/reorder controls. HTTP/CLI binding arrays and frozen facts unchanged.",
-      "employeeConfiguration": "Employee forms offer ordinary workers and managers only, without repository inputs; cards do not show a developer/bound-repository badge. Chat renders direct replies without handoff labels; saved history is not rewritten."
+      "employeeConfiguration": "Employee forms offer ordinary workers and managers only, without repository inputs; cards do not show a developer/bound-repository badge. Chat renders direct replies without handoff labels; saved history is not rewritten.",
+      "configurationPresentation": "MCP cards hide internal installation IDs; plugin cards show actual versions only. Employee system prompts and shared role prompts use eight visible rows for create/edit. HTTP/CLI references and payloads unchanged."
     },
     {
       "id": "web.manual-graphs",
@@ -1263,7 +1265,8 @@
       "directCommunicationReal": {
         "path": "scripts/test-communication-direct-real.mjs",
         "purpose": "Isolated real Claude/Codex/DeepSeek communication verifies replacement of a legacy handoff schema in the same native session, reply-only outputs and no automatic group child delivery."
-      }
+      },
+      "configurationPresentationVerification": "test-roles-ui checks eight actual text lines in prompt editors across themes/window sizes and removes MCP short IDs without changing reference IDs."
     }
   ]
 }

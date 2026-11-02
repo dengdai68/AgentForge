@@ -579,7 +579,7 @@ function roleModal(existing = null) {
     <p class="modal-intro">角色只有名称和纯文本提示词，代表一组员工可共用的系统提示词；不是员工类型、职责标签或权限规则。编辑只影响之后创建的任务和后续沟通投递，不改写已冻结的任务记录。</p>
     <form id="role-form" novalidate>
       <div class="form-field full"><label>名称 <b>*</b></label><input name="name" maxlength="80" value="${esc(existing?.name || "")}" placeholder="例如：事实核查员" /><div class="field-error"></div></div>
-      <div class="form-field full"><label>共用系统提示词 <b>*</b></label><textarea name="prompt" placeholder="绑定此角色的员工，在沟通与任务执行中都会把这段文字并入应用系统指令">${esc(existing?.prompt || "")}</textarea><div class="field-error"></div></div>
+      <div class="form-field full"><label>共用系统提示词 <b>*</b></label><textarea name="prompt" rows="8" placeholder="绑定此角色的员工，在沟通与任务执行中都会把这段文字并入应用系统指令">${esc(existing?.prompt || "")}</textarea><div class="field-error"></div></div>
       <div class="form-actions">
         <button type="button" class="ghost-button" data-close-modal>取消</button>
         <button type="submit" class="primary-button">${existing ? "保存修改" : "创建角色"}</button>
@@ -2204,7 +2204,7 @@ async function agentModal(existing = null) {
       <div class="employee-properties-row"><div class="form-field"><label>员工类型</label><select name="kind"><option value="business">普通员工</option><option value="manager" ${existing?.kind === "manager" ? "selected" : ""}>项目经理</option></select></div><div class="form-field"><label for="employee-runtime-profile">Runtime 配置 <b>*</b></label><select id="employee-runtime-profile" name="runtimeProfileId">${profiles.map(item => `<option value="${esc(item.id)}" ${!item.enabled && item.id !== runtime.profileId ? 'disabled' : ''} ${item.id === runtime.profileId ? 'selected' : ''}>${item.provider === 'dsh' ? 'DeepSeek Harness' : item.provider === 'codex' ? 'Codex' : 'Claude Code'}${item.enabled ? '' : '（已停用）'}</option>`).join('')}</select></div></div>
       <p class="field-hint">Runtime 在设置中管理和测试；停用不改写冻结任务与沟通。插件和 MCP 按员工独立选择。</p>
       <div class="form-field full" id="employee-role-selection"></div>
-      <div class="form-field full"><label>系统提示词（职责与协作边界）</label><textarea name="systemPrompt">${esc(existing?.systemPrompt || "")}</textarea></div>
+      <div class="form-field full"><label>系统提示词（职责与协作边界）</label><textarea name="systemPrompt" rows="8">${esc(existing?.systemPrompt || "")}</textarea></div>
       <div class="form-field full"><label>能力与简介</label><textarea name="description" placeholder="擅长什么、能解决哪些问题、何时应咨询这位员工">${esc([existing?.description, ...(existing?.capabilities || []).filter((item) => !existing?.description?.includes(item))].filter(Boolean).join("\n"))}</textarea><p class="field-hint">统一描述业务能力；系统提示词保留具体工作规则和协作边界。</p></div>
       <div class="form-field full" id="employee-market-selection"></div>
       <div class="form-actions">

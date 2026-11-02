@@ -289,6 +289,42 @@ process.exitCode=1;`);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+// A native CLI may recover inside one process after an authentication/network
+// error. Only an explicit successful completion plus exit 0 supersedes it.
+for (const provider of ['claude-code', 'codex']) for (const ending of ['recovered', 'incomplete', 'nonzero', 'later-failure']) {
+  test(`${provider} native recovery settles from the latest completion: ${ending}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'af-native-recovery-'));
+    try {
+      const executable = join(root, 'fixture.mjs'), events = [];
+      const failure = provider === 'codex'
+        ? { type: 'error', message: 'API Error: 401 access token expired' }
+        : { type: 'assistant', message: { content: [{ type: 'text', text: 'API Error: 401 access token expired' }] } };
+      const text = provider === 'codex'
+        ? { type: 'item.completed', item: { id: 'answer', type: 'agent_message', text: '{"reply":"Recovered"}' } }
+        : { type: 'assistant', message: { content: [{ type: 'text', text: '{"reply":"Recovered"}' }] } };
+      const success = provider === 'codex'
+        ? { type: 'turn.completed', usage: {} }
+        : { type: 'result', subtype: 'success', is_error: false, structured_output: { reply: 'Recovered' } };
+      const laterFailure = provider === 'codex'
+        ? { type: 'turn.failed', error: { message: 'API Error: 503 final request failed' } }
+        : { type: 'result', subtype: 'success', is_error: true, result: 'API Error: 503 final request failed' };
+      const frames = [failure, text, ...(ending === 'incomplete' ? [] : [success]), ...(ending === 'later-failure' ? [laterFailure] : [])];
+      await writeFile(executable, '#!/usr/bin/env node\n' + (provider === 'codex' ? codexProbeFixture : '') +
+        `for(const frame of ${JSON.stringify(frames)})console.log(JSON.stringify(frame));process.exitCode=${ending === 'nonzero' ? 1 : 0};`);
+      await chmod(executable, 0o755);
+      const invoke = provider === 'codex' ? runCodexCli : runClaudeCodeCli;
+      const call = () => invoke({ runtime: { executable }, workspacePath: root, traceDirectory: root,
+        finalPath: join(root, 'response.json'), prompt: 'recovery test', runId: randomUUID(), onEvent: async event => events.push(event) });
+      if (ending === 'recovered') {
+        assert.deepEqual(JSON.parse((await call()).finalText), { reply: 'Recovered' });
+        assert.ok(events.some(event => event.content?.fields.text?.text.includes('Recovered')), 'recovered answer is retained');
+        assert.ok(events.filter(event => event.providerEventType === 'error').every(event => event.data.presentation === 'error'));
+        assert.ok(events.filter(event => event.content?.fields.text?.text.includes('Recovered')).every(event => event.data.presentation !== 'error'), 'an earlier error must not relabel later output');
+      } else await assert.rejects(call(), ending === 'later-failure' ? /503/ : /401/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+}
+
 test("Claude adapter does not treat ordinary assistant text as a terminal failure", async () => {
   const root = await mkdtemp(join(tmpdir(), "af-claude-ordinary-text-"));
   try {

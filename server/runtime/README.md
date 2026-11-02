@@ -1,5 +1,7 @@
 # 本机 Runtime
 
+local-cli 按原生最终完成与进程退出结算恢复：早期错误在后续明确成功且 exit=0 时不再作为最终失败；非零退出、无成功完成、或后续新失败继续失败。Codex 的错误展示只标记实际错误事件，不污染其后的正文/思考/完成事件；原历史错误不删除。
+
 失败原文、退出码和可用 stderr 经脱敏保留，不替换为泛化提示；重试资格另行判定，只有明确临时服务/连接错误可退避，次数由 Orchestrator/Store 控制。插件完整性错误提供路径和哈希差异且不可自动重试。Provider 继承 PYTHONDONTWRITEBYTECODE=1，避免普通 Python 导入向安装树写缓存；不忽略已有缓存、不自动清理真实安装目录，也不承诺沙箱隔离。
 
 remotePluginRevision 用 ls-remote 查询真实提交并保留 ref/sha；importPlugins 可传 signal 和内部 transient 选项，自动更新源码用后清理，不保留重复检出。插件 source 记录安装 origin 及依赖 ref/sha/revision；marketplace 内部 pluginNames/includeMcps 限定自动更新只准备当前已装名称且不新装 MCP。公开安装输入仍仅 url/path，未扩权。
