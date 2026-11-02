@@ -2,7 +2,7 @@
 
 任务协作时间线合并同一 Run 的全部 Message、实际 Dispatch 与协调事件。接收人表示处理对象，不表示私密级别：经理派工指向接手员工，工作交接指向经理，咨询/答复保留双方，没有处理对象的发言只显示发送者。sourceMessageId 仅关联同 Run 来源消息，正文与首个实际投递合并；额外或无来源投递独立保留，不猜测历史来源。显示节点、尝试次数、重试/错误和真实投递状态；发言与接手执行提供独立控制台入口。任务确认、取消、暂停、恢复等事件按时间保留，不输出原始 Provider 帧或提示词。
 
-沟通输出 schema 的 required 含 reply 与可空 handoffToAgentId 两键（严格 Provider 校验要求）；null 或省略均不转交，实际目标继续由 Store 校验。提示词与 schema 同步，不修改 Task 协议或 CLI 能力。
+沟通输出 schema 只包含必填 reply 正文，没有 handoffToAgentId。Store 完成成员回复时不创建子投递，提示词和界面不提供转交概念；人类 @/广播、FIFO/并行、会话与历史隔离不变。任务派工/咨询独立不变。
 
 工作目录直接读取真实根，不再生成/读取展示清单，不预建 docs。目录查询按层/200项分页，普通根文件、业务自定义目录与大媒体可见；认证读取/下载仅保留工作根、敏感文件与链接检查。Git比较工作根初始化提交并保留绑定repos原始gitlink。Orchestrator记录各业务路径有限快照，Store工作流位置仅作建议、缺省空，不改写历史路径。
 
@@ -82,3 +82,5 @@ submitHumanMessage 允许省略/null recipientAgentId，默认路由给冻结 Ru
 ai-minions/常见源 frontmatter 兼容按 docs/26 v3 处理：源文本和历史 v2 计划保留，原生私有投影规范化描述，目录中的格式异常只影响对应插件。HTTP/CLI 共享当前兼容结果与安全错误位置，不返回 YAMLException.mark.buffer 或完整 Skill 正文。
 
 插件导入将组件格式错误与来源完整性错误区分：前者返回定位 warnings 并安装有效部分，后者仍原子失败。员工角色改为有序 roleIds/roleSnapshots，HTTP 拒绝旧 roleId 写入；历史单角色快照保留。
+
+员工当前配置只允许 business/manager，HTTP/CLI 拒绝 developer/repository；新任务仓库字段为空、所有成员从 Run 根启动，仓库说明由提示词承载。历史任务的 repositoryMode/sources/bindings 仍由原冻结规则执行；不启动迁移、不改写旧任务。

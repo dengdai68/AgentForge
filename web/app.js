@@ -544,7 +544,7 @@ function renderAgents() {
       <p>${esc(agent.description || "（未填写简介）")}</p>
       <div class="capabilities">${(agent.capabilities || []).map((capability) => `<span class="capability">${esc(capability)}</span>`).join("")}</div>
       <div class="agent-runtime"><span>${providerLabel(agent)}${agent.runtime?.model ? " · " + esc(agent.runtime.model) : " · CLI 默认模型"}${agent.runtime?.effort ? " · 思考 " + esc(agent.runtime.effort) : ""}${agent.runtime?.profile ? " · profile: " + esc(agent.runtime.profile) : ""}</span><span>插件 ${agent.runtime?.extensionSelection?.pluginIds?.length || 0} · MCP ${agent.runtime?.extensionSelection?.mcpIds?.length || 0}</span></div>
-      <div class="agent-footer"><span class="agent-status" data-status="${esc(agent.status)}">● ${agent.status === "active" ? "可用" : "已停用"}</span><span>${agent.kind === "manager" ? "项目经理" : agent.kind === "developer" ? "研发工程师 · 已绑定仓库" : "其他 · 能力标签非工具权限"}</span></div>
+      <div class="agent-footer"><span class="agent-status" data-status="${esc(agent.status)}">● ${agent.status === "active" ? "可用" : "已停用"}</span><span>${agent.kind === "manager" ? "项目经理" : "普通员工"}</span></div>
       ${agent.roleIds?.length ? `<div class="agent-runtime"><span>角色：${agent.roleIds.map(id=>esc(state.roles.find(role=>role.id===id)?.name || "（角色不存在）")).join("、")}</span></div>` : ""}
       <div class="directory-card-actions"><button class="small-button primary" data-chat-agent="${agent.id}">对话</button><button class="small-button" data-edit-agent="${agent.id}">编辑</button><button class="small-button danger" data-delete-agent="${agent.id}">删除</button></div>
     </div>`).join("") || (query ? `<div class="directory-empty" role="status"><strong>没有匹配的数字员工</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有数字员工</strong>点击右上角「创建数字员工」添加。</div>`);
@@ -2201,12 +2201,8 @@ async function agentModal(existing = null) {
     <p class="modal-intro">数字员工可加入团队并承担工作流节点；修改仅影响后续新任务和沟通。</p>
     <form id="agent-form" novalidate>
       <div class="employee-identity-row"><div class="form-field"><label>名称 <b>*</b></label><input name="name" value="${esc(existing?.name || "")}" placeholder="例如：周航" /><div class="field-error"></div></div><fieldset class="employee-status-choice"><legend>状态</legend><label><input type="radio" name="status" value="active" ${!existing || existing.status==='active'?'checked':''}>可用</label><label><input type="radio" name="status" value="inactive" ${existing?.status==='inactive'?'checked':''}>停用</label></fieldset></div>
-      <div class="employee-properties-row"><div class="form-field"><label>员工类型</label><select name="kind"><option value="business">其他</option><option value="manager" ${existing?.kind === "manager" ? "selected" : ""}>项目经理</option><option value="developer" ${existing?.kind === "developer" ? "selected" : ""}>研发工程师</option></select></div><div class="form-field"><label for="employee-runtime-profile">Runtime 配置 <b>*</b></label><select id="employee-runtime-profile" name="runtimeProfileId">${profiles.map(item => `<option value="${esc(item.id)}" ${!item.enabled && item.id !== runtime.profileId ? 'disabled' : ''} ${item.id === runtime.profileId ? 'selected' : ''}>${item.provider === 'dsh' ? 'DeepSeek Harness' : item.provider === 'codex' ? 'Codex' : 'Claude Code'}${item.enabled ? '' : '（已停用）'}</option>`).join('')}</select></div></div>
+      <div class="employee-properties-row"><div class="form-field"><label>员工类型</label><select name="kind"><option value="business">普通员工</option><option value="manager" ${existing?.kind === "manager" ? "selected" : ""}>项目经理</option></select></div><div class="form-field"><label for="employee-runtime-profile">Runtime 配置 <b>*</b></label><select id="employee-runtime-profile" name="runtimeProfileId">${profiles.map(item => `<option value="${esc(item.id)}" ${!item.enabled && item.id !== runtime.profileId ? 'disabled' : ''} ${item.id === runtime.profileId ? 'selected' : ''}>${item.provider === 'dsh' ? 'DeepSeek Harness' : item.provider === 'codex' ? 'Codex' : 'Claude Code'}${item.enabled ? '' : '（已停用）'}</option>`).join('')}</select></div></div>
       <p class="field-hint">Runtime 在设置中管理和测试；停用不改写冻结任务与沟通。插件和 MCP 按员工独立选择。</p>
-      <div id="employee-repository-fields" ${existing?.kind === "developer" ? "" : "hidden"}>
-        <div class="form-field full"><label for="employee-repository-url">绑定 Git 仓库 <b>*</b></label><input id="employee-repository-url" name="repositoryUrl" value="${esc(existing?.repository?.url || "")}" placeholder="https://github.com/owner/repository.git" /><div class="field-error"></div></div>
-        <div class="form-field full"><label for="employee-repository-ref">基线分支或提交</label><input id="employee-repository-ref" name="repositoryRef" value="${esc(existing?.repository?.ref || "main")}" /><p class="field-hint">一个研发员工绑定一个默认仓库。新任务启动前检出，员工从此仓库目录执行；仓库绑定不限制其他操作。</p></div>
-      </div>
       <div class="form-field full" id="employee-role-selection"></div>
       <div class="form-field full"><label>系统提示词（职责与协作边界）</label><textarea name="systemPrompt">${esc(existing?.systemPrompt || "")}</textarea></div>
       <div class="form-field full"><label>能力与简介</label><textarea name="description" placeholder="擅长什么、能解决哪些问题、何时应咨询这位员工">${esc([existing?.description, ...(existing?.capabilities || []).filter((item) => !existing?.description?.includes(item))].filter(Boolean).join("\n"))}</textarea><p class="field-hint">统一描述业务能力；系统提示词保留具体工作规则和协作边界。</p></div>
@@ -2223,7 +2219,6 @@ async function agentModal(existing = null) {
     const input = field.querySelector("input,textarea,select"), label = field.querySelector("label");
     if (input && label && !label.htmlFor) { input.id ||= `employee-field-${index}`; label.htmlFor = input.id; }
   });
-  form.kind.addEventListener("change", () => { $("#employee-repository-fields").hidden = form.kind.value !== "developer"; });
   let provider = profiles.find(item => item.id === form.elements.runtimeProfileId.value).provider;
   const selection = marketplaceUI.select($("#employee-market-selection"), runtime, provider);
   form.elements.runtimeProfileId.addEventListener("change", () => {
@@ -2238,13 +2233,10 @@ async function agentModal(existing = null) {
     let valid = true;
     if (!form.name.value.trim()) { setInvalid(form.name, "请填写名称。"); valid = false; }
 
-    if (form.kind.value === "developer" && !form.repositoryUrl.value.trim()) { setInvalid(form.repositoryUrl, "请填写此研发员工的 Git 仓库地址。"); valid = false; }
 
     if (!valid) return;
     const data = new FormData(form);
     const input = Object.fromEntries(data);
-    input.repository = input.kind === "developer" ? { url: data.get("repositoryUrl"), ref: data.get("repositoryRef") } : null;
-    delete input.repositoryUrl; delete input.repositoryRef;
     input.capabilities = [];
     input.roleIds = roleSelection.value();
     input.runtime = {

@@ -5,10 +5,8 @@ import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
 import { communicationPrompt } from "./prompts.mjs";
 import { runClaudeCodeCli, runCodexCli, runDshCli, RuntimeSessionMissingError, redactExternalText, separateRuntimeSession, promptSnapshot } from "./runtime/local-cli.mjs";
 
-// Strict Providers (Codex response_format) require every property in
-// `required`; the nullable handoff key satisfies that while null still means
-// no handoff. The Store keeps accepting an omitted key for robustness.
-const schema = { type: "object", additionalProperties: false, properties: { reply: { type: "string" }, handoffToAgentId: { type: ["string", "null"] } }, required: ["reply", "handoffToAgentId"] };
+// Ordinary communication has one reply payload and no member-routing fields.
+const schema = {type:"object",additionalProperties:false,properties:{reply:{type:"string"}},required:["reply"]};
 
 export function createCommunicationService(store, { root, invoke, files } = {}) {
   const active = new Map();
@@ -51,10 +49,9 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
         let parsed;
         try { parsed = JSON.parse(result.finalText); } catch (error) { diagnostic("communication.result_parse_error", { error }); throw new Error("Agent 未返回有效的沟通回复 JSON"); }
         if (!parsed || typeof parsed.reply !== "string" || !parsed.reply.trim()) throw new Error("Agent 沟通回复为空");
-        if (Array.isArray(parsed) || Object.keys(parsed).some((key) => !["reply", "handoffToAgentId"].includes(key))
-          || (parsed.handoffToAgentId !== undefined && parsed.handoffToAgentId !== null && (typeof parsed.handoffToAgentId !== "string" || !parsed.handoffToAgentId.trim()))) throw new Error("Agent 沟通回复结构无效");
+        if(Array.isArray(parsed) || Object.keys(parsed).some(key=>key!=="reply"))throw new Error("Agent 沟通回复只接受 reply 正文");
         const reply = redactExternalText(parsed.reply);
-        store.completeCommunication(key, item.id, reply, parsed.handoffToAgentId ?? null);
+        store.completeCommunication(key, item.id, reply);
         diagnostic("communication.completed");
       } catch (error) {
         diagnostic("communication.failed", { error });

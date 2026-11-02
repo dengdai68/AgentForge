@@ -97,7 +97,7 @@ export async function setupCliConfiguration({ root, api, page, username, passwor
   await write('agents','update',{runtime:{extensionSelection:{pluginIds:[],mcpIds:[]}}},auxiliary.id);
   await cli(['runtimes','delete',connection.id,'--yes'],undefined,2);
   assert.equal((await cli(['runtimes','list','--all'])).total,2);
-  const employee = (name, responsibility) => write('agents', 'create', { name, kind: 'developer', repository, capabilities: ['Node.js ESM', '真实测试', '内容工具'], systemPrompt: `${responsibility}：实际执行、核验文件与测试，明确说明失败。只提交本地commit，不push或部署。`, runtime: { profileId: connection.id, extensionSelection: { mcpIds: [], pluginIds: [] } } });
+  const employee = (name, responsibility) => write('agents', 'create', { name, kind: 'business', capabilities: ['Node.js ESM', '真实测试', '内容工具'], systemPrompt: `仓库工作说明：${repository.url}（基线 ${repository.ref}）；由你根据任务需要在 Run 工作目录准备，共享文件。${responsibility}：实际执行、核验文件与测试，明确说明失败。只提交本地commit，不push或部署。`, runtime: { profileId: connection.id, extensionSelection: { mcpIds: [], pluginIds: [] } } });
   const { agent: developer } = await employee('CLI真实代码开发', '研发工程师');
   const { agent: tester } = await employee('CLI独立代码核验', '测试工程师');
   const { team } = await write('teams', 'create', { name: 'CLI代码开发实测团队', managerAgentId: defaultManager.id, memberAgentIds: [developer.id, tester.id] });

@@ -49,3 +49,20 @@ export function fixtureTaskInput(store) {
   const { repositorySources, ...input } = store.listTasks()[0];
   return input;
 }
+
+
+// Explicit immutable-history fixture, never a current employee write protocol.
+export function freezeHistoricalRepository(store,taskId,{agentId='agent_engineer',url='https://example.test/app.git',ref='main',path='repos/app'}={}){
+  const workspaceRoot=store.getWorkspaceSettings().workspaceRoot,state=store.snapshot(),task=state.tasks.find(item=>item.id===taskId);
+  if(!task)throw new Error('fixture Task missing');
+  const source={url,ref,path};task.repositoryMode='agent';task.repositorySources=[source];task.repositoryBindings={[agentId]:source};
+  for(const member of task.memberSnapshots)if(member.id===agentId){member.kind='developer';member.repository={url,ref};}
+  for(const node of task.workflowSnapshot.nodes)node.repositoryPath=task.nodeAssignments[node.id]===agentId?path:null;
+  store.close();const databasePath=join(mkdtempSync(join(tmpdir(),'af-historical-repository-')),'state.sqlite');
+  const persistence=createSqlitePersistence(databasePath);try{persistence.save(state);}finally{persistence.close();}
+  const reopened=createStore({databasePath,workspaceRoot});
+  // Reload resolves current fixed profiles; restore only the fixture-owned CLI
+  // overrides before creating another historical Task in this disposable test.
+  for(const member of state.agents){const {profileId,...runtime}=member.runtime;reopened.updateAgent(member.id,{runtime});}
+  return reopened;
+}

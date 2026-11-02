@@ -89,7 +89,7 @@ Web 设置模型字段为可搜索筛选的建议列表 + 手工输入，思考�
 
 「设置 → 仓库访问」（`/settings/repositories`）管理本机 `git-credentials.json`，它位于 `AGENTFORGE_RUNTIME_CONFIG_ROOT` 下、权限为 0600，格式固定为版本号和 GitHub/GitLab Token。`GET /api/runtime/git-credentials` 只返回两个公共 HTTPS 主机的 `{ id, label, host, configured }` 状态；`PUT`/`DELETE /api/runtime/git-credentials/github|gitlab` 仅在已登录管理员会话中写入或移除，读取后绝不回显 Token。托管根目录和文件均拒绝链接，文件拒绝异常结构与过大内容，并以临时文件重命名提交；它不是 Store 数据、员工配置字段或可导出的业务 metadata。主题和导航偏好使用单独的浏览器本地存储，绝不混入 Token；离开设置清除输入，页面刷新只恢复配置状态。
 
-Task 继续冻结不含凭据的 repository URL/ref。`server/index.mjs` 只把 URL 解析能力交给 Run Files；Run Files 只在 URL 精确匹配 `https://github.com/...` 或 `https://gitlab.com/...` 时，在 clone/fetch 子进程中以临时 credential helper 传入 Token（GitHub 用户名 `x-access-token`，GitLab 用户名 `oauth2`），按主机拒绝重定向/其他主机请求并在检出后删除 helper。Token 不进入 URL、命令参数、workspace-ready 标记、Task/Run/Trace/Event/Artifact、日志或 Agent Prompt。clone 禁用 Git hooks、子模块与 LFS 自动下载；既有本机 Git URL 重写并不成为平台 Token 授权。
+已有历史 Task 保留冻结的不含凭据 repository URL/ref；新 Task 不再生成仓库绑定或自动检出。`server/index.mjs` 只把 URL 解析能力交给 Run Files；Run Files 只在 URL 精确匹配 `https://github.com/...` 或 `https://gitlab.com/...` 时，在 clone/fetch 子进程中以临时 credential helper 传入 Token（GitHub 用户名 `x-access-token`，GitLab 用户名 `oauth2`），按主机拒绝重定向/其他主机请求并在检出后删除 helper。Token 不进入 URL、命令参数、workspace-ready 标记、Task/Run/Trace/Event/Artifact、日志或 Agent Prompt。clone 禁用 Git hooks、子模块与 LFS 自动下载；既有本机 Git URL 重写并不成为平台 Token 授权。
 
 这仅解决公共 GitHub/GitLab HTTPS 的读取：SSH、自托管实例、GitHub App/OAuth、Token 轮换和写权限不在范围；已有本机 Git/SSH 认证仍可照常工作。拉取 Token 不等于 `deliveryAuthorization`，不授权 push、合并或部署；这些外部操作仍需 Task 明确的人类授权。由于 Runtime 是用户授权的本机 bypass，0600 私有文件和临时 helper 不是沙箱，也不能防御同一 OS 用户的直接读取。
 
@@ -108,3 +108,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 源标准兼容层见 [docs/26](26-runtime-plugin-compatibility.md)：安装保留源副本；当前安装可只读重算 Runtime 支持与组件标签，不必逐个重装。DeepSeek Harness 0.2.1-rc.2 使用原生独立子代理 Session 和版本匹配的官方 Claude/Codex command Hook 桥，保留源系统正文、继承模型与工具选择；父调用等待子代理真实结果/清理。无法等价映射的事件、字段、模型或动态 Hook 输出明确失败，不把跳过组件当支持。MCP 的 cwd/env_vars/传输在三种 Runtime 共用私有启动器。
 
 插件来源描述中的单行字面冒号可在原生调用副本中规范化；其他不合法 YAML 明确指出相对文件与行列，不输出原文。v3 已知 Claude 模型别名在非 Claude Runtime 使用所选 Runtime 的模型，源名称保留在计划中；旧 v2 冻结不转换。DeepSeek 可使用插件自带的完整 Codex 清单。详见 docs/26。
+
+员工类型只接受 business/manager，不再接受 developer、repository；界面和 CLI 同步移除研发类型及仓库输入。原仓库地址和基线可由操作者写入 systemPrompt。新任务从统一工作根执行，不自动准备仓库；旧 Task/Run 仓库事实保留。当前旧员工仅在操作者显式编辑时去除旧绑定，不做启动迁移或重置。

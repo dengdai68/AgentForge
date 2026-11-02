@@ -53,9 +53,9 @@ managerDecision 仅接受 nextNodeId、nextAgentId、rationale；consultation �
 
 ## 普通沟通
 
-输出 JSON 包含 `reply` 与可空的 `handoffToAgentId` 两个键；不转交时 `handoffToAgentId` 输出 null（Store 仍兼容省略该键）。线上 schema 把可空转交键列入 required，以满足 Codex 等严格 Provider 对 structured output「required 覆盖全部 properties」的校验。实际转交仍由 Store 校验候选与次数；不采用任务的 managerDecision/consultation 协议，不放宽未知字段或空正文校验。
+输出 JSON 只包含必填 `reply` 正文，不再声明 handoffToAgentId 或发送可转交成员列表。schema properties/required 均只有 reply，以严格 Provider 约束正文；未知字段和空正文拒绝。回复不创建其他成员投递；人类消息的 @/广播规则决定接收人。不采用任务的 managerDecision/consultation 协议，已保存的原生会话继续续接。
 
-每个私聊/群聊中的员工有独立原生会话。系统指令包含员工工作法、绑定角色的共用提示词、沟通入口边界、单次转交协议及会话目录。当前输入只有目标消息和尚未送达的新可见消息，目标只出现一次，不附近期聊天数组。角色文本随投递快照在发送/显式重试时嵌入；角色编辑或换绑不重建会话，后续投递应用新文本，原生历史中旧指令的影响不承诺消除。
+每个私聊/群聊中的员工有独立原生会话。系统指令包含员工工作法、绑定角色的共用提示词、沟通入口边界、reply 正文协议及会话目录。当前输入只有目标消息和尚未送达的新可见消息，目标只出现一次，不附近期聊天数组。角色文本随投递快照在发送/显式重试时嵌入；角色编辑或换绑不重建会话，后续投递应用新文本，原生历史中旧指令的影响不承诺消除。
 
 附件只含名称、字节、SHA-256 和真实绝对路径，不拼正文/二进制；未发送附件不注入。转交时带原问题和交接说明，使用接收员工自己的会话，不自动再次转交。
 

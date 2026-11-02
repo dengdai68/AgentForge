@@ -30,14 +30,6 @@ export function communicationCommands(state, save) {
     const ids = thread.kind === "agent" ? [thread.targetId] : [...new Set([...(team?.memberAgentIds || []), team?.managerAgentId].filter(Boolean))];
     return state.agents.filter((row) => ids.includes(row.id)).map((row) => ({ id: row.id, name: row.name, status: row.status, description: row.description }));
   };
-  const handoffCandidates = (thread, item) => {
-    const source = state.communicationMessages.find((row) => row.id === item.messageId && row.conversationId === thread.id);
-    const roster = members(thread);
-    if (thread.kind !== "team" || item.parentDeliveryId || source?.sender.type !== "human"
-      || !roster.some((member) => member.id === item.agentId && member.status === "active")) return [];
-    const visible = communicationVisibility(state, thread, source);
-    return roster.filter((member) => member.id !== item.agentId && member.status === "active" && visible.includes(member.id));
-  };
   // A failed delivery remains actionable while its scheduled backoff can retry it.
   const pending = (item) => !["done", "cancelled"].includes(item.status);
   const summary = (thread) => {
@@ -153,7 +145,7 @@ export function communicationCommands(state, save) {
       const messages = all.filter((row, index) => communicationVisibility(state, thread, row).includes(item.agentId) &&
         (row.id === item.messageId || row.id === all[cutoff].replyToMessageId ||
           (index > previous && index <= cutoff && row.sender.id !== item.agentId)));
-      return { conversation: summary(thread), messages: copy(messages), message: copy(all[cutoff]), handoffCandidates: copy(handoffCandidates(thread, item)) };
+      return { conversation: summary(thread), messages: copy(messages), message: copy(all[cutoff]) };
     },
     prepareCommunicationSession(key, deliveryId, cwd) {
       const thread = conversation(key), item = delivery(key, deliveryId);
@@ -185,27 +177,19 @@ export function communicationCommands(state, save) {
     appendCommunicationEvent(key, deliveryId, input) {
       const item = delivery(key, deliveryId); event(item, input.providerEventType || "output", input.message || "", input.data || {}); save();
     },
-    completeCommunication(key, deliveryId, content, handoffToAgentId = null) {
+    completeCommunication(key, deliveryId, content, ...retiredRouting) {
+      if(retiredRouting.length)throw new Error("普通沟通不支持转交参数");
       return this.transaction(() => {
         const item = delivery(key, deliveryId), thread = conversation(key);
         if (item.status === "done") return;
         if (item.status !== "running" || typeof content !== "string" || !content.trim() || content.length > 128000) throw new Error("沟通回复无效");
-        const target = handoffToAgentId === null ? null : handoffCandidates(thread, item).find((member) => member.id === handoffToAgentId);
-        if (handoffToAgentId !== null && !target) throw new Error("转交目标无效：仅人类群消息的直接接收者可转交给一名原消息可见的活跃同组成员，不能再次转交");
         const source = state.communicationMessages.find((row) => row.id === item.messageId && row.conversationId === key);
         const rosterIds = members(thread).map((member) => member.id);
-        const visible = target || item.parentDeliveryId ? communicationVisibility(state, thread, source).filter((agentId) => rosterIds.includes(agentId)) : rosterIds;
-        const message = { id: id("chat_message"), conversationId: key, sender: { type: "agent", id: item.agentId, name: item.agentSnapshot.name }, content, mentionAgentIds: target ? [target.id] : [], visibleToAgentIds: [...new Set([...visible, item.agentId])], createdAt: now(), replyToMessageId: item.messageId, deliveryId,
-          ...(target ? { handoffTo: { id: target.id, name: target.name } } : {}) };
+        const visible = item.parentDeliveryId ? communicationVisibility(state, thread, source).filter((agentId) => rosterIds.includes(agentId)) : rosterIds;
+        const message = { id: id("chat_message"), conversationId: key, sender: { type: "agent", id: item.agentId, name: item.agentSnapshot.name }, content, mentionAgentIds: [], visibleToAgentIds: [...new Set([...visible, item.agentId])], createdAt: now(), replyToMessageId: item.messageId, deliveryId };
         state.communicationMessages.push(message); item.status = "done"; item.error = null; item.nextAttemptAt = null; item.updatedAt = now(); thread.updatedAt = now();
         if (thread.sessions[item.agentId]) thread.sessions[item.agentId].inputThroughMessageId = item.messageId;
         event(item, "completed", "回复已保存");
-        if (target) {
-          const child = { id: id("chat_delivery"), conversationId: key, messageId: message.id, agentId: target.id, agentSnapshot: withRole(state.agents.find((row) => row.id === target.id)), parentDeliveryId: item.id, rootMessageId: item.messageId,
-            status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null };
-          state.communicationDeliveries.push(child);
-          event(item, "handoff_queued", "成员转交已入队", { messageId: message.id, childDeliveryId: child.id, recipientAgentId: target.id, rootMessageId: item.messageId });
-        }
         save();
       });
     },

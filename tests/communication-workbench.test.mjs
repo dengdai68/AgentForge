@@ -71,7 +71,7 @@ test('communication console owns bounded attempts and private content without le
     await input.onEvent({ providerEventType: 'system', message: 'Provider initialized', data: { sessionId: input.session.sessionId, auditVersion: 2, subtype: 'init' } });
     await input.onEvent({ providerEventType: 'assistant', message: 'public text', data: { auditVersion: 2, presentation: 'text' }, content: executionContent({ text: 'private-file-runtime-text' }) });
     await input.onEvent({ providerEventType: 'tool', message: 'tool', data: { auditVersion: 2, presentation: 'tool', toolName: 'Bash', toolUseId: 'call' }, content: executionContent({ input: { command: 'wc -c proof.txt' } }) });
-    return { finalText: JSON.stringify({ reply: '已核对', handoffToAgentId: null }) };
+    return { finalText: JSON.stringify({ reply: '已核对' }) };
   } });
   for (let index = 0; index < 2; index++) {
     store.sendCommunication(chat.id, { content: '查看附件', attachmentIds: [record.id], clientRequestId: 'console-proof-' + index });

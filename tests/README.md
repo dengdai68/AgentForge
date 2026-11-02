@@ -75,3 +75,5 @@ Runtime 安装可用性由 cli-environment 与 runtime-profiles 测试分别覆�
 plugin-compatibility 新增单行描述规范化、错误不泄露缓冲区、格式错误插件不阻断其他条目、原生支持文件保留、v3 模型与方言映射、v2 摘要稳定及原生工具别名选择回归。实际外部来源和三 Runtime 由 scripts/test-ai-minions-real.mjs 另验。
 
 roles.test 覆盖有序多角色校验/原子失败/冻结/历史读取；marketplace.test 覆盖错误组件隔离、原生清单排除与原始源保留。
+
+沟通覆盖 reply-only schema、旧转交参数/字段拒绝、没有自动子投递及事务失败回滚。历史仓库由 fixture-store 的 freezeHistoricalRepository 显式构造已冻结任务，当前员工仍为普通类型；保留原检出/重试/历史执行核验，不用废弃输入创建新配置。

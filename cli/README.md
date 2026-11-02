@@ -56,3 +56,5 @@ tasks message 的 recipientAgentId 可省略，默认发给当前 Run 的项目�
 插件导入/查询共享源标准 v3：已知 Claude 模型别名在其他 Runtime 继承目标模型；单行描述冒号在原生投影规范化，未知结构明确拒绝。某个已安装插件格式错误在该条兼容原因中显示，不阻塞全部列表；原始源和冻结任务不改写。命令、输入 schema 和引用输出不新增转换参数。
 
 插件 import 的 warnings 明确列出跳过组件；文本 ⚠️、JSON 结构化结果和插件 get 共享相对路径/原因。路径或完整性失败仍拒绝批次。
+
+员工 kind 只接受 business/manager，schema/help 移除 repository 与 developer；仓库说明放 systemPrompt。当前员工 get 不展示废弃仓库字段。普通沟通不属于 CLI 配置/任务命令，reply-only 协议没有新增 CLI 能力。

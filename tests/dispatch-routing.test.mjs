@@ -6,7 +6,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createCatalogFixtureStore, createFixtureStore } from "./fixture-store.mjs";
+import { createCatalogFixtureStore, createFixtureStore, freezeHistoricalRepository } from "./fixture-store.mjs";
 import { createSqlitePersistence } from "../server/persistence.mjs";
 import { createRunFiles } from "../server/run-files.mjs";
 import { dispatchBlocksHandoff, executeRun, requestHumanIntervention, scheduleManagerFollowup } from "../server/orchestrator.mjs";
@@ -599,13 +599,13 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   process.env.GIT_CONFIG_KEY_0 = `url.file://${origin}.insteadOf`;
   process.env.GIT_CONFIG_VALUE_0 = "https://example.test/app.git";
 
-  const store = createCatalogFixtureStore({ workspaceRoot: join(root, "work") });
+  let store = createCatalogFixtureStore({ workspaceRoot: join(root, "work") });
   for (const agent of store.listAgents().filter((agent) => agent.kind !== "manager")) store.updateAgent(agent.id, { runtime: { provider: "claude-code", executable } });
-  store.updateAgent("agent_engineer", { kind: "developer", repository: { url: "https://example.test/app.git", ref: "main" } });
 
   // Run 1: empty nodeAssignments — direct @ routes through the manager.
   const task = store.createTask({ title: "真实链路", objective: "真实编排链路", teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery", managerRuntime: { provider: "claude-code", executable } });
   assert.deepEqual(task.nodeAssignments, {});
+  store=freezeHistoricalRepository(store,task.id);
   const run = store.createRun(task.id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
   const sent = store.submitHumanMessage(run.id, { recipientAgentId: "agent_engineer", content: "@Kai · 研发工程师 请在绑定仓库完成研发交付" });
@@ -646,6 +646,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   // Run 2: assigned-member @ regression — the declared directory is guidance,
   // not an execution permission boundary.
   const task2 = store.createTask({ title: "真实链路回归", objective: "已分配成员回归与越界", teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery", nodeAssignments: { requirements: "agent_analyst", design: "agent_designer", development: "agent_engineer", testing: "agent_tester", bug_fix: "agent_engineer", regression: "agent_tester" }, managerRuntime: { provider: "claude-code", executable } });
+  store=freezeHistoricalRepository(store,task2.id);
   const run2 = store.createRun(task2.id);
   store.updateRun(run2.id, { status: "running" }); store.setTaskStatus(run2.taskId, "running");
   const prior = store.enqueueDispatch(run2.id, { recipientAgentId: "agent_engineer", workflowNodeId: "development", purpose: "node" });
@@ -661,7 +662,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   const instructionTrace = workspace2.traces.find((trace) => trace.type === "instruction");
   assert.ok(instructionTrace, "the instruction ran through the real invokeDispatch");
   assert.ok(instructionTrace.promptRef, "the completed Trace keeps its prompt snapshot");
-  assert.equal(instructionTrace.status, "completed", "a cross-directory write is accepted");
+  assert.equal(instructionTrace.status, "completed", "a cross-directory write is accepted: "+JSON.stringify(instructionTrace.error || instructionTrace.failure));
   assert.equal(instructionTrace.workflowNodeId, "development");
   const retried = workspace2.dispatches.find((item) => item.id === instruction.id);
   assert.equal(retried.status, "done");
@@ -670,6 +671,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   // Run 3: a failed developer subprocess writes repository source/tests; its
   // retry writes only a report. The original code files must still be captured.
   const task3 = store.createTask({ title: "失败重试代码", objective: "失败后源码和测试仍应接纳", teamId: store.listTeams()[0].id, workflowTemplateId: "software_delivery", nodeAssignments: { requirements: "agent_analyst", design: "agent_designer", development: "agent_engineer", testing: "agent_tester", bug_fix: "agent_engineer", regression: "agent_tester" }, managerRuntime: { provider: "claude-code", executable } });
+  store=freezeHistoricalRepository(store,task3.id);
   const run3 = store.createRun(task3.id);
   await executeRun(store, run3.id, { runFilesRoot: join(root, "audit") });
   const first3 = store.getRunWorkspace(run3.id);

@@ -148,44 +148,9 @@ function migrate(loaded) {
   return state;
 }
 
-function validateRepositorySources(sources, template) {
-  if (!Array.isArray(sources)) throw new Error("仓库来源必须是数组");
-  const seen = new Set(), declared = new Set(template.nodes.map((node) => node.repositoryPath).filter(Boolean));
-  return sources.map((source) => {
-    const path = source?.path, url = source?.url?.trim(), ref = source?.ref?.trim() || "main";
-    if (!declared.has(path) || seen.has(path)) throw new Error("仓库来源必须对应唯一的工作流仓库路径");
-    if (!url || !/^(https:\/\/[A-Za-z0-9.-]+(?::[0-9]+)?\/|git@[A-Za-z0-9.-]+:)[A-Za-z0-9._/-]+$/.test(url) || url.includes("..") || url.endsWith("/")) throw new Error("仓库来源仅支持无凭据 HTTPS 或 git SSH 地址");
-    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref.includes("..")) throw new Error("仓库基线分支或提交无效");
-    seen.add(path); return { path, url, ref };
-  });
-}
-
-function employeeRepository(kind, value) {
-  if (!["business", "manager", "developer"].includes(kind)) throw new Error("数字员工类型无效");
-  if (kind !== "developer") return null;
-  const source = validateRepositorySources([{ ...value, path: "repos/repository" }], { nodes: [{ repositoryPath: "repos/repository" }] })[0];
-  if (/\/\/|\/$|\.$|\.lock$/.test(source.ref)) throw new Error("仓库基线分支或提交无效");
-  return { url: source.url, ref: source.ref };
-}
-
-function employeeRepositories(members) {
-  const bindings = {}, sources = [], urls = new Map(), paths = new Map();
-  for (const member of [...members].sort((a, b) => a.id.localeCompare(b.id))) {
-    if (member.kind !== "developer") continue;
-    const repository = employeeRepository(member.kind, member.repository);
-    const previous = urls.get(repository.url);
-    if (previous && previous.ref !== repository.ref) throw new Error("同一团队仓库不能使用不同基线");
-    let source = previous;
-    if (!source) {
-      const basename = repository.url.split(/[/:]/).pop().replace(/\.git$/, "").replace(/[^A-Za-z0-9._-]/g, "-");
-      let path = `repos/${basename && ![".", ".."].includes(basename) ? basename : "repository"}`;
-      if (paths.has(path)) path += `-${createHash("sha256").update(repository.url).digest("hex").slice(0, 12)}`;
-      source = { ...repository, path }; paths.set(path, repository.url); urls.set(repository.url, source); sources.push(source);
-    }
-    bindings[member.id] = { ...source };
-  }
-  return { repositoryBindings: bindings, repositorySources: sources };
-}
+// Current employee configuration has no repository binding. Historical Task/Run
+// snapshots retain their own repository metadata and startup semantics.
+const employeeConfiguration = agent => {if(!agent)return agent;const {repository,...employee}=agent;return clone(employee);};
 
 // Effort vocabularies come from the real CLIs (claude --help effort levels;
 // codex debug models supported_reasoning_levels, codex-cli 0.160.0). Codex does
@@ -685,10 +650,9 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     deleteTask(taskId) { const task = this.assertTaskDeletionAllowed(taskId); const relatedRuns = state.runs.filter((run) => run.taskId === taskId); const runIds = new Set(relatedRuns.map((run) => run.id)); state.tasks = state.tasks.filter((item) => item.id !== taskId); state.runs = state.runs.filter((item) => !runIds.has(item.id)); state.traces = state.traces.filter((item) => !runIds.has(item.runId)); state.artifacts = state.artifacts.filter((item) => !runIds.has(item.runId)); state.messages = state.messages.filter((item) => !runIds.has(item.runId)); state.dispatches = state.dispatches.filter((item) => !runIds.has(item.runId)); state.decisions = state.decisions.filter((item) => !runIds.has(item.runId)); state.defects = state.defects.filter((item) => !runIds.has(item.runId)); state.events = state.events.filter((item) => !runIds.has(item.runId)); save(); return { task: clone(task), runIds: [...runIds] }; },
     getExecutionLogs: (query) => executionLogs(state, query),
     snapshot: () => clone(state), subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, addEvent,
-    listAgents: () => clone(state.agents), listTeams: () => clone(state.teams.map((item) => {
+    listAgents: () => state.agents.map(employeeConfiguration), listTeams: () => clone(state.teams.map((item) => {
       const businessMembers = item.memberAgentIds.map(getAgent).filter(Boolean);
-      const activeMembers = businessMembers.filter((agent) => agent.status === "active");
-      return { ...item, deliveryRepositories: employeeRepositories(activeMembers).repositorySources, members: [...businessMembers.map((agent) => ({ ...agent, type: "agent" })), { ...getAgent(item.managerAgentId), type: "agent" }, humanMember] };
+      return { ...item, members: [...businessMembers.map((agent) => ({ ...employeeConfiguration(agent), type: "agent" })), { ...employeeConfiguration(getAgent(item.managerAgentId)), type: "agent" }, humanMember] };
     })), listTasks: () => clone(state.tasks.map((item) => ({ ...item, team: getTeam(item.teamId) }))), listWorkflowTemplates: () => clone(state.workflowTemplates), timeline: (runId = null) => clone(state.events.filter((item) => !runId || item.runId === runId)),
     listRuns: () => clone(state.runs.map((item) => ({ ...item, task: getTask(item.taskId), traceCount: state.traces.filter((trace) => trace.runId === item.id).length, artifactCount: state.artifacts.filter((artifact) => artifact.runId === item.id).length, openDefectCount: state.defects.filter((defect) => defect.runId === item.id && defect.status !== "closed").length }))),
     getRun(runId) { const item = getRun(runId); if (!item) throw new Error("Run 不存在"); return clone(item); }, getTask(taskId) { const item = getTask(taskId); if (!item) throw new Error("任务不存在"); return clone(item); }, getRunAgent(runId, agentId) { return clone(runAgent(getRun(runId), agentId)); },
@@ -709,19 +673,23 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     createAgent(input = {}) {
       if(Object.hasOwn(input,"roleId"))throw new Error("roleId 已废弃，请使用 roleIds 数组");
-      const name = text(input.name, "数字员工名称"), kind = input.kind || "business";
-      if (!["business", "manager", "developer"].includes(kind)) throw new Error("数字员工类型无效");
+      if(Object.hasOwn(input,"repository"))throw new Error("员工不再绑定仓库，请将仓库说明写入提示词");
+      const name = text(input.name, "数字员工名称"), kind = input.kind === undefined ? "business" : input.kind;
+      if (!["business", "manager"].includes(kind)) throw new Error("数字员工类型无效");
       if (input.status !== undefined && !['active','inactive'].includes(input.status)) throw new Error('数字员工状态无效');
-      const item = { ...agent(id("agent"), name, input.description?.trim() || "一个等待被赋予使命的数字员工。", ["violet", "cyan", "amber", "blue", "green"][state.agents.length % 5], input.runtime?.provider || "claude-code", kind), repository: employeeRepository(kind, input.repository), systemPrompt: input.systemPrompt?.trim() || input.description?.trim() || "评估输入并完成可核验交付，信息不足时向合适成员咨询。", capabilities: Array.isArray(input.capabilities) ? input.capabilities : [], roleIds: assertRoleBindings(input.roleIds), runtime: bindRuntime(input.runtime) };
+      const item = { ...agent(id("agent"), name, input.description?.trim() || "一个等待被赋予使命的数字员工。", ["violet", "cyan", "amber", "blue", "green"][state.agents.length % 5], input.runtime?.provider || "claude-code", kind), systemPrompt: input.systemPrompt?.trim() || input.description?.trim() || "评估输入并完成可核验交付，信息不足时向合适成员咨询。", capabilities: Array.isArray(input.capabilities) ? input.capabilities : [], roleIds: assertRoleBindings(input.roleIds), runtime: bindRuntime(input.runtime) };
       item.status=input.status ?? 'active';state.agents.push(item); save(); return clone(item);
     },
     updateAgent(agentId, input = {}) {
       if(Object.hasOwn(input,"roleId"))throw new Error("roleId 已废弃，请使用 roleIds 数组");
+      if(Object.hasOwn(input,"repository"))throw new Error("员工不再绑定仓库，请将仓库说明写入提示词");
       const stored = getAgent(agentId), current = clone(stored);
       if (!current) throw new Error("数字员工不存在");
-      if (input.kind && (!["business", "manager", "developer"].includes(input.kind) || state.teams.some(team => (team.managerAgentId === agentId && input.kind !== "manager") || (team.memberAgentIds.includes(agentId) && input.kind === "manager")))) throw new Error("不能改变已被团队使用的经理类型");
+      if(input.kind!==undefined && !["business","manager"].includes(input.kind))throw new Error("员工类型只支持普通员工和项目经理");
+      if(input.kind && state.teams.some(team=>(team.managerAgentId===agentId && input.kind!=="manager") || (team.memberAgentIds.includes(agentId) && input.kind==="manager")))throw new Error("不能改变已被团队使用的经理类型");
       if (input.status !== undefined && !["active", "inactive"].includes(input.status)) throw new Error("数字员工状态无效");
-      current.repository = employeeRepository(input.kind || current.kind, input.repository === undefined ? current.repository : input.repository);
+      if(!["business","manager"].includes(input.kind || current.kind))throw new Error("旧研发类型已废弃，请显式保存为普通员工");
+      delete current.repository;
       if (input.kind) current.kind = input.kind;
       if (input.systemPrompt !== undefined) current.systemPrompt = String(input.systemPrompt).trim();
       if (input.name) current.name = text(input.name, "数字员工名称");
@@ -730,7 +698,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (input.roleIds !== undefined) current.roleIds = assertRoleBindings(input.roleIds);
       if (input.runtime) current.runtime = bindRuntime(input.runtime);
       if (input.status) current.status = input.status;
-      Object.assign(stored, current); save(); return clone(current);
+      Object.assign(stored, current); delete stored.repository; save(); return clone(current);
     },
     isExtensionRemoved(kind, extensionId) {
       return state.extensionRemovals.some(item => item.kind === kind && item.id === extensionId);
@@ -872,7 +840,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     createTeam(input = {}) { const members = validateTeam(input); const item = { id: id("team"), name: text(input.name, "团队名称"), mission: input.mission?.trim() || "协作完成高质量交付。", ...members, policyProfile: "local-bypass-authorized", status: "active", createdAt: now() }; state.teams.push(item); save(); return clone(item); },
     updateTeam(teamId, input = {}) { const current = getTeam(teamId); if (!current) throw new Error("团队不存在"); const next = { ...current, ...input }, members = validateTeam(next); Object.assign(current, members, { name: text(next.name, "团队名称"), mission: next.mission, status: next.status }); save(); return clone(current); },
-    createTask(input = {}) { const workspaceRoot = this.getWorkspaceSettings().workspaceRoot; const currentTeam = getTeam(input.teamId), template = find(state.workflowTemplates, input.workflowTemplateId || state.workflowTemplates[0]?.id); if (!currentTeam || currentTeam.status !== "active" || !template) throw new Error("任务需要可用团队和工作流"); const taskId = "task_" + randomUUID(); if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定"); const workspacePath = workspaceRoot ? resolve(workspaceRoot, taskId) : text(input.workspacePath, "任务工作目录"); if (!workspaceRoot && (!isAbsolute(workspacePath) || !statSync(resolve(workspacePath)).isDirectory())) throw new Error("任务工作目录必须是存在的绝对路径"); if (input.repositorySources !== undefined) throw new Error("请在研发数字员工中配置仓库，任务不能指定仓库来源"); const memberSnapshots = currentTeam.memberAgentIds.map(getAgent).filter((member) => member?.status === "active").map((member) => withRoleSnapshot(clone(member))); if (!memberSnapshots.length) throw new Error("任务团队至少需要一位可用业务成员"); const managerSnapshot = withRoleSnapshot(clone(getAgent(currentTeam.managerAgentId))); if (managerSnapshot?.kind !== "manager" || managerSnapshot.status !== "active") throw new Error("团队项目经理已停用或不可用，请先选择可用经理"); const repositories = employeeRepositories(memberSnapshots); const effectiveTemplate = clone(template); effectiveTemplate.nodes.forEach((node) => { node.staffingGuidance ||= node.ownerRole ? `适合由熟悉${node.ownerRole}相关工作的成员承担；请结合成员提示词和能力判断。` : `选择能够完成「${node.title}」交付的成员。`; node.repositoryPath = null; }); const nodeAssignments = input.nodeAssignments ? assignments(currentTeam, effectiveTemplate, input.nodeAssignments) : {}; effectiveTemplate.nodes.forEach((node) => { node.repositoryPath = repositories.repositoryBindings[nodeAssignments[node.id]]?.path || null; }); const item = { id: taskId, workspaceManaged: Boolean(workspaceRoot), repositoryMode: "agent", ...repositories, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), teamId: currentTeam.id, priority: input.priority || "medium", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId: currentTeam.managerAgentId, managerRuntime: runtime(input.managerRuntime || getAgent(currentTeam.managerAgentId).runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: now(), updatedAt: now() }; state.tasks.unshift(item); save(); return clone(item); },
+    createTask(input = {}) { const workspaceRoot = this.getWorkspaceSettings().workspaceRoot; const currentTeam = getTeam(input.teamId), template = find(state.workflowTemplates, input.workflowTemplateId || state.workflowTemplates[0]?.id); if (!currentTeam || currentTeam.status !== "active" || !template) throw new Error("任务需要可用团队和工作流"); const taskId = "task_" + randomUUID(); if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定"); const workspacePath = workspaceRoot ? resolve(workspaceRoot, taskId) : text(input.workspacePath, "任务工作目录"); if (!workspaceRoot && (!isAbsolute(workspacePath) || !statSync(resolve(workspacePath)).isDirectory())) throw new Error("任务工作目录必须是存在的绝对路径"); if (input.repositorySources !== undefined) throw new Error("不再接受仓库绑定，请将仓库说明写入提示词或任务内容"); const memberSnapshots = currentTeam.memberAgentIds.map(getAgent).filter((member) => member?.status === "active").map((member) => withRoleSnapshot(employeeConfiguration(member))); if (!memberSnapshots.length) throw new Error("任务团队至少需要一位可用业务成员"); const managerSnapshot = withRoleSnapshot(employeeConfiguration(getAgent(currentTeam.managerAgentId))); if (managerSnapshot?.kind !== "manager" || managerSnapshot.status !== "active") throw new Error("团队项目经理已停用或不可用，请先选择可用经理"); if([managerSnapshot,...memberSnapshots].some(member=>!["business","manager"].includes(member.kind)))throw new Error("任务成员含旧研发类型，请先编辑为普通员工");
+      const repositories = {repositorySources:[],repositoryBindings:{}}; const effectiveTemplate = clone(template); effectiveTemplate.nodes.forEach((node) => { node.staffingGuidance ||= node.ownerRole ? `适合由熟悉${node.ownerRole}相关工作的成员承担；请结合成员提示词和能力判断。` : `选择能够完成「${node.title}」交付的成员。`; node.repositoryPath = null; }); const nodeAssignments = input.nodeAssignments ? assignments(currentTeam, effectiveTemplate, input.nodeAssignments) : {}; effectiveTemplate.nodes.forEach((node) => { node.repositoryPath = repositories.repositoryBindings[nodeAssignments[node.id]]?.path || null; }); const item = { id: taskId, workspaceManaged: Boolean(workspaceRoot), repositoryMode: "workspace", ...repositories, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), teamId: currentTeam.id, priority: input.priority || "medium", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId: currentTeam.managerAgentId, managerRuntime: runtime(input.managerRuntime || getAgent(currentTeam.managerAgentId).runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: now(), updatedAt: now() }; state.tasks.unshift(item); save(); return clone(item); },
     archiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (current.status !== "done") throw new Error("只有已完成任务可以归档"); if (current.archivedAt) throw new Error("任务已经归档"); if (state.runs.some((run) => run.taskId === taskId && !this.canCompleteRun(run.id))) throw new Error("仍有未结束协作，不能归档"); current.archivedAt = now(); current.updatedAt = current.archivedAt; const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.archived", runId: latestRun?.id || null, message: `任务「${current.title}」已归档，交付记录仍可查看。`, data: { taskId, archivedAt: current.archivedAt } }); save(); return clone(current); },
     unarchiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (!current.archivedAt) throw new Error("任务尚未归档"); current.archivedAt = null; current.updatedAt = now(); const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.unarchived", runId: latestRun?.id || null, message: `任务「${current.title}」已恢复至任务中心。`, data: { taskId } }); save(); return clone(current); },
     createRun(taskId) { const currentTask = getTask(taskId); if (!currentTask || currentTask.status !== "backlog") throw new Error("Task 不能启动新的 Run"); const currentTeam = getTeam(currentTask.teamId); if (!currentTask.memberSnapshots) assignments(currentTeam, currentTask.workflowSnapshot, currentTask.nodeAssignments); const sourceManager = currentTask.managerSnapshot || getAgent(currentTask.managerAgentId || getTeam(currentTask.teamId)?.managerAgentId || managerId); if (sourceManager?.kind !== "manager" || sourceManager.status !== "active") throw new Error("项目经理不可用"); for (const employee of [sourceManager, ...(currentTask.memberSnapshots || currentTeam.memberAgentIds.map(getAgent))]) assertRuntimeEnabled(employee.runtime); const manager = { ...withRoleSnapshot(clone(sourceManager)), id: id("manager"), sourceAgentId: sourceManager.id, runtime: clone(currentTask.managerRuntime) }; const participants = [...(currentTask.memberSnapshots || getTeam(currentTask.teamId).memberAgentIds.map(getAgent)).map((item) => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...manager, type: "agent" }, clone(humanMember)]; const runId = id("run"); const item = { id: runId, workspacePath: currentTask.workspaceManaged ? resolve(currentTask.workspacePath, runId) : currentTask.workspacePath, taskId, manager, participants, status: "planning", currentFocus: null, waitingConversationId: null, waitingNodeId: null, waitingAgentId: null, pendingMessageIds: [], startedAt: now(), completedAt: null, failure: null, summary: null, deliveryReview: null }; state.runs.unshift(item); currentTask.status = "planning"; save(); return clone(item); },

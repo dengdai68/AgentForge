@@ -111,3 +111,5 @@ test-collaboration-flow 核对精简后的协作顶部/答复正文，以及两�
 test-roles-ui 覆盖角色/插件/MCP 框内多选添加/移除、无排序操作、两主题宽窄几何一致性及保存回读；test-plugin-runtimes-real 在两种来源内加入错误 Skill/Subagent/Hook，验证有效组件在三种 Runtime 中真实调用与多个角色指令生效；test-dsh-real 验证整组角色冻结及完整任务验收。
 
 `AGENTFORGE_ROLES_APP=/absolute/path/AgentForge.app node scripts/test-roles-ui.mjs` 将同一多角色/部分安装验收用于真实打包版（仍使用隔离数据），并实际通过已认证 CLI 写入/清空 roleIds。
+
+`AGENTFORGE_DIRECT_COMMUNICATION_REAL=1 node scripts/test-communication-direct-real.mjs`：在隔离 Store 中实际调用三种 Runtime，先产生旧 schema 会话，再用 reply-only 重试并核对原生 ID 不变、群聊仅处理人类接收者且不新增子投递；不读写操作者沟通。test-dsh-real 同时核对新任务没有仓库绑定并到可见人类确认。开发/CLI E2E 的仓库说明改写在 systemPrompt 中，由员工依目标准备，不通过旧 developer/repository 输入。

@@ -54,19 +54,17 @@ test('communication separates persona/mode/environment from the one target messa
   assert.match(result.systemPrompt, /会话主目录：\/chat/);
   assert.doesNotMatch(result.systemPrompt, /USER_ORIGINAL/);
   assert.doesNotMatch(result.prompt, /PERSONA_RULE|\/chat|只输出|人类沟通中回答/);
-  assert.match(result.systemPrompt, /本轮可转交成员：\[\]/);
-  assert.match(result.systemPrompt, /handoffToAgentId 是转交字段，不需要转交时输出 null/);
-  assert.match(result.systemPrompt, /不转交时 handoffToAgentId 填 null/);
-  assert.doesNotMatch(result.systemPrompt, /省略 handoffToAgentId/);
-  assert.doesNotMatch(result.prompt, /本轮可转交成员/);
+  assert.doesNotMatch(result.systemPrompt,/handoffToAgentId|本轮可转交成员/);
+  assert.match(result.systemPrompt,/只输出 JSON 对象/);
+  assert.match(result.systemPrompt,/不转交、不安排其他成员/);
   assert.equal(result.prompt.match(/USER_ORIGINAL/g).length, 1);
 });
 
-test('changing eligible peers updates system instructions without changing user input', () => {
+test('ordinary communication never adds automatic routing candidates', () => {
   const input = { agent: { name: '员工' }, root: '/chat', cwd: '/chat/worker', messages: [], context: { conversation: { kind: 'team' }, message: { id: 'm', content: 'USER_ONLY' }, handoffCandidates: [{ id: 'peer-one', name: '同事' }] } };
   const first = communicationPrompt(input);
   const second = communicationPrompt({ ...input, context: { ...input.context, handoffCandidates: [] } });
-  assert.match(first.systemPrompt, /peer-one/);
+  assert.doesNotMatch(first.systemPrompt, /peer-one|handoffToAgentId/);
   assert.doesNotMatch(second.systemPrompt, /peer-one/);
   assert.equal(first.prompt, second.prompt);
 });

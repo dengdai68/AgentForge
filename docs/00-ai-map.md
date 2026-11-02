@@ -12,7 +12,7 @@
 
 独立客户端入口：npm start/dev → apps/electron/main.mjs → 自有 server/index.mjs → web/ 与 client/。全部相对依赖、CLI、Runtime、测试在本仓库；抽取来源、保留边界与发布身份见 docs/23-desktop-extraction.md。服务只由客户端 IPC 启动，直接运行拒绝；无独立 Web 部署。renderer 始终用客户端样式，所有 UI 验收只操作 Electron。
 
-普通沟通：communication.mjs 的回复 schema 把可空的 handoffToAgentId 与 reply 同列 required（严格 Provider 要求 required 覆盖全部键），null/省略均表示不转交；Store 仍校验真实候选及单次转交，测试覆盖省略/null/非法字段和目标，任务协议独立不变。经理决定被在途投递顺延时，orchestrator 记录说明并向经理入队复核投递，不再静默丢弃；Run 进入验收或确认完成时，Store 取消未执行的平台协调跟进投递并记录审计，归档不再被残留复核投递阻塞。
+普通沟通：communication.mjs 的输出 schema 仅要求 reply；communication-store 只完成当前成员答复，不生成候选转交或子投递，原生会话/消息/历史保留。经理决定被在途投递顺延时，orchestrator 记录说明并向经理入队复核投递，不再静默丢弃；Run 进入验收或确认完成时，Store 取消未执行的平台协调跟进投递并记录审计，归档不再被残留复核投递阻塞。
 
 工作目录：run-files 不再读写 .agentforge-workspace.json 或限定 docs；目录按 path/offset 分页读取，界面按需展开、继续加载和同层重试。CHANGE 将所有业务路径按真实层级合并，工作根与绑定子仓库比较任务初始提交。Workflow artifactPaths 仅为规范相对交付位置，可为空；Store/CLI/提示词同步，不再改写到 docs。执行快照覆盖全部业务路径但保留大小/敏感文件限制，历史冻结文件不迁移。
 
@@ -136,3 +136,5 @@ ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别�
 组件错误隔离：marketplace 导入独立捕获 Markdown/Hook 定义错误，原始 source 完整保留、有效执行树排除错误文件并生成按方言的原生清单；返回 warnings，web 安装警告弹框/详情与 CLI 共用。路径/完整性错误仍阻断批次。多角色由 Store 校验 roleIds 并冻结 roleSnapshots，prompts 按顺序注入，员工表单以框内多选标签添加/移除，不展示排序；真实兼容矩阵同时验证坏组件不影响三个 Runtime 和整组角色生效。
 
 员工框内多选：web/marketplace.mjs 的 createEmployeeMultiSelect 同时服务角色、插件与 MCP；app.js 只组合角色目录和保存值，styles.css 统一输入边框内的标签/搜索/换行与悬停桥。移除角色排序箭头/序号，绑定及 Runtime/CLI 协议不变；test-roles-ui 覆盖两主题宽窄、框内几何对齐、键盘及保存回读。
+
+员工配置简化：app.js/CLI 只展示并接受 business/manager，不再接收 repository。Store 新 Task 的仓库来源/绑定为空，工作根统一；旧任务冻结仓库仍由 Run Files/Orchestrator 原逻辑执行。沟通真实续接验证见 test-communication-direct-real，完整新任务验收见 test-dsh-real。

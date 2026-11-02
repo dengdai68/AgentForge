@@ -113,3 +113,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 插件部分安装后弹出 ⚠️ 错误组件清单，包含路径与原因；有效插件列表刷新，详情保留警告。警告不携带源正文且经 HTML 转义。
 
 员工三个多选字段使用 marketplace.mjs 的 createEmployeeMultiSelect：已选标签与搜索输入位于同一边框内，空时显示占位符，多个或长标签自然换行；仅保留移除按钮，不另设框下已选区。候选区与输入保留连续可悬停的4px间隙，键盘方向键/Enter、Escape/Tab 与移除后焦点归还共用。绑定值和 HTTP/CLI 协议不变。
+
+员工表单只提供普通员工与项目经理，不提供仓库绑定字段或研发类型。沟通消息只显示直接回复，移除旧 handoffTo 标签；原历史数据不改写，Task 内派工/咨询不变。

@@ -1395,14 +1395,12 @@ button { cursor:pointer; }
 .communication-message.from-human header { justify-content:flex-end; }
 .communication-message header { display:flex; flex-wrap:wrap;gap:12px;align-items:center;font-size:13px;margin-bottom:8px; }
 .communication-message time { font-size:11px;color:#697160; }
-.communication-handoff { margin:0 0 8px;font-size:12px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere; }
 .communication-body { white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;font-size:14px;padding:12px 16px;background:var(--bg);border-radius:4px 14px 14px; }
 .communication-message.from-human .communication-body { background:#eef4e2; }
 .communication-message[data-tone] header strong { color:var(--record-accent); }
 .communication-message[data-tone] .communication-body { background:var(--record-soft); }
 .communication-message[data-tone] .communication-body strong { color:var(--record-accent); }
 .communication-message[data-tone] blockquote { border-left-color:var(--record-accent); background:var(--record-soft); }
-.communication-message .communication-handoff { color:var(--record-violet); }
 .communication-contact i { color:var(--record-info); }
 .communication-contact.selected .communication-avatar { color:var(--record-info); background:var(--record-info-soft); }
 .communication-error:not(:empty) { color:var(--danger-ink); background:var(--danger-soft); padding:8px 12px; border-radius:4px; }

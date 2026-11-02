@@ -675,3 +675,10 @@ test('CLI role arrays validate duplicates/retired writes and format partial impo
   const result={plugins:[{id:'plugin',name:'partial'}],mcps:[],warnings:[{plugin:'partial',component:'skill',path:'skills/bad/SKILL.md',message:'frontmatter YAML 无效'}]};
   const output=formatOutput(['plugins','import'],result);assert.match(output,/⚠️/);assert.match(output,/skills\/bad\/SKILL.md/);assert.match(output,/YAML 无效/);
 });
+
+
+test('employee CLI rejects retired developer/repository writes and directs repository guidance to prompts',async()=>{
+ const {validateInput}=await import('../cli/client.mjs');assert.deepEqual(resources.agents.schema.properties.kind.enum,['business','manager']);assert.equal(Object.hasOwn(resources.agents.schema.properties,'repository'),false);
+ for(const input of [{name:'old',kind:'developer'},{name:'old',repository:null},{name:'old',repository:{url:'https://example.invalid/app.git'}}])assert.throws(()=>validateInput(input,resources.agents.schema));
+ validateInput({name:'worker',kind:'business',systemPrompt:'按本次任务说明处理仓库。'},resources.agents.schema);
+});

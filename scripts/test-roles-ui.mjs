@@ -255,9 +255,13 @@ try {
   await page.screenshot({path:join(root,'partial-install-detail.png'),animations:'disabled'});
   await page.locator('#modal-close').click();
   // Current HTTP and actual CLI agree on role arrays and reject the retired field.
+  for(const body of [{kind:'developer'},{repository:{url:'https://example.invalid/app.git'}}]){const status=await page.evaluate(async({id,body})=>{const r=await fetch('/api/agents/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.status;},{id:employee.id,body});assert.equal(status,400);}
+
   const old=await page.evaluate(async id=>{const r=await fetch('/api/agents/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({roleId:null})});return r.status;},employee.id);assert.equal(old,400);
 
   await page.goto(origin+'/agents');await page.locator('[data-action="new-agent"]').click();
+  assert.deepEqual(await page.locator('#agent-form [name=kind] option').evaluateAll(options=>options.map(option=>option.value)),['business','manager']);
+  assert.equal(await page.locator('#agent-form [name=repositoryUrl],#employee-repository-fields').count(),0);
   await page.locator('#agent-form [name=name]').fill('框内多选新建员工');
   const roleCandidate=(await api('/api/roles',null,'GET')).roles[0];
   for(const [inputId,item] of [['employee-role',roleCandidate],['employee-plugin-search',pickerPlugins[0]],['employee-mcp-search',pickerMcps[0]]]){

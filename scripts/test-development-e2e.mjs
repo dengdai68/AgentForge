@@ -34,13 +34,13 @@ const agents = store.snapshot().agents;
 const repository = { url: "https://github.com/octocat/Hello-World.git", ref: "master" };
 let developer, tester;
 if (!cliMode) {
-  const member = (name, capability) => store.createAgent({ name, kind: "developer", repository, capabilities: ["Node.js ESM", "node:test", capability], systemPrompt: `${capability}：实际执行代码与测试，记录真实命令和失败，只在任务工作目录交付。仅本地 Git commit，不 push、不部署。`, runtime: { provider: "claude-code" } });
+  const member = (name, capability) => store.createAgent({ name, kind: "business", capabilities: ["Node.js ESM", "node:test", capability], systemPrompt: `仓库工作说明：${repository.url}（基线 ${repository.ref}）；按任务需要在 Run 工作目录自行准备并共享仓库。${capability}：实际执行代码与测试，记录真实命令和失败，只在任务工作目录交付。仅本地 Git commit，不 push、不部署。`, runtime: { provider: "claude-code" } });
   developer = resume && (agents.find(employee => employee.name === "开发验收 · 代码实现") || agents.find(employee => employee.id === "agent_developer") || agents.find(employee => employee.id === "agent_engineer"));
   tester = resume && (agents.find(employee => employee.name === "开发验收 · 独立验证") || agents.find(employee => employee.id === "agent_tester"));
   developer ||= member("开发验收 · 代码实现", "实现内容工具并提供真实开发证据");
   tester ||= member("开发验收 · 独立验证", "独立审阅他人代码并验证边界条件");
-  store.updateAgent(developer.id, { kind: "developer", repository });
-  store.updateAgent(tester.id, { kind: "developer", repository });
+  store.updateAgent(developer.id, {kind:"business"});
+  store.updateAgent(tester.id, {kind:"business"});
 }
 const manager = agents.find(employee => employee.kind === "manager");
 assert.ok(manager, "the isolated fixture must have an explicitly selected manager");

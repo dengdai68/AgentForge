@@ -8,7 +8,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ELK from "elkjs/lib/elk.bundled.js";
-import { createFixtureStore as createStore, fixtureTaskInput } from "./fixture-store.mjs";
+import { createFixtureStore as createStore, fixtureTaskInput, freezeHistoricalRepository } from "./fixture-store.mjs";
 import { createRunFiles } from "../server/run-files.mjs";
 import { createSqlitePersistence } from "../server/persistence.mjs";
 import { executeRun, readNodeResult, parseEmployeeResponse, terminateRun } from "../server/orchestrator.mjs";
@@ -330,7 +330,7 @@ test("system workspace root assigns isolated Task/Run paths and survives configu
     const db = join(root, "meta.sqlite"), store = createStore({ databasePath: db, workspaceRoot: join(root, "work") });
     const seed = fixtureTaskInput(store), input = { ...seed }; delete input.workspacePath;
     assert.throws(() => store.createTask({ ...input, workspacePath: root }), /系统自动分配/);
-    assert.throws(() => store.createTask({ ...input, repositorySources: [{ path: "repos/app", url: "https://token@example.com/repo.git" }] }), /数字员工/);
+    assert.throws(() => store.createTask({ ...input, repositorySources: [{ path: "repos/app", url: "https://token@example.com/repo.git" }] }), /不再接受仓库绑定/);
     const a = store.createTask(input), b = store.createTask(input), run = store.createRun(a.id);
     assert.equal(a.workspacePath, join(root, "work", a.id)); assert.notEqual(a.workspacePath, b.workspacePath);
     assert.equal(run.workspacePath, join(a.workspacePath, run.id));
@@ -483,32 +483,17 @@ test("inline form validation clears stale errors only after the affected control
   assert.equal(textField.error.textContent, "");
 });
 
-test("developer repositories are validated, deduplicated and frozen with Task members", () => {
-  const store = createStore(), base = fixtureTaskInput(store);
-  const repository = { url: "https://example.test/team/app.git", ref: "main" };
-  assert.throws(() => store.createAgent({ name: "研发", role: "任意职责", kind: "developer" }), /无凭据/);
-  const original = store.listAgents().find(agent => agent.id === "agent_engineer");
-  assert.throws(() => store.updateAgent(original.id, { name: "不应保存", kind: "developer", repository: { url: "https://secret@example.test/app.git" } }), /无凭据/);
-  assert.deepEqual(store.listAgents().find(agent => agent.id === original.id), original);
-  store.updateAgent(original.id, { kind: "developer", repository });
-  store.updateAgent("agent_tester", { kind: "developer", repository });
-  const task = store.createTask(base);
-  assert.equal(task.repositorySources.length, 1);
-  assert.equal(task.repositoryBindings.agent_engineer.path, "repos/app");
-  assert.deepEqual(task.repositoryBindings.agent_engineer, task.repositoryBindings.agent_tester);
-  assert.equal(task.workflowSnapshot.nodes.find(node => node.id === "requirements").repositoryPath, null);
-  store.updateAgent(original.id, { repository: { ...repository, ref: "next" } });
-  assert.throws(() => store.createTask(base), /不同基线/);
-  store.updateAgent(original.id, { kind: "business" });
-  const run = store.createRun(task.id);
-  assert.equal(store.getRunAgent(run.id, original.id).repository.ref, "main");
-  assert.equal(store.getRunAgent(run.id, original.id).kind, "developer");
-  assert.equal(store.getRunTask(run.id).repositoryBindings.agent_engineer.ref, "main");
-  const extra = store.createAgent({ name: "另一个研发", role: "任意职责", kind: "developer", repository: { url: "https://example.test/other/app.git" } });
-  store.updateTeam(base.teamId, { memberAgentIds: [...store.listTeams()[0].memberAgentIds, extra.id] });
-  const collision = store.createTask(base);
-  assert.equal(new Set(collision.repositorySources.map(source => source.path)).size, 2);
-  assert.ok(collision.repositoryBindings[extra.id]); // Also prepare consultable, unassigned developers.
+test("employees have no developer/repository protocol and new tasks use the shared workspace",()=>{
+  const store=createStore(),base=fixtureTaskInput(store),original=store.listAgents().find(a=>a.id==='agent_engineer');
+  for(const kind of ['developer',null,''])assert.throws(()=>store.createAgent({name:'retired',kind}),/类型无效/);
+  assert.throws(()=>store.updateAgent(original.id,{kind:'developer'}),/只支持普通员工和项目经理/);
+  for(const repository of [null,{url:'https://example.test/app.git'}])assert.throws(()=>store.updateAgent(original.id,{name:'must not change',repository}),/不再绑定仓库/);
+  assert.deepEqual(store.listAgents().find(a=>a.id===original.id),original);
+  store.updateAgent(original.id,{systemPrompt:'请根据任务内容在工作目录操作 https://example.test/app.git'});
+  const task=store.createTask(base);assert.equal(task.repositoryMode,'workspace');assert.deepEqual(task.repositorySources,[]);assert.deepEqual(task.repositoryBindings,{});
+  assert.ok(task.memberSnapshots.every(member=>!Object.hasOwn(member,'repository')));assert.ok(task.workflowSnapshot.nodes.every(node=>node.repositoryPath===null));
+  assert.ok(store.listTeams().every(team=>!Object.hasOwn(team,'deliveryRepositories')));
+  store.close();
 });
 
 test("real Git preparation clones employee sources, preserves changes and retries failed checkout", async () => {
@@ -539,11 +524,10 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     git("-C", origin, "init", "-b", "main"); await writeFile(join(origin, "README.md"), "baseline\n");
     git("-C", origin, "add", "README.md"); git("-C", origin, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "baseline");
     process.env.GIT_CONFIG_COUNT = "1"; process.env.GIT_CONFIG_KEY_0 = `url.file://${origin}.insteadOf`; process.env.GIT_CONFIG_VALUE_0 = "https://example.test/app.git";
-    const store = createStore({ workspaceRoot: join(root, "work") });
+    let store = createStore({ workspaceRoot: join(root, "work") });
     for (const agent of store.listAgents().filter((agent) => agent.kind !== "manager")) store.updateAgent(agent.id, { runtime: { provider: "claude-code", executable } });
-    store.updateAgent("agent_engineer", { kind: "developer", repository: { url: "https://example.test/app.git", ref: "missing" } });
     const input = { ...fixtureTaskInput(store), managerRuntime: { provider: "claude-code", executable } }; delete input.workspacePath;
-    const task = store.createTask(input), run = store.createRun(task.id), runTask = store.getRunTask(run.id), files = createRunFiles({ root: join(root, "audit") });
+    const task = store.createTask(input);store=freezeHistoricalRepository(store,task.id,{ref:"missing"});const run = store.createRun(task.id), runTask = store.getRunTask(run.id), files = createRunFiles({ root: join(root, "audit") });
     await assert.rejects(files.prepareRunWorkspace(runTask));
     await executeRun(store, run.id, { runFilesRoot: join(root, "audit") });
     assert.equal(store.getRunWorkspace(run.id).traces.length, 0);
@@ -567,7 +551,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     await writeFile(join(repo, "README.md"), "local work\n"); await files.prepareRunWorkspace(runTask);
     assert.equal(await readFile(join(repo, "README.md"), "utf8"), "local work\n");
     assert.ok((await files.listWorkingDirectory(runTask,{path:'repos'})).entries.some(entry => entry.path==='repos/app' && entry.type==='directory'));
-    const next = store.createTask(input), nextRun = store.createRun(next.id);
+    const next = store.createTask(input);store=freezeHistoricalRepository(store,next.id,{ref:"missing"});const nextRun = store.createRun(next.id);
     await files.prepareRunWorkspace(store.getRunTask(nextRun.id));
     assert.equal(await readFile(join(nextRun.workspacePath, "repos/app/README.md"), "utf8"), "baseline\n");
     assert.equal(baselineRevisions[0].commitSha, git("-C", repo, "rev-parse", "HEAD"));
@@ -937,9 +921,9 @@ test("Artifact capture ignores sensitive and symbolic-link changes without copyi
 
 test("new tasks do not need delivery authorization", () => {
   const store = createStore(), base = fixtureTaskInput(store);
-  store.updateAgent("agent_engineer", { kind: "developer", repository: { url: "https://github.com/example/app", ref: "main" } });
+  store.updateAgent("agent_engineer", {systemPrompt:"仓库工作说明：https://github.com/example/app"});
   const make = (deliveryAuthorization) => store.createTask({ ...base, deliveryAuthorization });
-  assert.deepEqual(store.listTeams()[0].deliveryRepositories, [{ path: "repos/app", url: "https://github.com/example/app", ref: "main" }]);
+  assert.equal(Object.hasOwn(store.listTeams()[0],"deliveryRepositories"),false);
   const task = make(undefined);
   assert.equal(task.deliveryAuthorization, null);
   assert.equal(make({ allowPush: false }).deliveryAuthorization, null);
@@ -1529,7 +1513,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 `);
     await chmod(executable, 0o755);
     const store = createStore();
-    const tester = store.createAgent({ name: "测试", role: "测试工程师", kind: "developer", repository: { url: "https://example.test/app.git", ref: "main" }, runtime: { provider: "claude-code", executable } });
+    const tester = store.createAgent({ name: "测试", role: "测试工程师", kind: "business", systemPrompt:"在任务工作目录完成测试；需要仓库时自行准备。", runtime: { provider: "claude-code", executable } });
     const reviewer = store.createAgent({ name: "独立验证", runtime: { provider: "claude-code", executable } });
     const team = store.createTeam({ name: "团队", memberAgentIds: [tester.id, reviewer.id] });
     const flow = store.createWorkflowTemplate({ name: "开发与测试", nodes: [{ id: "verify", title: "开发", staffingGuidance: "研发工程师", dependsOn: [] }, { id: "testing", title: "独立测试", staffingGuidance: "非作者验证", artifactPaths: ["docs/testing/"], dependsOn: [] }] });
@@ -1557,8 +1541,8 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     const humanCompletion = store.getRunWorkspace(run.id).events.find(event => event.type === "run.completed");
     assert.equal(humanCompletion.message, "人类已验收并确认任务完成。");
     assert.equal(humanCompletion.actor.type, "human");
-    assert.equal(await readFile(join(root, "repos", "app", "provider-cwd.txt"), "utf8"), await realpath(join(root, "repos", "app")));
-    assert.ok(workspace.artifacts.some((artifact) => artifact.name === "repos/app/provider-cwd.txt"));
+    assert.equal(await readFile(join(root, "provider-cwd.txt"), "utf8"), await realpath(root));
+    assert.ok(workspace.artifacts.some((artifact) => artifact.name === "provider-cwd.txt"));
     assert.equal("reflectionAgent" in workspace.run, false);
     assert.ok(workspace.decisions.some(item => item.summary === "保留追加验收标准"));
   } finally { await rm(root, { recursive: true, force: true }); }
