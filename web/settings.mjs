@@ -1,4 +1,5 @@
 import { DIRECTORY_THEMES, NAVIGATION, normalizePreferences } from "./preferences.mjs";
+import { createFloatingList, closeFloatingLists } from './floating-list.mjs';
 
 export const SETTINGS_PAGES = { general: "常规", appearance: "外观", workspace: "工作目录", cli: "命令行 CLI", repositories: "仓库访问", runtime: "Runtime", updates: "更新", logs: "运行日志" };
 const escape = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
@@ -244,7 +245,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
     try {
       const { profiles } = await api('/api/settings/runtime-profiles');
       if (!container.isConnected) return;
-      container.replaceChildren();
+      closeFloatingLists(container); container.replaceChildren();
       for (const profile of profiles) {
         const label = profile.provider === 'dsh' ? 'DeepSeek Harness' : profile.provider === 'codex' ? 'Codex' : 'Claude Code';
         const row = document.createElement('div'); row.className = 'runtime-provider-row'; row.dataset.runtimeProfile = profile.id;
@@ -291,8 +292,9 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
           const modelStatus = card.querySelector('[data-model-status]'), effortStatus = card.querySelector('[data-effort-status]');
           const modelOptions = card.querySelector('.model-options');
           let activeOption = -1;
-          function closeModels() { modelOptions.hidden = true; modelInput.setAttribute('aria-expanded', 'false'); modelInput.removeAttribute('aria-activedescendant'); activeOption = -1; }
-          function showModels(all = false) { syncModel(all); modelOptions.hidden = false; modelInput.setAttribute('aria-expanded', 'true'); }
+          let modelFloating;
+          function closeModels() { if(modelFloating)modelFloating.close();else modelOptions.hidden = true; modelInput.setAttribute('aria-expanded', 'false'); modelInput.removeAttribute('aria-activedescendant'); activeOption = -1; }
+          function showModels(all = false) { syncModel(all); modelFloating ||= createFloatingList(card.querySelector('.runtime-model-picker'),modelOptions,{maxHeight:226,onClose:()=>{modelInput.setAttribute('aria-expanded','false');modelInput.removeAttribute('aria-activedescendant');activeOption=-1;}});modelFloating.open(); modelInput.setAttribute('aria-expanded', 'true'); }
           function chooseModel(id) { modelInput.value = id; closeModels(); modelInput.dispatchEvent(new Event('input', { bubbles: true })); closeModels(); modelInput.focus(); }
           card.querySelector('.model-picker-toggle').addEventListener('click', () => { if (modelOptions.hidden) { modelInput.focus(); showModels(true); } else closeModels(); });
           modelInput.addEventListener('click', () => showModels(true));
@@ -629,7 +631,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
     appUpdateUI?.dispose(); appUpdateUI = null;
     ++logRequest;
     currentPage = null;
-    if (root) { inputClear(root); root.replaceChildren(); }
+    if (root) { closeFloatingLists(root); inputClear(root); root.replaceChildren(); }
     root = null; repositoriesLoaded = false; workspaceLoaded = false; runtimeLoaded = false;
   }
   return { mount, unmount, syncPreferences };

@@ -1,5 +1,7 @@
 # 代码导航
 
+下拉定位：`web/floating-list.mjs` 以原生 Popover 顶层容器统一成员/扩展、Runtime 模型和 @ 列表的窗口定位与生命周期，避免弹框滚动裁剪；视觉与退出规则见 docs/06。沟通列表头像复用员工身份颜色，新建对话默认不聚焦选人；表单弹框仅显式退出，textarea 拖动不改变弹框顶部。
+
 任务成员与删除：`server/store.mjs` 负责独立 `memberAgentIds`、唯一经理、员工逻辑删除及冻结任务；契约见 [领域模型](03-domain-model.md)。`client/console-projections.mjs` 过滤当前员工 Tab，历史控制台仍可按 Trace 打开。
 
 群聊：`server/communication-store.mjs` 管理独立名字/成员与定向投递，`communication.mjs` 调用 Runtime，`web/communication.js` 展示成员详情及最右侧控制台。创建/编辑 API、公开交流与轮次规则见 [长期沟通](17-communication.md)。

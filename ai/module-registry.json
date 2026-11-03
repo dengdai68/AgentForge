@@ -1271,6 +1271,45 @@
         "purpose": "Isolated real Claude/Codex/DeepSeek communication verifies replacement of a legacy handoff schema in the same native session, reply-only outputs and no automatic group child delivery."
       },
       "configurationPresentationVerification": "test-roles-ui checks eight actual text lines in prompt editors across themes/window sizes and removes MCP short IDs without changing reference IDs."
+    },
+    {
+      "id": "web.floating-list",
+      "path": "web/floating-list.mjs",
+      "kind": "renderer-utility",
+      "owner": "client-platform",
+      "purpose": "Shared top-layer dropdown placement for member/extension selection, Runtime model suggestions and mentions. Keeps a pointer bridge, fits the viewport above/below the anchor, follows scroll/resize and releases observers/listeners on close. Owns no business state.",
+      "sourceOfTruth": [
+        "docs/06-design-system.md"
+      ],
+      "tests": [
+        "scripts/test-task-creation.mjs",
+        "scripts/test-runtime-settings.mjs",
+        "scripts/test-communication-workbench.mjs"
+      ],
+      "allowedDependencies": [
+        "browser DOM",
+        "native Popover API",
+        "ResizeObserver"
+      ],
+      "forbiddenDependencies": [
+        "server/*",
+        "Node APIs",
+        "domain-state-mutation"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "web/README.md",
+          "docs/06-design-system.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "keyboard navigation",
+          "scroll containers",
+          "modal lifecycle"
+        ]
+      }
     }
   ]
 }

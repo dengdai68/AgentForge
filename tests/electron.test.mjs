@@ -490,7 +490,8 @@ test("Electron applies one component language to forms, reference and short wind
   const shared = await readFile(new URL("../web/styles.css", import.meta.url), "utf8");
   assert.match(shared, /\.modal-scroll \{ display:contents/);
   assert.match(shared, /\.modal \{ position:relative; width:min\(560px,100%\); margin:auto;/);
-  assert.doesNotMatch(shared, /\.modal \{[^}]*(?:max-height|overflow:auto)/, "Web modals size to their content and never scroll");
+  const baseModal = shared.match(/^\.modal \{[^}]+\}/m)[0];
+  assert.doesNotMatch(baseModal, /max-height|overflow:auto/, "ordinary modals still size to content; form-specific bounds are verified in the UI acceptance");
   assert.match(shared, /\.modal-backdrop \{[^}]*overflow:auto/, "the backdrop carries extreme overflow at page level");
 });
 test("packaged Electron keeps mutable control-plane data outside its resources", async () => {

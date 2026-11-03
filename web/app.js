@@ -4,6 +4,7 @@ import { applyPreferences, normalizePreferences, PREFERENCES_KEY, readPreference
 import { createSettingsUI } from "./settings.mjs";
 import { createMarketplaceUI, createMcpMarketplaceUI, createEmployeeMultiSelect } from "./marketplace.mjs";
 import { paginate, paginationMarkup } from "./pagination.mjs";
+import { createFloatingList, closeFloatingList, closeFloatingLists } from './floating-list.mjs';
 import { consoleContentTokens, editDiff, isShellTool, shellCommandText, shellTokens, toolCommandSummary, toolEditInput, toolFileInput, workingDirectoryIcon } from "/client/console-projections.mjs";
 import { EVENT_KIND_LABEL as KIND_LABEL, STATUS_TEXT as statusText, buildConsoleEntries, classifyEvent, collaborationRecords, displayText, formatExactTime as exactTime, formatRelativeTime as timeAgo, isTransportFrame, mentionables, providerLabel, roleExecutionStatus, taskActionLabel, taskMatchesFilter, taskNeedsAttention, workspaceAgents, workflowFocus } from "/client/console-projections.mjs";
 
@@ -142,7 +143,7 @@ async function refresh({ quiet = false } = {}) {
 }
 const runOfTask = (taskId) => state.runs.find((run) => run.taskId === taskId || run.task?.id === taskId);
 const communicationUI = createCommunicationUI({ api, notify: toast,
-  renderAvatar: agent => `<span class="agent-card-avatar ${esc(roleColor(agent))}" aria-hidden="true">${esc(initialsOf(agent))}</span>`,
+  renderAvatar: (agent, className = '') => `<span class="agent-card-avatar ${esc(roleColor(agent))} ${esc(className)}" aria-hidden="true">${esc(initialsOf(agent))}</span>`,
   renderConsole: (stream, result, agent) => {
     if (result.refresh) for (const cache of [consoleContentCache, promptSnapshotCache]) for (const key of cache.keys()) if (key.startsWith(result.basePath + '/')) cache.delete(key);
     renderChatStream(result.events.map(event => ({ ...event, contentBase: result.basePath })), agent, { stream, runId: null, traces: result.traces.map(trace => ({ ...trace, contentBase: result.basePath })), hasMore: result.hasMore });
@@ -190,10 +191,12 @@ function toast(message, isError = false) {
 function openModal(content) {
   modalCancel?.(); modalCancel = null;
   disposeWorkflowGraphs("details");
+  closeFloatingLists($("#modal-content"));
   $("#modal-content").closest(".modal")?.classList.remove("workflow-detail-modal", "workflow-editor-modal", "team-config-modal", "employee-config-modal", "extension-detail-modal", "task-create-modal", "confirm-dialog");
   $("#modal-content").innerHTML = content;
   // Shared semantic grouping; Web keeps display:contents, desktop bounds body scrolling.
   const host = $("#modal-content"), container = host.querySelector(":scope > form") || host;
+  $("#modal-backdrop").classList.toggle('form-modal-open',Boolean(host.querySelector('form')));
   const actions = container.querySelector(":scope > .form-actions");
   if (actions) {
     const body = document.createElement("div");
@@ -211,8 +214,10 @@ function openModal(content) {
 function closeModal() {
   if (resetRequestActive) return;
   disposeWorkflowGraphs("details");
+  closeFloatingLists($("#modal-content"));
   $("#modal-content").closest(".modal")?.classList.remove("workflow-detail-modal", "workflow-editor-modal", "team-config-modal", "employee-config-modal", "extension-detail-modal", "task-create-modal", "confirm-dialog");
   $("#modal-backdrop").classList.remove("open");
+  $("#modal-backdrop").classList.remove('form-modal-open');
   $("#modal-backdrop").setAttribute("aria-hidden", "true");
   $("#modal-content").replaceChildren();
   const cancel = modalCancel; modalCancel = null;
@@ -2449,7 +2454,8 @@ document.addEventListener("click", (event) => {
     return confirmDialog({ title: "删除工作流", message: `删除工作流「${workflow.name}」？该操作不可恢复。`, confirmLabel: "删除工作流", danger: true })
       .then((accepted) => accepted ? api(`/api/workflow-templates/${workflow.id}`, { method: "DELETE" }).then(async () => { toast("工作流已删除。"); await refresh(); }).catch((error) => toast(error.message, true)) : undefined);
   }
-  if ((target = el("[data-close-modal]")) || event.target.id === "modal-close" || event.target.id === "modal-backdrop") return closeModal();
+  if ((target = el("[data-close-modal]")) || event.target.id === "modal-close") return closeModal();
+  if (event.target.id === "modal-backdrop" && !$("#modal-backdrop").classList.contains('form-modal-open')) return closeModal();
   if (event.target.id === "notify-button") return toast("通知中心即将支持。");
   if ((target = el("#live-indicator"))) return toast(state.eventSource ? "SSE 事件流已连接当前 Run。" : "尚未订阅 Run 事件流。");
   if ((target = el("[data-open-run]"))) {
@@ -2525,6 +2531,7 @@ document.addEventListener("click", (event) => {
     workspaceView().draft = textarea.value;
     textarea.focus();
     $("#mention-list")?.classList.remove("show");
+    closeFloatingList($("#mention-list"));
     return;
   }
   if ((target = el("[data-open-workspace-directory]"))) {
@@ -2568,7 +2575,7 @@ document.addEventListener("input", (event) => {
   if (!list || !state.workspace) return;
   const upto = event.target.value.slice(0, event.target.selectionStart);
   const match = upto.match(/@([^\s@]{0,12})$/);
-  if (!match) { list.classList.remove("show"); return; }
+  if (!match) { list.classList.remove("show"); closeFloatingList(list); return; }
   const items = mentionables(workspaceAgents(state.workspace, state.agents)).filter((item) => item.name.includes(match[1]));
   list.innerHTML = items.length ? items.map((item, index) => `
     <button type="button" class="mention-item ${index === 0 ? "selected" : ""}" aria-selected="${index === 0}" data-mention-insert="${esc(item.name)}">
@@ -2576,6 +2583,7 @@ document.addEventListener("input", (event) => {
       ${esc(item.name)}<small>${esc(item.description || "")}</small>
     </button>`).join("") : '<div class="mention-empty">没有匹配的角色</div>';
   list.classList.add("show");
+  createFloatingList(event.target,list,{onClose:()=>list.classList.remove('show')}).open();
 });
 
 document.addEventListener("keydown", (event) => {
@@ -2598,9 +2606,9 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.key !== "Escape") return;
-  if ($("#mention-list")?.classList.contains("show")) { $("#mention-list").classList.remove("show"); return; }
+  if ($("#mention-list")?.classList.contains("show")) { $("#mention-list").classList.remove("show"); closeFloatingList($("#mention-list")); return; }
   $("#mention-list")?.classList.remove("show");
-  if ($("#modal-backdrop").classList.contains("open")) closeModal();
+  if ($("#modal-backdrop").classList.contains("open") && !$("#modal-backdrop").classList.contains('form-modal-open')) closeModal();
 });
 window.addEventListener("popstate", () => {
   const route = routeFromLocation();

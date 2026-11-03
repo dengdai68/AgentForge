@@ -1,4 +1,5 @@
 import { paginate, paginationMarkup } from './pagination.mjs';
+import { createFloatingList } from './floating-list.mjs';
 
 export function extensionAvatarColor(id) {
   let hash = 0;
@@ -98,14 +99,15 @@ export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items
   target.classList.add('extension-picker');
   target.innerHTML=`<label for="${esc(id)}">${esc(label)}</label><div class="extension-picker-search"><div class="extension-picker-control"><div class="extension-picked"></div><input id="${esc(id)}" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${esc(id)}-options" autocomplete="off" placeholder="${esc(placeholder)}"></div><div class="extension-picker-options" id="${esc(id)}-options" role="listbox" hidden></div></div>`;
   const search=target.querySelector('.extension-picker-search'),control=target.querySelector('.extension-picker-control'),input=target.querySelector('input'),list=target.querySelector('[role=listbox]'),chips=target.querySelector('.extension-picked');
-  const close=(restoreFocus=false)=>{if(restoreFocus && list.contains(document.activeElement))input.focus({preventScroll:true});list.hidden=true;input.setAttribute('aria-expanded','false');};
+  const floating=createFloatingList(control,list,{onClose:()=>input.setAttribute('aria-expanded','false')});
+  const close=(restoreFocus=false)=>{if(restoreFocus && list.contains(document.activeElement))input.focus({preventScroll:true});floating.close();input.setAttribute('aria-expanded','false');};
   const paint=()=>{
     const found=catalog.filter(item=>!selected.has(item.id) && `${item.name} ${item.description || ''} ${item.id}`.toLowerCase().includes(input.value.trim().toLowerCase())).slice(0,20);
     list.innerHTML=found.map(item=>`<button type="button" role="option" aria-selected="false" data-add-extension="${esc(item.id)}" ${available(item)?'':`disabled title="${esc(reason(item))}"`}><strong>${esc(item.name)}</strong>${detail(item)}${available(item)?'':`<small>${esc(reason(item))}</small>`}</button>`).join('') || `<p class="field-hint">${esc(emptyMessage())}</p>`;
     chips.innerHTML=[...selected].map(id=>{const item=catalog.find(item=>item.id===id),incompatible=item && !available(item),name=item?.name || '未安装版本 '+id.slice(0,8);return `<span class="extension-chip" title="${esc(id)}" data-incompatible="${Boolean(incompatible)}"><span class="extension-chip-name">${esc(name)}</span>${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" aria-label="移除${esc(name)}">×</button></span>`;}).join('');
     input.placeholder=selected.size?'继续添加…':placeholder;
   };
-  const open=()=>{paint();list.hidden=false;input.setAttribute('aria-expanded','true');};
+  const open=()=>{paint();floating.open();input.setAttribute('aria-expanded','true');};
   input.onfocus=open;input.oninput=open;input.onclick=open;
   control.onclick=event=>{if(!event.target.closest('button') && event.target!==input)input.focus();};
   input.onkeydown=event=>{

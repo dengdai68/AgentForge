@@ -69,6 +69,33 @@ try{
   const saved=(await api('/api/tasks')).tasks.find(t=>t.id===task.id);assert.equal(saved.objective,description);assert.equal(Object.hasOwn(saved,'teamId'),false);assert.deepEqual(saved.memberAgentIds,[manager.id,worker.id,extra.id]);assert.equal(saved.workflowTemplateId,flows[1].id);assert.deepEqual(saved.acceptanceCriteria,height===1000?['第一项验收','第二项验收']:[]);assert.equal(saved.status,'backlog');assert.ok(launchIds.includes(task.id));
  }
  evidence.cases.push('two themes at 1320x1000, 760x760 and 800x560; six to twelve visible description lines, fixed same-row selectors and submit; optional criteria retain drafts and reopen on validation errors; real HTTP creation persists combined independent employees/workflow and rejects another manager and empty or supplied criteria; rejected launch retains backlog task');
+ for(const theme of ['minimal','warm']){
+  await app.evaluate(({BrowserWindow},origin)=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(1320,1000),origin);
+  await page.goto(origin+'/settings/appearance');await page.locator(`[name="theme"][value="${theme}"]`).check();
+  await page.goto(origin+'/roles');await page.locator('[data-action="new-role"]').click();
+  const roleForm=page.locator('#role-form'),prompt=roleForm.locator('textarea');await roleForm.locator('[name=name]').fill('不应因拖动或背景点击丢失的草稿');
+  await page.evaluate(()=>document.getAnimations().filter(animation=>Number.isFinite(animation.effect.getComputedTiming().endTime)).forEach(animation=>animation.finish()));
+  const before=await prompt.boundingBox(),modalBefore=await page.locator('.modal').boundingBox();
+  await page.mouse.move(before.x+before.width-6,before.y+before.height-6);await page.mouse.down();await page.mouse.move(before.x+before.width-6,before.y+before.height+74,{steps:8});await page.mouse.up();
+  const after=await prompt.boundingBox(),modalAfter=await page.locator('.modal').boundingBox();assert.ok(after.height-before.height>65,'native resize follows the pointer');assert.ok(Math.abs(modalAfter.y-modalBefore.y)<2,'resizing keeps the form top stable');
+  await page.mouse.click(2,2);await page.keyboard.press('Escape');assert.equal(await roleForm.isVisible(),true,'background and Escape do not discard a new form');
+  assert.equal(await roleForm.locator('[name=name]').inputValue(),'不应因拖动或背景点击丢失的草稿');await page.screenshot({path:join(root,`resize-${theme}.png`)});await page.locator('#modal-close').click();
+  await page.goto(origin+'/teams');await page.locator('[data-action="new-team"]').click();
+  const mission=page.locator('#team-form textarea');
+  await page.evaluate(()=>document.getAnimations().filter(animation=>Number.isFinite(animation.effect.getComputedTiming().endTime)).forEach(animation=>animation.finish()));
+  const missionBox=await mission.boundingBox();
+  await page.mouse.move(missionBox.x+missionBox.width-6,missionBox.y+missionBox.height-6);await page.mouse.down();await page.mouse.move(missionBox.x+missionBox.width-6,missionBox.y+missionBox.height+134,{steps:8});await page.mouse.up();
+  for(const [width,height] of [[1320,1000],[800,560]]){
+   await app.evaluate(({BrowserWindow},{origin,width,height})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,height),{origin,width,height});await page.waitForFunction(h=>innerHeight===h,height);
+   const input=page.locator('#team-members'),options=page.locator('#team-members-options');await input.scrollIntoViewIfNeeded();await input.click();await options.waitFor();
+   const layout=await options.evaluate(list=>{const popup=list.closest('.floating-list'),control=document.querySelector('#team-form .extension-picker-control'),r=list.getBoundingClientRect(),a=control.getBoundingClientRect(),body=list.closest('.modal-scroll').getBoundingClientRect();return{placement:popup.dataset.placement,topLayer:popup.matches(':popover-open'),x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,anchor:{x:a.x,y:a.y,width:a.width,bottom:a.bottom},body:{y:body.y,bottom:body.bottom},visible:document.elementFromPoint(r.x+12,r.y+12)?.closest('[role=listbox]')===list,viewport:{width:innerWidth,height:innerHeight}};});
+   assert.equal(layout.topLayer,true);assert.equal(layout.visible,true);assert.ok(layout.y>=7&&layout.bottom<=height-7);assert.ok(layout.x>=7&&layout.x+layout.width<=width-7);assert.equal(layout.placement,height===1000?'bottom':'top');
+   const gapY=layout.placement==='bottom'?layout.anchor.bottom+2:layout.anchor.y-2;await page.mouse.move(layout.anchor.x+layout.anchor.width/2,(layout.anchor.y+layout.anchor.bottom)/2);await page.mouse.move(layout.anchor.x+layout.anchor.width/2,gapY,{steps:3});assert.equal(await options.isVisible(),true,'pointer can cross the menu gap');
+   evidence.geometry.push({theme,width,height,popup:layout});await page.screenshot({path:join(root,`team-dropdown-${theme}-${height}.png`)});await input.press('Escape');
+  }
+  await page.locator('#team-members').fill(worker.name);await page.locator(`[data-add-extension="${worker.id}"]`).click();assert.equal(await page.locator('#team-form .extension-chip-name').textContent(),worker.name);await page.locator('#team-members').click();await page.locator('#team-members-options').waitFor();await page.locator('#modal-close').click();assert.equal(await page.locator('.floating-list:popover-open').count(),0,'closing the owner releases its popup');
+ }
+ evidence.cases.push('native role/Team textarea resizing keeps the modal top fixed; backdrop/Escape retain drafts; Team dropdowns escape clipped modal bodies, flip by viewport space and keep the mouse gap reachable in two themes');
  await page.goto(origin+'/teams');await page.locator('[data-action="new-team"]').click();
  await page.locator('#team-form [name=name]').fill('界面可空团队');
  const teamCreated=page.waitForResponse(response=>response.url().endsWith('/api/teams')&&response.request().method()==='POST');

@@ -1,5 +1,6 @@
-import { createEmployeeMultiSelect } from "./marketplace.mjs";
+import { createEmployeeMultiSelect, extensionAvatarColor } from "./marketplace.mjs";
 import { paginate, paginationMarkup } from "./pagination.mjs";
+import { createFloatingList, closeFloatingList, closeFloatingLists } from './floating-list.mjs';
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const date = (value) => new Date(value).toLocaleString("zh-CN", { hour12: false });
 const consoleIcon = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m7 9 3 3-3 3m6 0h4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
@@ -70,7 +71,13 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   }
   function renderList() {
     const page = paginate(conversations, listPage); listPage = page.page;
-    query(".communication-list").innerHTML = page.items.map((item) => `<button class="communication-contact ${item.id === currentId ? "selected" : ""}" data-chat-id="${escapeHtml(item.id)}"><span class="communication-avatar">${item.kind !== "agent" ? "群" : escapeHtml(item.name.slice(0, 1))}</span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.preview || (item.kind !== "agent" ? "群聊" : "数字员工私聊"))}</small></span>${item.unreadCount ? `<span class="communication-unread" aria-label="${item.unreadCount} 条未读">${item.unreadCount}</span>` : ""}</button>`).join("") || `<div class="directory-empty" role="${listError ? "alert" : "status"}">${listError ? "会话列表读取失败，正在重连。" : listLoaded ? "<strong>还没有会话</strong>点击 ＋ 新建对话，选择数字员工开始沟通。" : "正在读取会话…"}</div>`;
+    const html = page.items.map(item => {
+      const employee = item.members?.find(member => member.id === item.targetId) || contacts.find(member => member.id === item.targetId) || {name:item.name};
+      const initials = [...(employee.initials || employee.name || '?')].slice(0,2).join('');
+      const avatar = item.kind !== 'agent' ? `<span class="communication-avatar color-${extensionAvatarColor(item.id)}" aria-hidden="true">群聊</span>` : renderAvatar({...employee,initials},'communication-avatar') || `<span class="communication-avatar color-${escapeHtml(employee.color || 'system')}" aria-hidden="true">${escapeHtml(initials)}</span>`;
+      return `<button class="communication-contact ${item.id === currentId ? "selected" : ""}" data-chat-id="${escapeHtml(item.id)}">${avatar}<span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.preview || (item.kind !== "agent" ? "群聊" : "数字员工私聊"))}</small></span>${item.unreadCount ? `<span class="communication-unread" aria-label="${item.unreadCount} 条未读">${item.unreadCount}</span>` : ""}</button>`;
+    }).join('') || `<div class="directory-empty" role="${listError ? "alert" : "status"}">${listError ? "会话列表读取失败，正在重连。" : listLoaded ? "<strong>还没有会话</strong>点击 ＋ 新建对话，选择数字员工开始沟通。" : "正在读取会话…"}</div>`;
+    if (query('.communication-list').innerHTML !== html) query('.communication-list').innerHTML = html;
     query(".communication-pager").innerHTML = paginationMarkup(page, "communications");
     queryAll("[data-chat-id]").forEach((button) => button.onclick = () => navigate(button.dataset.chatId));
   }
@@ -245,15 +252,15 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     const input = query("textarea"), state = view(currentId), menu = query(".communication-mentions");
     state.mentions = state.mentions.filter((member) => input.value.includes("@" + member.name));
     const match = activeMention(input.value, input.selectionStart, state.mentions);
-    if (!match || state.conversation?.kind !== "group") { menu.hidden = true; return; }
+    if (!match || state.conversation?.kind !== "group") { closeFloatingList(menu); return; }
     const members = state.conversation.members.filter((member) => member.status === "active" && member.name.toLowerCase().includes(match[1].toLowerCase()));
     menu.innerHTML = members.map((member, index) => `<button type="button" role="option" aria-selected="${index === 0}" data-chat-mention="${escapeHtml(member.id)}">${escapeHtml(member.name)}</button>`).join("") || "<p>没有匹配成员</p>";
-    menu.hidden = false;
+    createFloatingList(input,menu).open();
     menu.querySelectorAll("button").forEach((button) => button.onclick = () => {
       const member = members.find((item) => item.id === button.dataset.chatMention);
       input.setRangeText("@" + member.name + " ", input.selectionStart - match[0].length, input.selectionStart, "end");
       state.mentions = [...state.mentions.filter((item) => item.id !== member.id), member];
-      state.draft = input.value; state.requestId = null; menu.hidden = true; input.focus();
+      state.draft = input.value; state.requestId = null; closeFloatingList(menu); input.focus();
     });
   }
   function renderHeading() {
@@ -363,7 +370,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         else { index = (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length; buttons.forEach((button, i) => button.setAttribute("aria-selected", String(i === index))); }
         return;
       }
-      if (event.key === "Escape") menu.hidden = true;
+      if (event.key === "Escape") closeFloatingList(menu);
       if (event.key === "Enter") {
         event.preventDefault();
         if (modified) { input.setRangeText("\n", input.selectionStart, input.selectionEnd, "end"); input.dispatchEvent(new Event("input")); }
@@ -391,7 +398,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         state.attachments = state.attachments.filter(item => !attachments.includes(item));
         state.latestRequest?.sentMessages.push(message);
         if (state.draft === content) { state.draft = ""; state.mentions = []; state.requestId = null; if (isCurrent(key, token)) input.value = ""; }
-        if (isCurrent(key, token)) { query(".communication-mentions").hidden = true; renderMessages(); const list = query(".communication-messages"); list.scrollTop = list.scrollHeight; }
+        if (isCurrent(key, token)) { closeFloatingList(query(".communication-mentions")); renderMessages(); const list = query(".communication-messages"); list.scrollTop = list.scrollHeight; }
       } catch (error) { notify(error.message, true); }
       finally { state.sending = false; if (host && currentId === key) { query('form [type="submit"]').disabled = false; query('[data-chat-upload-status]').textContent = ''; renderAttachments(); } }
     };
@@ -443,12 +450,13 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   function showGroupEditor(existing = null) {
     const trigger = query('[data-new-chat]'), key = currentId;
     const dialog = document.createElement('dialog'); dialog.className = 'communication-picker'; dialog.setAttribute('aria-labelledby','communication-picker-title');
-    dialog.innerHTML = `<header><h2 id="communication-picker-title">${existing ? '编辑群聊' : '新建对话'}</h2><button type="button" class="small-button" data-close-group>关闭</button></header><form>${existing ? `<div class="form-field"><label for="chat-group-name">群聊名称</label><input id="chat-group-name" name="name" maxlength="100" required value="${escapeHtml(existing.name)}"></div>` : ''}<div class="form-field" data-group-member-picker></div><p role="alert" data-group-error></p><div class="form-actions"><button type="submit" class="primary-button">${existing ? '保存' : '开始沟通'}</button></div></form>`;
+    dialog.innerHTML = `<header><h2 id="communication-picker-title">${existing ? '编辑群聊' : '新建对话'}</h2></header><form>${existing ? `<div class="form-field"><label for="chat-group-name">群聊名称</label><input id="chat-group-name" name="name" maxlength="100" required value="${escapeHtml(existing.name)}"></div>` : ''}<div class="form-field" data-group-member-picker></div><p role="alert" data-group-error></p><div class="form-actions"><button type="button" class="small-button" data-close-group autofocus>关闭</button><button type="submit" class="primary-button">${existing ? '保存' : '开始沟通'}</button></div></form>`;
     host.append(dialog);
     const employees = contacts.filter(item => item.contactKind === 'agent'), teams = contacts.filter(item => item.contactKind === 'team');
     const selection = createEmployeeMultiSelect(dialog.querySelector('[data-group-member-picker]'), { id:'chat-group-members', label:'成员', placeholder:'添加团队或数字员工', esc:escapeHtml, items:[...teams,...employees], selectedIds:existing?.members.map(member=>member.id) || [], detail:item=>`<small>${escapeHtml(item.contactKind === 'team' ? '团队 · '+item.memberAgentIds.length+' 位员工' : item.description || '数字员工')}</small>`, expand:item=>item.contactKind === 'team' ? item.memberAgentIds.filter(id=>employees.some(member=>member.id===id)) : [item.id] });
     dialog.querySelector('[data-close-group]').onclick = () => dialog.close();
-    dialog.onclose = () => { dialog.remove(); trigger?.focus(); };
+    dialog.oncancel = event => event.preventDefault();
+    dialog.onclose = () => { closeFloatingLists(dialog); dialog.remove(); trigger?.focus(); };
     dialog.querySelector('form').onsubmit = async event => {
       event.preventDefault(); const button = dialog.querySelector('[type=submit]'); button.disabled = true;
       try {
@@ -460,7 +468,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         void poll();
       } catch(error) { dialog.querySelector('[data-group-error]').textContent = error.message; button.disabled = false; }
     };
-    dialog.showModal(); dialog.querySelector('input').focus();
+    dialog.showModal(); dialog.querySelector('[data-close-group]').focus();
   }
   return {
     async open(kind, targetId) {
@@ -486,6 +494,6 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       renderList(); renderReadErrors();
       if (changed || !timer) { clearInterval(timer); timer = setInterval(update, 2000); update(); }
     },
-    unmount() { clearInterval(timer); timer = null; host = null; currentId = null; generation++; }
+    unmount() { clearInterval(timer); timer = null; closeFloatingLists(host); host = null; currentId = null; generation++; }
   };
 }

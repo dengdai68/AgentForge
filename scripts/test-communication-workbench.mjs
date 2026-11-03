@@ -76,6 +76,10 @@ try {
     evidence[view] = avatars; await page.screenshot({ path: join(root, view + '.png') });
   }
   await page.goto(origin + '/communication/' + chat.id); await page.locator('.communication-heading').filter({ hasText: employee.name }).waitFor();
+  const privateAvatar=page.locator(`[data-chat-id="${chat.id}"] .communication-avatar`);
+  const selectedAvatar=await privateAvatar.evaluate(node=>({text:node.textContent,color:getComputedStyle(node).backgroundColor,width:node.getBoundingClientRect().width}));
+  assert.equal(selectedAvatar.text,employee.initials.slice(0,2));assert.ok(selectedAvatar.width>=36);
+  assert.ok((await privateAvatar.getAttribute('class')).includes('color-'+employee.color));
   assert.equal(await page.locator('.communication-roster').isVisible(),false,'private chat has no member sidebar');
   assert.equal(await page.locator('[data-toggle-chat-members]').isVisible(),false);
   assert.equal(await page.locator('[data-toggle-communication-console]').innerText(),'','private Console uses an icon');
@@ -124,6 +128,7 @@ try {
   assert.equal(initial.conversation.unreadCount, 0); assert.equal(await page.locator('.communication-contact i').count(), 0);
   // Leave the receiving chat before its reply; only incoming unread content lights it up.
   await page.goto(origin + '/communication/' + other.id); await page.locator('.communication-heading').filter({ hasText: failedAgent.name }).waitFor();
+  assert.equal(await page.locator(`[data-chat-id="${chat.id}"] .communication-avatar`).evaluate(node=>getComputedStyle(node).backgroundColor),selectedAvatar.color,'selection does not replace identity colors');
   if (real) {
     const received = await wait('real Claude attachment review', async () => { const value = await api('/api/communications/' + chat.id); const reply = value.messages.find(row => row.sender.type === 'agent'); if (reply) return { value, reply }; const failed = value.deliveries.find(row => row.status === 'failed'); if (failed) throw new Error('Real Runtime failed: ' + failed.error); }, 600000);
     assert.ok(received.reply.content.includes(a) && received.reply.content.includes(b), 'employee actually read both unpredictable attachment markers');
@@ -225,6 +230,11 @@ try {
   const addressed=(await api('/api/communications/'+group.id)).messages.at(-1);assert.deepEqual(addressed.mentionAgentIds,[failedAgent.id]);
   // Creation only asks for people: one reuses the private chat; many create a named group.
   await page.locator('[data-new-chat]').click();assert.equal(await page.locator('#chat-group-name').count(),0);
+  assert.equal(await page.locator('#chat-group-members-options').isVisible(),false,'new conversation does not auto-open candidates');
+  assert.equal(await page.locator('dialog[open] header [data-close-group]').count(),0);
+  const footer=page.locator('dialog[open] .form-actions');assert.deepEqual(await footer.locator('button').allTextContents(),['关闭','开始沟通']);
+  const footerRects=await footer.locator('button').evaluateAll(nodes=>nodes.map(node=>{const r=node.getBoundingClientRect();return{x:r.x,y:r.y,right:r.right};}));assert.ok(footerRects[0].right<footerRects[1].x);assert.ok(Math.abs(footerRects[0].y-footerRects[1].y)<2);
+  await page.keyboard.press('Escape');assert.equal(await page.locator('dialog[open]').count(),1,'new conversation only closes through an explicit action');
   await page.locator('.communication-picker [type=submit]').click();await page.locator('[data-group-error]').filter({hasText:'请至少选择一位数字员工'}).waitFor();
   await page.locator('#chat-group-members').fill(employee.name);await page.locator(`[data-add-extension="${employee.id}"]`).click();
   await page.locator('#chat-group-members').focus();
@@ -248,7 +258,7 @@ try {
   await app.evaluate(({BrowserWindow},origin)=>BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().startsWith(origin)).setContentSize(760,700),origin);await page.waitForFunction(()=>innerWidth===760);
   await page.locator('[data-toggle-chat-members]').click();await page.locator('.communication-roster').waitFor();
   await page.screenshot({path:join(root,'group-members-narrow.png')});
-  evidence.independentGroups={renamed:true,inlineRenameFailureAndPolling:true,singleSelectionPrivate:true,defaultNameFromMembers:true,teamDeletionDoesNotChangeMembers:true,inlineSelectedChips:true,newGroupsUnique:true,membershipEditable:true,employeeDetails:true,targetedConsole:true,explicitMention:true,deletedMemberHidden:true};
+  evidence.independentGroups={renamed:true,inlineRenameFailureAndPolling:true,singleSelectionPrivate:true,defaultNameFromMembers:true,teamDeletionDoesNotChangeMembers:true,inlineSelectedChips:true,newGroupsUnique:true,membershipEditable:true,employeeDetails:true,targetedConsole:true,explicitMention:true,deletedMemberHidden:true,footerClose:true,noAutomaticDropdown:true,identityAvatars:true};
   for(const theme of ['minimal','warm']) {
     await page.goto(origin+'/settings/appearance');await page.locator(`[name="theme"][value="${theme}"]`).check();
     for(const [width,height] of [[1500,1000],[760,700]]) {

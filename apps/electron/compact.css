@@ -305,7 +305,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 .communication-messages { padding:12px 14px; }
 .communication-contact strong { font-size:12px; }
 .communication-contact small { margin-top:3px; color:var(--muted); font-size:11px; }
-.communication-avatar { width:26px; height:26px; border:1px solid var(--line); border-radius:5px; font-size:11px; }
+.communication-avatar { width:38px; height:38px; border:0; border-radius:8px; font-size:12px; }
 .communication-sidebar-heading button { display:flex; align-items:center; justify-content:center; padding:0; width:28px; height:28px; min-width:28px; min-height:28px; border-radius:7px; }
 .communication-sidebar-heading button svg { width:16px; height:16px; }
 .communication-contact.selected { box-shadow:inset 2px 0 var(--ink); }

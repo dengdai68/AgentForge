@@ -1,6 +1,6 @@
 {
   "name": "agentforge-app",
-  "version": "0.1.3-beta.3",
+  "version": "0.1.3",
   "private": true,
   "license": "Apache-2.0",
   "description": "Local AI teams powered by Claude Code and Codex",

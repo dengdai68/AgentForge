@@ -1,5 +1,7 @@
 # 工程脚本
 
+候选浮层与表单验收：test-task-creation 在两主题用真实鼠标拖动角色/团队 textarea，核对顶部稳定、背景/Escape 保留草稿，以及团队列表脱离正文裁剪、随窗口向上/向下定位和鼠标跨越间隔；test-runtime-settings 覆盖模型列表与原生思考 select；test-communication-workbench 覆盖底部关闭、不自动展开、稳定身份色与两字头像。各脚本均支持隔离安装包路径，不改造操作者实例。
+
 任务/团队验收夹具使用显式 memberAgentIds，团队选人仅作为 UI 展开来源；真实任务按冻结成员运行。test-task-creation 与 test-communication-workbench 覆盖独立成员和群聊，test-prompt-e2e 验证真实完整任务与人类验收。
 
 客户端专用验收：源码/安装包均操作 Electron，自有服务随机端口。test-prompt-e2e 验证真实任务和历史；test-communication-workbench 验证沟通；已移除固定端口 Web 设置/历史脚本和独立浏览器分支。

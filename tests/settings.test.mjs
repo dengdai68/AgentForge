@@ -742,7 +742,7 @@ test("Console initializes Settings with ready validation helpers", async () => {
 test("in-app confirm dialog resolves on buttons and cancels on modal close", async () => {
   const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const slice = app.slice(app.indexOf("function openModal("), app.indexOf("function clearInvalidField"));
-  const classList = () => { const set = new Set(); return { add: (...names) => names.forEach(name => set.add(name)), remove: (...names) => names.forEach(name => set.delete(name)), contains: name => set.has(name) }; };
+  const classList = () => { const set = new Set(); return { add: (...names) => names.forEach(name => set.add(name)), remove: (...names) => names.forEach(name => set.delete(name)), contains: name => set.has(name), toggle(name,force){const enabled=force ?? !set.has(name);if(enabled)set.add(name);else set.delete(name);return enabled;} }; };
   const button = () => ({ handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; }, click() { this.handlers.click?.(); }, focus() {} });
   const cancelButton = button(), acceptButton = button();
   const modal = { classList: classList(), scrollTop: 5 };
@@ -758,6 +758,7 @@ test("in-app confirm dialog resolves on buttons and cancels on modal close", asy
   };
   const run = vm.runInNewContext(`${slice}\n({ confirmDialog, closeModal })`, {
     disposeWorkflowGraphs() {}, resetRequestActive: false,
+    closeFloatingLists() {},
     esc: (value = "") => String(value),
     $: selector => ({ "#modal-content": content, "#modal-backdrop": backdrop })[selector],
   });
