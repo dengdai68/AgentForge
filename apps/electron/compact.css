@@ -173,6 +173,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 .team-card > p,.agent-card > p { min-height:0; margin:6px 0; color:var(--muted); font-size:12px; line-height:1.6; }
 .team-card-header { align-items:center; }
 .agent-card-top { grid-template-columns:30px minmax(0,1fr); align-items:center; gap:10px; }
+.employee-card .agent-card-top { grid-template-columns:30px minmax(0,1fr) auto; align-items:start; }
 .agent-card-avatar { width:30px; height:30px; border-radius:6px; font-size:12px; }
 .agent-card .role { margin-top:2px; color:var(--muted); font-size:11px; }
 .agent-card { display:block; padding:16px; border:1px solid var(--line); border-radius:8px; }

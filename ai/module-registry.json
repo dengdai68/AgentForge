@@ -11,6 +11,10 @@
   ],
   "instructionContract": "AGENTS.md is the concise canonical repository rulebook; CLAUDE.md retains only its local AGENTS link. verify-ai-contract validates the reference and required rules, not duplicated bodies. Development does not maintain old-version data compatibility, migrations or automatic backups; breaking changes state reinitialization requirements without silently resetting operator data. Changes to CLI-covered features must synchronize affected commands, validation, text/JSON output, progressive help/schema, docs and tests in the same change without expanding authority; details in CONTRIBUTING.md and docs/21.",
   "humanMap": "docs/00-ai-map.md",
+  "releaseSkill": {
+    "path": ".codex/skills/agentforge-release/SKILL.md",
+    "purpose": "GitHub Release workflow: Beta by default, patch-only stable increments, explicit stable tags, exact version titles and concise Chinese notes."
+  },
   "developmentSkill": {
     "path": ".codex/skills/agentforge-development/SKILL.md",
     "purpose": "Repository-local development patterns and verification routing; AGENTS.md stays the sole contributor rulebook and docs/06 owns design facts. Not a Runtime skill or packaged employee plugin."

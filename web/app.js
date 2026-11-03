@@ -553,11 +553,11 @@ function renderAgents() {
       <div class="agent-card-top">
         <div class="agent-card-avatar ${roleColor(agent)}">${esc(initialsOf(agent))}</div>
         <div class="agent-card-identity"><h3>${esc(agent.name)}</h3></div>
+        <div class="employee-card-badges">${agent.kind === "manager" ? '<span class="employee-kind">项目经理</span>' : ""}<span class="agent-status" data-status="${esc(agent.status)}">● ${agent.status === "active" ? "可用" : "已停用"}</span></div>
       </div>
       <p>${esc(agent.description || "（未填写简介）")}</p>
       <div class="capabilities">${(agent.capabilities || []).map((capability) => `<span class="capability">${esc(capability)}</span>`).join("")}</div>
-      <div class="agent-runtime"><span>${providerLabel(agent)}${agent.runtime?.model ? " · " + esc(agent.runtime.model) : " · CLI 默认模型"}${agent.runtime?.effort ? " · 思考 " + esc(agent.runtime.effort) : ""}${agent.runtime?.profile ? " · profile: " + esc(agent.runtime.profile) : ""}</span><span>插件 ${agent.runtime?.extensionSelection?.pluginIds?.length || 0} · MCP ${agent.runtime?.extensionSelection?.mcpIds?.length || 0}</span></div>
-      <div class="agent-footer"><span class="agent-status" data-status="${esc(agent.status)}">● ${agent.status === "active" ? "可用" : "已停用"}</span><span>${agent.kind === "manager" ? "项目经理" : "普通员工"}</span></div>
+      <div class="agent-runtime employee-runtime-summary"><span>${providerLabel(agent)}${agent.runtime?.model ? " · " + esc(agent.runtime.model) : " · CLI 默认模型"}${agent.runtime?.effort ? " · 思考 " + esc(agent.runtime.effort) : ""}${agent.runtime?.profile ? " · profile: " + esc(agent.runtime.profile) : ""}</span><span>插件 ${agent.runtime?.extensionSelection?.pluginIds?.length || 0} · MCP ${agent.runtime?.extensionSelection?.mcpIds?.length || 0}</span></div>
       ${agent.roleIds?.length ? `<div class="agent-runtime"><span>角色：${agent.roleIds.map(id=>esc(state.roles.find(role=>role.id===id)?.name || "（角色不存在）")).join("、")}</span></div>` : ""}
       <div class="directory-card-actions"><button class="small-button primary" data-chat-agent="${agent.id}">对话</button><button class="small-button" data-edit-agent="${agent.id}">编辑</button><button class="small-button danger" data-delete-agent="${agent.id}">删除</button></div>
     </div>`).join("") || (query ? `<div class="directory-empty" role="status"><strong>没有匹配的数字员工</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有数字员工</strong>点击右上角「创建数字员工」添加。</div>`);

@@ -1,5 +1,7 @@
 # 代码导航
 
+GitHub 发布入口：`.codex/skills/agentforge-release/SKILL.md`；默认 Beta、正式版补丁递增、仅正式版显式打 tag，以及版本标题/简洁说明规则由该 skill 定义。现有旧 CI 发布入口的差异在 skill 中列明。
+
 核心管理双端对齐：Store.createTask 展开 teamIds/个人成员，cli/main.mjs 支持 create --start 与部分成功回执；web/app.js 独立保存员工 capabilities、工作流 handoffFrom，编辑团队状态与任务优先级。configuration-cli/catalog 测试及 test-task-creation 隔离 App/CLI 交叉验收覆盖协议与回读。
 
 任务列表工作流：web/app.js 按稳定工作流 ID 组合筛选、展示冻结名称；cli/main.mjs 的 tasks list 同步 --workflow ID_OR_NAME 与引用摘要。scripts/test-directory-headers.mjs 覆盖跨页、组合条件、重置、两主题宽窄布局。
@@ -166,3 +168,5 @@ Runtime 启动恢复：local-cli/codex-app-server 在原生会话建立前识别
 当前文件与 CHANGE 左侧目录树仅展示文件/目录及必要操作，移除空目录、展开后读取、无更改、仓库基准等提示段落及 CHANGE 解释副标题；实际读取错误移至树外，比较基准保留在右侧预览头部。仅展示变更，无 CLI/API 协议变化。
 
 待答复的人类澄清卡片由共享样式 `.collaboration-row.needs-answer` 保留左右 12px 内边距，时间、正文及操作与左侧状态色条分开；桌面紧凑布局只覆盖垂直内边距，水平内边距遵循共享样式。仅样式调整，无 CLI/API 或消息语义变化。
+
+员工卡片布局由 web/app.js 与 web/styles.css 维护：头像、姓名与右上状态/经理类型顶部对齐，同排左右对齐 Runtime 与扩展数量；纯展示变化。
