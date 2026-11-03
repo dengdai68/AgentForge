@@ -1593,6 +1593,7 @@ button { cursor:pointer; }
 #run-workspace .collaboration-toolbar small { font-size:11px; }
 #run-workspace .human-guide { margin:0 0 6px; font-size:12px; }
 #run-workspace .collaboration-row { display:block; max-width:none; margin:0; padding:14px 0; border-bottom:1px solid var(--line); font-size:13px; line-height:1.7; }
+#run-workspace .collaboration-row.needs-answer { padding-inline:12px; }
 #run-workspace .role-card[data-execution-state="running"] { background:var(--record-info-soft); box-shadow:inset 3px 0 var(--record-info); }
 #run-workspace .role-card[data-execution-state="running"].selected { outline:1px solid var(--record-info); outline-offset:-1px; }
 #run-workspace .role-card[data-execution-state="running"] :is(strong,em) { color:var(--record-info); }

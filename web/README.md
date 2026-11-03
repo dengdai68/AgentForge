@@ -137,3 +137,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
 
 当前文件与 CHANGE 左侧目录树仅展示文件/目录及必要操作，移除空目录、展开后读取、无更改、仓库基准等提示段落及 CHANGE 解释副标题；实际读取错误移至树外，比较基准保留在右侧预览头部。仅展示变更，无 CLI/API 协议变化。
+
+待答复的人类澄清卡片由共享样式 `.collaboration-row.needs-answer` 保留左右 12px 内边距，时间、正文及操作与左侧状态色条分开；桌面紧凑布局只覆盖垂直内边距，水平内边距遵循共享样式。仅样式调整，无 CLI/API 或消息语义变化。

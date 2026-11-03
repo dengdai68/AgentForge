@@ -289,7 +289,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 #run-workspace .workspace-acceptance { background:var(--surface-soft); color:var(--ink); border:1px solid var(--line); }
 #run-workspace .workspace-acceptance.incomplete { background:#fff8e7; color:#805500; }
 #run-workspace .workspace-acceptance-kicker,#run-workspace .workspace-acceptance p,#run-workspace .workspace-acceptance strong,#run-workspace .workspace-acceptance li,#run-workspace .workspace-acceptance-actions > span { color:inherit; }
-#run-workspace .collaboration-row { padding:12px 0; }
+#run-workspace .collaboration-row { padding-block:12px; }
 
 /* Communication is a split-pane tool, with a persistent composer and readable messages. */
 .communication-layout { grid-template-columns:240px minmax(0,1fr); height:calc(100dvh - 78px); min-height:360px; border:1px solid var(--line); border-radius:5px; box-shadow:none; }

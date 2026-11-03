@@ -87,7 +87,7 @@ test("Mac close preference is explicit, persistent and fails without changing sa
 test("desktop new-conversation button owns zero padding and centered icon layout", async () => {
   const css = await readFile(new URL("../apps/electron/compact.css", import.meta.url), "utf8");
   assert.match(css, /\.communication-sidebar-heading button \{ display:flex; align-items:center; justify-content:center; padding:0; width:28px; height:28px;/);
-  assert.match(css, /#run-workspace \.collaboration-row \{ padding:12px 0; \}/);
+  assert.match(css, /#run-workspace \.collaboration-row \{ padding-block:12px; \}/);
 });
 
 test("tray restore suppresses only navigation focus until the next interaction", async () => {
