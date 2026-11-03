@@ -6,7 +6,7 @@ Store 拥有任务独立成员、唯一经理及逻辑删除规则；团队仅�
 
 Store 拥有员工逻辑删除、成员校验和公开消息的定向投递；HTTP 暴露同一命令，Runtime 只执行会话。
 
-任务协作由共享纯投影合并 Message、Dispatch 和白名单内协调事件，Web/Electron 与 CLI 使用同一完整记录。Store 校验 sourceMessageId 属于当前 Run，Orchestrator 在经理派工和员工交接的后续投递上记录来源；该关联只供追溯，不改变执行或输入选择。消息无团队内私密分类，处理对象与公开可查范围分开；旧投递可按已存 Dispatch/Trace 引用唯一解析来源；无法关联者按独立事实显示，不按正文/时间猜测，不重写历史。当前状态与实际执行历史分别投影，重试等事件归入所关联投递。 已知员工交接信封只投影已记录的 rawResponse 报告，原始消息不改写。renderer 全文渲染 Markdown 并按5行裁剪、原位展开；不附加验收文件清单或控制台错误摘要，员工状态取最新 Trace。CLI 保留完整读模型。
+协作记录只展示员工、经理、人类之间的沟通 Message；系统提示、启动、投递、重试和结算事件不作为记录行。底层不可变事件、Dispatch 和 Trace 继续保留，关联执行元数据供查询。消息保存本轮 `startMessageId`，对应 Trace 的 `inputMessageId`；“本轮控制台”按该 ID 打开、定位本次提示词，不受日志分页影响。成员原生会话贯穿任务且彼此隔离，每次执行拥有独立输入轮次 ID。 sourceMessageId 由 Store 校验同 Run；共享投影供 Web/Electron 与 CLI 使用，不按正文或时间猜测关联。
 
 本仓库为 AgentForge App 独立客户端，完整抽取边界见 [ADR：客户端抽取](23-desktop-extraction.md)。默认 start/dev 启动 Electron，自带本机控制面与全部界面；服务要求父进程 IPC 与 bootstrap 信息，不能直接启动；父进程断开时退出。
 
@@ -18,7 +18,7 @@ Store 拥有员工逻辑删除、成员校验和公开消息的定向投递；HT
 
 server/prompts.mjs 分离应用系统指令和当前输入：完整工作流仅经理持有，执行环境进系统层。Store 保存成员平台消息输入游标及上下文摘要，模型产生内容/成功返回后确认送达，后续只追加新消息和变化上下文，原生会话拥有对话历史，不重放 transcript。Runtime 分别适配 Claude 系统追加文件和 Codex developer_instructions，详细协议见 docs/22。
 
-运行失败展示脱敏原始错误；Runtime 判定明确临时故障，Orchestrator 限制同一投递最多三次，Store 停止不可重试/耗尽投递并标记业务 Run 失败。HTTP 定时器仅唤醒到期队列，不伪造经理新派工，不在安装完整性失败后无限重试。经理的非终止安排在仍有未结束投递时顺延：Orchestrator 记录顺延说明并向经理入队一次复核投递，队列清空后基于最新状态重新决定，被顺延的决定不再静默丢失；该复核投递自身不阻塞后续交接。平台自建的协调跟进投递（顺延复核、格式纠错、交付通知）只为继续协调而存在；Run 进入验收或人类确认完成时，Store 将未执行的跟进投递取消并记录审计事件，完成状态不再残留永久不可领取的协调投递，归档门禁不受影响。
+Runtime 外部故障立即保留脱敏原始错误并标记任务失败，禁止新消息；修复后在客户端重试原员工投递和会话，CLI 不新增恢复权限。只有确认的原生会话丢失允许重建一次；经理非终止安排仍尊重已有投递，验收后的协调跟进结算只保留审计事件。
 
 沟通工作台复用任务控制台 renderer 和按需内容读取器，但以 Conversation/Delivery/attempt 为归属。HTTP 接受同源认证二进制附件，Run Files 保存会话原文件和私有执行内容，Store 只保存元数据、消息关联与调用事实。控制台只在展开时按成员/50 条事件分页轮询，历史按 Map 分组，不重复扫描全事件。现有 CLI 未覆盖长期沟通，本轮不扩展 CLI 权限或命令；配置与任务协议不变。
 
@@ -86,3 +86,5 @@ DeepSeek Harness 使用独立 SDK JSON-RPC 适配器 dsh.mjs；dsh-plugin.mjs �
 Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
 插件自动更新仍通过 Marketplace 准备不可变候选、Store 原子更新员工绑定；组件定义错误的 warnings 随候选结果进入检查状态，由更新区域提示并在插件详情查看。来源/完整性等致命错误保留当前版本，冻结任务与排队投递不改写。
+
+`server/task-patrol.mjs` 每 10 秒检测运行元数据。存在执行中的 Trace/Dispatch 或正在准备的执行时跳过；已有可执行队列则继续队列；运行中没有执行者和待执行交接时，由 Store 创建经理巡检投递，异步调用 Orchestrator。单飞覆盖准备阶段，定时器不等待模型。错误、等待人类澄清、暂停、验收及结束不会触发经理推进；终态已有独立答疑队列仍可执行。经理根据状态和角色沟通记录继续协调，平台不评价业务结果。

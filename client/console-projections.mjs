@@ -31,9 +31,9 @@ export function consoleContentTokens(value, { json = true, truncated = false } =
 }
 
 export const STATUS_TEXT = {
-  backlog: "待开始", planning: "规划中", running: "执行中", awaiting_human: "等待你的澄清",
-  review: "经理协调中", awaiting_acceptance: "待你验收", paused: "已暂停", done: "已完成",
-  blocked: "已阻塞", failed: "失败", completed: "已完成", cancelled: "已终止"
+  backlog: "待开始", planning: "进行中", running: "进行中", awaiting_human: "等待你的澄清",
+  review: "进行中", awaiting_acceptance: "待你验收", paused: "已暂停", done: "已完成",
+  blocked: "错误中断", failed: "错误中断", completed: "已完成", cancelled: "已终止"
 };
 
 // Shell-like tools whose already-redacted input carries a real command line.
@@ -610,5 +610,8 @@ export function collaborationRecords(workspace = {}) {
       records.push(record);
     }
   }
-  return records.sort(chronological);
+  return records.filter(record => record.category === "message" && ["agent", "human"].includes(record.senderType)).map(record => ({
+    ...record,
+    startMessageId: byMessage.get(record.id)?.startMessageId || byTrace.get(record.traceId || record.executionTraceId)?.inputMessageId || record.traceId || record.executionTraceId || null,
+  })).sort(chronological);
 }

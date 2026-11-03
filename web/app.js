@@ -1056,7 +1056,7 @@ function tracePromptMarkup(trace, runId, agent = null) {
   const body = trace.promptRef
     ? `<div class="prompt-snapshot-body" data-prompt-snapshot="${esc(trace.id)}" data-content-run="${esc(runId)}"${trace.contentBase ? ` data-content-url="${esc(trace.contentBase)}/traces/${esc(trace.id)}/prompt"` : ""}><span class="muted">正在读取提示词快照…</span></div>${session}`
     : `<p class="tool-audit-note">该次调用未保存提示词快照。</p>${session}`;
-  return `<div class="log-row log-row-trace-prompt"><div class="log-meta"><time class="log-time">${esc(exactTime(trace.startedAt))}</time><span class="log-level system">TRACE</span></div><div class="log-body"><details data-console-key="prompt:${esc(trace.id)}" class="prompt-snapshot"><summary><span class="console-tool-chevron">▶</span><strong>${esc(label)}</strong><small>本次调用提示词 · 已脱敏</small></summary>${body}</details></div></div>`;
+  return `<div class="log-row log-row-trace-prompt"><div class="log-meta"><time class="log-time">${esc(exactTime(trace.startedAt))}</time><span class="log-level system">TRACE</span></div><div class="log-body"><details data-console-key="prompt:${esc(trace.id)}" data-turn-message-id="${esc(trace.inputMessageId || trace.id)}" class="prompt-snapshot"><summary><span class="console-tool-chevron">▶</span><strong>${esc(label)}</strong><small>本次调用提示词 · 已脱敏</small></summary>${body}</details></div></div>`;
 }
 
 function tracePromptFallbackMarkup(traceId) {
@@ -1080,6 +1080,24 @@ function renderConsolePage({ prepend = false } = {}) {
   else if (oldControls.outerHTML !== controls.outerHTML) oldControls.replaceWith(controls);
   for (const details of stream.querySelectorAll("details[data-console-key]")) details.open = open.has(details.dataset.consoleKey) || (details.dataset.defaultOpen !== undefined && !closed.has(details.dataset.consoleKey));
   stream.scrollTop = prepend ? top + stream.scrollHeight - height : following ? stream.scrollHeight : top;
+}
+
+async function openCollaborationTurn(traceId, startMessageId) {
+  const runId = state.selectedRunId;
+  const trace = state.workspace.traces.find(item => item.id === traceId);
+  if (!trace) return toast("来源 Trace 在当前 Run 中不可读取。", true);
+  state.selectedAgentId = trace.agentId;
+  workspaceView().jumpLatest = false; workspaceView().tab = "console";
+  renderWorkspace();
+  await loadConsolePage(runId, trace.agentId, { reset: true, traceId });
+  if (state.selectedRunId !== runId || state.selectedAgentId !== trace.agentId) return;
+  const key = startMessageId || trace.inputMessageId || trace.id;
+  const prompt = document.querySelector(`[data-turn-message-id="${CSS.escape(key)}"]`);
+  if (!prompt) return toast("本轮提示词定位失败，请重试。", true);
+  prompt.open = true;
+  consolePage(runId, trace.agentId).browsingHistory = true;
+  prompt.scrollIntoView({ block: "start" });
+  prompt.querySelector("summary")?.focus({ preventScroll: true });
 }
 
 async function loadConsolePage(runId, agentId, { older = false, reset = false, traceId } = {}) {
@@ -1290,7 +1308,7 @@ function renderChatStream(events, agent, { traceId = null, hasMore = false, stre
     if (traceId && id !== traceId) continue;
     const trace = traceById.get(id);
     const time = timestamp(trace?.startedAt) ?? encountered.get(id) ?? null;
-    if (hasMore && (time === null || (windowStart !== null && time < windowStart))) continue;
+    if (!traceId && hasMore && (time === null || (windowStart !== null && time < windowStart))) continue;
     rows.push({ key: `prompt:${id}`, time, prompt: true, html: trace ? tracePromptMarkup(trace, runId, agent) : tracePromptFallbackMarkup(id) });
   }
   rows.sort((a, b) => (a.time ?? Infinity) - (b.time ?? Infinity) || Number(Boolean(b.prompt)) - Number(Boolean(a.prompt)));
@@ -1749,8 +1767,8 @@ function renderCollaboration(workspace, agents) {
   view.disclosures ||= {};
   const questions = (state.workspace?.pendingQuestions || []).filter(message => message.recipient.type === "human");
   if (view.replyToMessageId === undefined || (view.replyToMessageId && !questions.some(item => item.id === view.replyToMessageId))) view.replyToMessageId = questions[0]?.id || "";
-  const runtimeNoticeIds = new Set((workspace.messages || []).filter(message => message.sender?.type === "system" && ["automatic_retry", "escalation"].includes(message.kind)).map(message => message.id));
-  const records = collaborationRecords(workspace).filter(item => item.category !== "dispatch" && !runtimeNoticeIds.has(item.id) && !["run.failed", "session.reset", "dispatch.retry_scheduled", "dispatch.retry_stopped", "dispatch.escalated"].includes(item.eventType)).filter(item => view.collaborationFilter === "human" ? item.human : true);
+  const records = collaborationRecords(workspace).filter(item => view.collaborationFilter === "human" ? item.human : true);
+  const messagingBlocked = Boolean(run.task.archivedAt || run.status === "failed");
   const visibleRecords = records.slice(-(view.collaborationLimit || 30));
   const body = (content, key) => {
     const expanded = Boolean(view.disclosures["body:" + key]), id = "collaboration-body-" + encodeURIComponent(key);
@@ -1764,25 +1782,22 @@ function renderCollaboration(workspace, agents) {
       ${records.length ? visibleRecords.map(item => `<article class="collaboration-row ${item.senderType === "human" ? "from-human" : ""} ${item.canReply ? "needs-answer" : ""}" data-collaboration-record="${esc(item.id)}" data-tone="${esc(item.tone)}" data-record-status="${esc(item.statusCode)}"><time>${exactTime(item.timestamp)}</time><div>
         <header><span class="collaboration-kind">${esc(item.title)}</span><strong>${esc(item.from)}${item.to ? ` <span aria-label="交给">→</span> ${esc(item.to)}` : ""}</strong>${item.status ? `<span class="collaboration-status">${esc(item.status)}</span>` : ""}</header>
         <div class="collaboration-content">
-          ${item.routingNote ? `<p class="collaboration-source-note">${esc(item.routingNote)}</p>` : ""}
-          ${item.sourceNotice ? `<p class="collaboration-source-note">${esc(item.sourceNotice)}</p>` : ""}
-          ${item.questionType ? `<small>问题类型：${esc(item.questionType)} · 路由依据：${esc(item.routingReason)}</small>` : ""}
           ${body(item.content, item.id)}
           ${item.reason ? `<p>${esc(item.reason)}</p>` : ""}
           ${item.canReply ? `<button class="small-button primary" data-answer-message="${esc(item.replyId)}">回复此问题</button>` : ""}
-          ${item.traceId || item.executionTraceId ? `<button class="text-action trace-link" data-open-collaboration-trace="${esc(item.traceId || item.executionTraceId)}" title="查看本轮执行详情">本轮控制台 ↗</button>` : ""}
-        </div></div></article>`).join("") : `<div class="human-empty"><strong>暂无协作消息</strong><p>任务消息、实际派工与协作状态会按时间出现在这里；执行细节请查看控制台。</p></div>`}
+          ${item.traceId || item.executionTraceId ? `<button class="text-action trace-link" data-open-collaboration-trace="${esc(item.traceId || item.executionTraceId)}" data-start-message-id="${esc(item.startMessageId)}" title="定位本轮对话开始时的提示词">本轮控制台 ↗</button>` : ""}
+        </div></div></article>`).join("") : `<div class="human-empty"><strong>暂无协作消息</strong><p>角色之间的沟通会按时间出现在这里；执行细节请查看控制台。</p></div>`}
     </div>
     <form class="instruction-form" id="instruction-form">
       ${questions.length ? `<label for="reply-question">消息用途</label><select id="reply-question" name="replyToMessageId"><option value="">追加新指令（排队）</option>${questions.map(item => `<option value="${item.id}" ${view.replyToMessageId === item.id ? "selected" : ""}>回复 ${esc(item.sender.name)}：${esc(item.content.slice(0, 70))}</option>`).join("")}</select>` : ""}
       <label for="instruction-text">消息内容</label><div class="mention-wrap"><textarea id="instruction-text" name="content" required placeholder="输入消息…"></textarea><div class="mention-list" id="mention-list"></div></div>
-      <button class="primary-button compact" type="submit" data-send-instruction ${run.task.archivedAt ? "disabled" : ""}>发送</button>
-      <p class="directive-note">${run.task.archivedAt ? "任务已归档，协作记录只读。" : ["completed", "cancelled", "failed", "paused"].includes(run.status) ? "可继续咨询；仅答疑，不恢复业务流程。Enter 发送，Shift / Cmd / Alt + Enter 换行。" : "新指令入队，不打断当前成员。Enter 发送，Shift / Cmd / Alt + Enter 换行。"}</p>
+      <button class="primary-button compact" type="submit" data-send-instruction ${messagingBlocked ? "disabled" : ""}>发送</button>
+      <p class="directive-note">${run.task.archivedAt ? "任务已归档，协作记录只读。" : run.status === "failed" ? "任务因错误中断，请先点击重试继续失败员工；当前不能发送消息或 @ 其他成员。" : ["completed", "cancelled", "paused"].includes(run.status) ? "可继续咨询；仅答疑，不恢复业务流程。Enter 发送，Shift / Cmd / Alt + Enter 换行。" : "新指令入队，不打断当前成员。Enter 发送，Shift / Cmd / Alt + Enter 换行。"}</p>
     </form>`;
   $("#instruction-form").addEventListener("submit", sendInstruction);
   $("#reply-question")?.addEventListener("change", event => { view.replyToMessageId = event.target.value; });
   $("#instruction-text").value = view.draft;
-  $("#instruction-text").disabled = Boolean(run.task.archivedAt);
+  $("#instruction-text").disabled = messagingBlocked;
   refreshCollaborationBodies(dock);
 }
 
@@ -2515,7 +2530,7 @@ document.addEventListener("click", (event) => {
   if ((target = el("[data-collaboration-filter]"))) { workspaceView().collaborationFilter = target.dataset.collaborationFilter; workspaceView().collaborationScroll = null; return renderWorkspace(); }
   if ((target = el("[data-collaboration-latest]"))) { const list = $(".human-message-list"); list.scrollTop = list.scrollHeight; return; }
   if ((target = el("[data-answer-message]"))) { workspaceView().replyToMessageId = target.dataset.answerMessage; renderWorkspace(); $("#instruction-text").focus({ preventScroll: true }); return; }
-  if ((target = el("[data-open-collaboration-trace]"))) { const trace = state.workspace.traces.find((item) => item.id === target.dataset.openCollaborationTrace); if (!trace) return toast("来源 Trace 在当前 Run 中不可读取。", true); state.selectedAgentId = trace.agentId; workspaceView().jumpLatest = true; workspaceView().tab = "console"; loadConsolePage(state.selectedRunId, trace.agentId, { reset: true, traceId: trace.id }); renderWorkspace(); return; }
+  if ((target = el("[data-open-collaboration-trace]"))) { void openCollaborationTurn(target.dataset.openCollaborationTrace, target.dataset.startMessageId); return; }
   if ((target = el("[data-open-acceptance-review]"))) { const trace = state.workspace?.traces.find((item) => item.id === target.dataset.openAcceptanceReview); if (!trace) return toast("经理交接记录在当前 Run 中不可读取。", true); state.selectedAgentId = trace.agentId; workspaceView().jumpLatest = true; workspaceView().tab = "console"; loadConsolePage(state.selectedRunId, trace.agentId, { reset: true, traceId: trace.id }); renderWorkspace(); return; }
   if ((target = el("[data-console-latest]"))) { workspaceView().jumpLatest = true; workspaceView().tab = "console"; loadConsolePage(state.selectedRunId, state.selectedAgentId, { reset: true, traceId: null }); renderWorkspace(); const stream = $("#trace-stream"); stream.scrollTop = stream.scrollHeight; return; }
   if ((target = el("[data-collaboration-older]"))) {

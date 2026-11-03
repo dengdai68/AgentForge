@@ -20,7 +20,7 @@ Runtime 恢复结算：local-cli 仅在原生明确成功完成且进程正常�
 
 公开思考展示：Runtime executionContent 保留凭据过滤，空白规范化不再误标脱敏；web/app.js 展示已保存 thinking 正文，空历史正文明确提示未保存，不补造 Provider 未公开内容。验证见 runtime-configuration/settings 与 test-collaboration-flow。
 
-完整协作记录：Store 校验 Dispatch.sourceMessageId 属于同一 Run，Orchestrator 记录派工/交接来源；client/console-projections.mjs 合并消息、实际投递与协调事件，Web/Electron 和 CLI 共用。已有唯一结构化引用恢复展示关联，deliveries 为当前状态、history 为历史事实；已知交接 JSON 信封提取 rawResponse 报告，原始消息不变。客户端主线只保留总结、沟通及关键人类状态，不附加投递块、平台失败或验收文件清单。长消息始终渲染 Markdown，超过10行只展开区域；控制台无顶部错误摘要，日志错误标红，员工状态跟随最新 Trace 的失败/重试/恢复。CLI 保留完整投递/执行/验收文件引用；不改变调度或领域协议。scripts/test-collaboration-flow.mjs 用隔离 Electron/HTTP/CLI 验证。
+协作记录仅展示角色之间的 Message，保留真实发送者、接收者和正文；系统事件不生成记录行。sourceMessageId 关联实际派工，startMessageId 关联本轮提示词，Web/Electron/CLI 共用投影。底层事件与执行历史保留，无法关联的投递由执行查询查看，不伪造沟通。长消息安全渲染 Markdown 后折叠，展开保留阅读位置；错误详情在控制台，成员状态随最新执行更新。
 
 独立客户端入口：npm start/dev → apps/electron/main.mjs → 自有 server/index.mjs → web/ 与 client/。全部相对依赖、CLI、Runtime、测试在本仓库；抽取来源、保留边界与发布身份见 docs/23-desktop-extraction.md。服务只由客户端 IPC 启动，直接运行拒绝；无独立 Web 部署。renderer 始终用客户端样式，所有 UI 验收只操作 Electron。
 
@@ -58,7 +58,7 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 
 ## 修改入口
 
-- 失败与续接：runtime/local-cli 保留脱敏原始错误并独立判定临时故障；marketplace 提供完整性失败位置，cli-environment 禁止默认 Python 字节码写入。orchestrator 限制三次尝试，Store 停止不可重试投递；prompts 按内容摘要追加变化，模型实际活动确认输入游标。HTTP 巡检只继续已有到期队列，CLI 进度/帮助同步失败恢复语义。
+- 失败与续接：runtime/local-cli 保留脱敏原始错误并独立判定临时故障；marketplace 提供完整性失败位置，cli-environment 禁止默认 Python 字节码写入。orchestrator 将外部错误交给 Store 停止投递并标记任务失败；prompts 按内容摘要追加变化，模型实际活动确认输入游标。10 秒巡检继续队列或唤醒空闲任务经理，CLI 进度/帮助同步失败恢复语义。
 
 - 任务目录标题由顶栏展示，index.html/styles.css 将内部任务/归档 h2 保留为无占位的可访问语义；app.js 更新归档顶栏名称。目录实机回归验证宽窄 客户端及往返搜索。Release 工作流发布成功后按构建输出的精确 artifact ID 清理 Actions 中转包，失败最多保留一天，不删除发布附件/标签。
 
@@ -150,3 +150,5 @@ ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别�
 员工框内多选：web/marketplace.mjs 的 createEmployeeMultiSelect 同时服务角色、插件与 MCP；app.js 只组合角色目录和保存值，styles.css 统一输入边框内的标签/搜索/换行与悬停桥。移除角色排序箭头/序号，绑定及 Runtime/CLI 协议不变；test-roles-ui 覆盖两主题宽窄、框内几何对齐、键盘及保存回读。
 
 员工配置简化：app.js/CLI 只展示并接受 business/manager，不再接收 repository。Store 新 Task 的仓库来源/绑定为空，工作根统一；旧任务冻结仓库仍由 Run Files/Orchestrator 原逻辑执行。沟通真实续接验证见 test-communication-direct-real，完整新任务验收见 test-dsh-real。
+
+任务协作：`server/task-patrol.mjs`（10 秒非阻塞检测）→ Store 经理巡检投递 → Orchestrator；错误只由人工续接原员工。共享协作投影仅角色消息，Trace.inputMessageId / Message.startMessageId 连接本轮提示词。契约见 docs/03、docs/22；回归见 tests/task-patrol.test.mjs、scripts/test-task-collaboration-real.mjs。

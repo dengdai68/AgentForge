@@ -79,3 +79,5 @@ roles.test 覆盖有序多角色校验/原子失败/冻结/历史读取；market
 沟通覆盖 reply-only schema、旧转交参数/字段拒绝、没有自动子投递及事务失败回滚。历史仓库由 fixture-store 的 freezeHistoricalRepository 显式构造已冻结任务，当前员工仍为普通类型；保留原检出/重试/历史执行核验，不用废弃输入创建新配置。
 
 人工失败恢复：dispatch-routing/smoke 验证原员工、投递引用、咨询父链、累计次数、原生会话、再次失败、重复请求拒绝、历史错误排除、优先领取和重启持久化；CLI 帮助同步但不新增恢复命令。test-task-retry-real.mjs 另用真实 Claude 任务、明确的进程失败注入、实际 UI 点击与人类验收验证完整续接，不以单测夹具代替。
+
+task-patrol.test.mjs 覆盖 10 秒巡检、准备阶段单飞、空闲经理恢复、人类等待/失败/终态排除、直接交接和动态继续输入。真实模型端到端验证见 scripts/test-task-collaboration-real.mjs，不以单元夹具代替。

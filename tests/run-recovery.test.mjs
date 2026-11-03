@@ -130,7 +130,7 @@ test("terminal inquiry recovery leaves unrelated stale business Traces unchanged
   store.initializeDispatches(run.id);
   const business = store.claimDispatch(run.id), staleTrace = startTrace(store, run, business);
   store.completeDispatch(business.id);
-  store.updateRun(run.id, { status: "failed" }); store.setTaskStatus(run.taskId, "blocked");
+  store.updateRun(run.id, { status: "cancelled" }); store.setTaskStatus(run.taskId, "cancelled");
   store.submitHumanMessage(run.id, { content: "Explain the preserved evidence without restarting work", recipientAgentId: run.manager.id });
   const inquiry = store.claimDispatch(run.id), inquiryTrace = startTrace(store, run, inquiry);
   const recovery = store.recoverInterruptedRun(run.id);
@@ -138,7 +138,7 @@ test("terminal inquiry recovery leaves unrelated stale business Traces unchanged
   assert.deepEqual(recovery.recoveredDispatchIds, [inquiry.id]);
   assert.equal(store.getRunWorkspace(run.id).traces.find((item) => item.id === staleTrace.id).status, "running");
   assert.equal(store.claimDispatch(run.id).id, inquiry.id);
-  assert.equal(store.getRun(run.id).status, "failed");
+  assert.equal(store.getRun(run.id).status, "cancelled");
 });
 
 test("paused inquiries in backoff do not prepare files before their retry time", async (t) => {

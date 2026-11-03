@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
 import { desktopServiceDataRoot } from "./data-home.mjs";
 import { createRunFiles } from "./run-files.mjs";
-import { runClaudeCodeCli, runCodexCli, runDshCli, promptSnapshot, RuntimeCancelledError, RuntimeSessionMissingError, runtimeFailureDetail, retryableRuntimeFailure, separateRuntimeSession } from "./runtime/local-cli.mjs";
+import { runClaudeCodeCli, runCodexCli, runDshCli, promptSnapshot, RuntimeCancelledError, RuntimeSessionMissingError, runtimeFailureDetail, separateRuntimeSession } from "./runtime/local-cli.mjs";
 import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
 import { terminateExecution } from "./runtime/registry.mjs";
 import { taskPrompt } from "./prompts.mjs";
@@ -45,7 +45,7 @@ export function parseEmployeeResponse(value) {
   if (objects.length === 1) {
     const item = objects[0];
     if (!raw.slice(item.end).trim() && /(?:^|\n)\s*$/.test(raw.slice(0, item.start)) &&
-        ["managerDecision", "consultation", "deliveryReview"].some(key => item.value[key] && typeof item.value[key] === "object")) {
+        ["managerDecision", "consultation", "deliveryReview", "handoff"].some(key => item.value[key] && typeof item.value[key] === "object")) {
       return readNodeResult({ ...item.value, rawResponse: raw });
     }
   }
@@ -59,7 +59,6 @@ class RuntimeInvocationError extends Error {
   constructor(error, input) {
     super(runtimeFailureDetail(error, [input.systemPrompt, input.prompt].filter(Boolean).join('\n')));
     this.name = "RuntimeInvocationError";
-    this.retryable = retryableRuntimeFailure(error);
     this.code = error?.code;
   }
 }
@@ -142,6 +141,7 @@ export function scheduleManagerFollowup(store, runId, delivery, decision, source
       return { scheduled: "blocked", requeued: true };
     }
     const recipientId = decision.nextAgentId;
+    if (recipientId === delivery.recipientAgentId) throw new Error("不能 @ 自己");
     store.setCurrentFocus(runId, next, decision.rationale || "项目经理安排下一次协作");
     store.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: next, purpose: "node", dedupeKey: "handoff:" + delivery.id, sourceMessageId });
     return { scheduled: "handoff" };
@@ -157,6 +157,10 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
   const sender = { type: "agent", id: agent.id, name: agent.name };
   store.acceptNodeResult(runId, delivery.workflowNodeId, trace.id, output, artifacts);
   const content = output.summary || "本轮工作已返回。";
+  if (output.handoff) {
+    store.handoffDispatch(delivery.id, output.handoff.recipientAgentId, content, trace.id);
+    store.completeTrace(trace.id); store.syncWaiting(runId); return;
+  }
   if (output.consultation) {
     try {
       store.askQuestion(delivery.id, output.consultation, trace.id);
@@ -186,13 +190,15 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
         if (!decision || !Object.hasOwn(decision, "nextNodeId")) throw new Error('本轮缺少 managerDecision，正文报告不能建立派工或提交验收。请返回 managerDecision（nextNodeId、nextAgentId、rationale）；提交人类验收时前两项为 null，需要咨询则使用顶层 consultation');
         scheduleManagerFollowup(store, runId, { ...delivery, traceIds: [trace.id] }, decision, resultMessage?.id);
       } catch (error) {
-        const note = store.addMessage({ runId, traceId: trace.id, sender: { type: "system", id: "agentforge", name: "AgentForge" }, recipientAgentId: run.manager.id, kind: "coordination_notice", content: `协调决定未能执行：${error.message}` });
-        managerDispatch(store, runId, "routing:" + delivery.id, [note.id], note.id);
+        store.addEvent({ type: "run.routing_incomplete", runId, actor: sender, message: error.message, data: { traceId: trace.id } });
       }
     }
   } else if (!["consultation", "inquiry"].includes(delivery.purpose) || output.consultation) {
     store.addEvent({ type: "trace.accepted", runId, actor: sender, message: "已记录员工交接。", data: { traceId: trace.id, workflowNodeId: delivery.workflowNodeId, artifactCount: artifacts.length } });
-    managerDispatch(store, runId, "delivery:" + delivery.id, [], resultMessage?.id);
+    const source = store.getRunWorkspace(runId).messages.find(message => message.id === delivery.sourceMessageId);
+    if (source?.sender?.type === "agent" && source.sender.id !== agent.id) {
+      store.enqueueDispatch(runId, { recipientAgentId: source.sender.id, workflowNodeId: delivery.workflowNodeId, purpose: source.sender.id === run.manager.id ? "manager" : "instruction", messageIds: resultMessage ? [resultMessage.id] : [], sourceMessageId: resultMessage?.id, dedupeKey: "delivery:" + delivery.id, coordinationFollowup: source.sender.id === run.manager.id });
+    }
   }
   store.syncWaiting(runId);
 }
@@ -256,8 +262,8 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
     const failureFact = kind ? { kind, signature: failureSignature(kind, failure) } : null;
     if (failureFact) failureFact.streak = delivery.lastErrorSignature === failureFact.signature ? (delivery.errorStreak || 1) + 1 : 1;
     const retrySession = error instanceof RuntimeSessionMissingError && delivery.lastErrorKind !== 'session';
-    const retryTransient = error instanceof RuntimeInvocationError && error.retryable && delivery.attempts < 3;
-    if (cancelled || immediate && !(error instanceof RuntimeSessionMissingError) || retrySession || retryTransient) {
+
+    if (cancelled || immediate && !(error instanceof RuntimeSessionMissingError) || retrySession) {
       store.retryDispatch(delivery.id, failure, immediate ? 0 : 300000, failureFact);
     } else {
       store.stopFailedDispatch(delivery.id, failure, failureFact);
@@ -270,6 +276,7 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
 // In-process guard complements the persisted single-claim invariant. No polling
 // may create a second invocation while file preparation is still in progress.
 const executions = new WeakMap();
+export function isRunExecuting(store, runId) { return Boolean(executions.get(store)?.has(runId)); }
 export function executeRun(store, runId, options = {}) {
   let active = executions.get(store); if (!active) { active = new Map(); executions.set(store, active); }
   if (active.has(runId)) return active.get(runId);
@@ -327,17 +334,8 @@ export function requestHumanIntervention(store, runId, messageId) {
   if (!message) throw new Error("人工消息不存在");
   const run = store.getRun(runId), task = store.getRunTask(runId), recipientId = message.recipient.type === "agent" ? message.recipient.id : run.manager.id;
   const ownNode = store.memberResponsibility(runId, recipientId);
-  // Same rule as submitHumanMessage: without an assigned node there is no
-  // fabricated nodes[0] binding — the manager picks the message up for formal
-  // dispatch (managerDecision chooses node + member). A manager recipient is
-  // bound as a manager-purpose dispatch on the conventional first node:
-  // manager deliveries open no Artifact boundary, so there is no mismatch and
-  // node resolution must never throw.
-  if (recipientId !== run.manager.id && !ownNode) {
-    store.enqueueDispatch(runId, { recipientAgentId: run.manager.id, workflowNodeId: task.workflowSnapshot.nodes[0].id, purpose: "manager", messageIds: [messageId], dedupeKey: "message:" + messageId });
-    return store.getRun(runId);
-  }
-  store.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: ownNode || task.workflowSnapshot.nodes[0].id, purpose: recipientId === run.manager.id ? "manager" : "instruction", messageIds: [messageId], dedupeKey: "message:" + messageId });
+  if (run.status === "failed") throw new Error("任务因错误中断，请先重试失败员工");
+  store.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: ownNode || task.workflowSnapshot.nodes[0].id, purpose: recipientId === run.manager.id ? "manager" : "instruction", messageIds: [messageId], sourceMessageId: messageId, dedupeKey: "message:" + messageId });
   return store.getRun(runId);
 }
 export function terminateRun(store, runId, reason) {

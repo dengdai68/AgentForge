@@ -119,3 +119,5 @@ test-roles-ui 覆盖角色/插件/MCP 框内多选添加/移除、无排序操�
 `AGENTFORGE_ROLES_APP=/absolute/path/AgentForge.app node scripts/test-roles-ui.mjs` 将同一多角色/部分安装验收用于真实打包版（仍使用隔离数据），并实际通过已认证 CLI 写入/清空 roleIds。
 
 `AGENTFORGE_DIRECT_COMMUNICATION_REAL=1 node scripts/test-communication-direct-real.mjs`：在隔离 Store 中实际调用三种 Runtime，先产生旧 schema 会话，再用 reply-only 重试并核对原生 ID 不变、群聊仅处理人类接收者且不新增子投递；不读写操作者沟通。test-dsh-real 同时核对新任务没有仓库绑定并到可见人类确认。开发/CLI E2E 的仓库说明改写在 systemPrompt 中，由员工依目标准备，不通过旧 developer/repository 输入。
+
+`AGENTFORGE_TASK_COLLABORATION_REAL=1 node scripts/test-task-collaboration-real.mjs` 使用隔离 Electron 和真实 Claude：首轮真实经理输出注入丢失协调字段，验证正式 10 秒巡检接续；真实员工首轮结束后注入鉴权错误，验证 failed 锁定、原员工/会话重试、完成交付和界面人类确认。故障是验收注入，不冒充 Provider 实际故障。证据保存在 .data/task-collaboration-real-*；可用 AGENTFORGE_TASK_COLLABORATION_RESUME 指定该脚本失败的隔离目录续验。`test-collaboration-flow.mjs` 覆盖角色消息过滤和跨日志分页的提示词定位。

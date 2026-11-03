@@ -12,7 +12,7 @@ import { createRunFiles } from "../server/run-files.mjs";
 import { dispatchBlocksHandoff, executeRun, requestHumanIntervention, scheduleManagerFollowup } from "../server/orchestrator.mjs";
 
 test('unaddressed task messages route to the frozen manager while terminal runs remain inquiry-only', () => {
-  for (const status of ['running', 'paused', 'completed', 'failed', 'cancelled', 'awaiting_acceptance']) {
+  for (const status of ['running', 'paused', 'completed', 'cancelled', 'awaiting_acceptance']) {
     const store = createFixtureStore();
     try {
       const run = store.createRun(store.listTasks()[0].id);
@@ -62,7 +62,7 @@ test('dispatch provenance is same-Run metadata and does not deliver or consume t
   } finally { store.close(); }
 });
 
-test('transient retries are bounded and consumed inputs are not replayed after a failed turn', async t => {
+test('explicit retries preserve failure history and consumed inputs are not replayed after a failed turn', async t => {
   const root = await mkdtemp(join(tmpdir(), 'af-retry-receipt-'));
   t.after(() => rm(root, { recursive:true, force:true }));
   const executable=join(root,'provider.mjs'), capture=join(root,'inputs.jsonl');
@@ -81,7 +81,7 @@ process.exitCode=1;
   const delivery=store.enqueueDispatch(run.id,{recipientAgentId:'agent_analyst',workflowNodeId:'requirements',purpose:'node',messageIds:[message.id]});
   for(let attempt=1;attempt<=3;attempt++) {
     await executeRun(store,run.id,{runFilesRoot:join(root,'audit')});
-    if(attempt<3)store.retryScheduledDispatches(run.id);
+    if(attempt<3)store.retryFailedNode(run.id,"requirements");
   }
   const inputs=(await readFile(capture,'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(inputs.length,3);
@@ -206,7 +206,7 @@ test("persistent restart and multiple unanswered questions retain the gate until
 // (canCompleteRun/confirmRunCompletion/archiveTask) stays strict — every
 // dispatch must be done or legitimately cancelled before completion.
 
-test("direct @ to an unassigned member routes to the manager, never fabricates a nodes[0] instruction", () => {
+test("direct @ to an unassigned member directly reaches that employee", () => {
   const store = createCatalogFixtureStore();
   const task = store.createTask({ title: "Unassigned fixture", objective: "Routing without nodeAssignments", workspacePath: mkdtempSync(join(tmpdir(), "af-routing-unassigned-")), memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
   assert.deepEqual(task.nodeAssignments, {});
@@ -220,20 +220,18 @@ test("direct @ to an unassigned member routes to the manager, never fabricates a
     const sent = store.submitHumanMessage(run.id, { recipientAgentId: recipientId, content: "@成员 请直接验证交付" });
     const dispatches = store.listDispatches(run.id).filter((item) => item.messageIds.includes(sent.message.id));
     assert.equal(dispatches.length, 1);
-    assert.equal(dispatches[0].purpose, "manager");
-    assert.equal(dispatches[0].recipientAgentId, run.manager.id);
+    assert.equal(dispatches[0].purpose, "instruction");
+    assert.equal(dispatches[0].recipientAgentId, recipientId);
     assert.equal(sent.message.recipient.id, recipientId, "original @ intent stays visible on the message");
     assert.equal(sent.message.kind, "instruction");
-    assert.ok(!store.listDispatches(run.id).some((item) => item.purpose === "instruction" && item.recipientAgentId === recipientId), "no instruction dispatch to the unassigned member");
-    assert.ok(!store.listDispatches(run.id).some((item) => item.purpose === "instruction" && item.workflowNodeId === firstNode.id), "nothing is silently bound to nodes[0]");
   }
   // requestHumanIntervention follows the same rule.
   const message = store.addMessage({ runId: run.id, recipientAgentId: "agent_designer", content: "@成员 请复核", kind: "instruction" });
   requestHumanIntervention(store, run.id, message.id);
   const followup = store.listDispatches(run.id).filter((item) => item.messageIds.includes(message.id));
   assert.equal(followup.length, 1);
-  assert.equal(followup[0].purpose, "manager");
-  assert.equal(followup[0].recipientAgentId, run.manager.id);
+  assert.equal(followup[0].purpose, "instruction");
+  assert.equal(followup[0].recipientAgentId, "agent_designer");
 });
 
 test("manager recipient without any assigned node never throws and binds as a manager dispatch (regression ①)", () => {
@@ -505,11 +503,11 @@ test("formal routing chain: direct @ → manager dispatch → node delivery → 
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
 
   // Link 1 (P1): direct @ to the unassigned tester becomes a manager dispatch.
-  const sent = store.submitHumanMessage(run.id, { recipientAgentId: "agent_tester", content: "@Sora · 测试工程师 请独立验证交付并写 docs/testing/review.md" });
+  const sent = store.submitHumanMessage(run.id, { content: "请安排独立验证交付并写 docs/testing/review.md" });
   const managerDelivery = store.listDispatches(run.id).find((item) => item.messageIds.includes(sent.message.id));
   assert.equal(managerDelivery.purpose, "manager");
   assert.equal(managerDelivery.recipientAgentId, run.manager.id);
-  assert.equal(sent.message.recipient.id, "agent_tester", "@ intent stays visible on the original message");
+  assert.equal(sent.message.recipient.id, run.manager.id);
 
   // Link 2 (P3): the manager formally assigns the testing node to the tester;
   // the decision materializes as a real node delivery.
@@ -608,7 +606,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   store=freezeHistoricalRepository(store,task.id);
   const run = store.createRun(task.id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
-  const sent = store.submitHumanMessage(run.id, { recipientAgentId: "agent_engineer", content: "@Kai · 研发工程师 请在绑定仓库完成研发交付" });
+  const sent = store.submitHumanMessage(run.id, { content: "请安排工程师在绑定仓库完成研发交付" });
   assert.equal(store.listDispatches(run.id).find((item) => item.messageIds.includes(sent.message.id)).purpose, "manager");
 
   await executeRun(store, run.id, { runFilesRoot: join(root, "audit") });
@@ -678,7 +676,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   const failed3 = first3.traces.find((trace) => trace.type === "node" && trace.status === "failed");
   assert.ok(failed3, "the first developer invocation actually failed after writing code");
   assert.equal(first3.artifacts.length, 0);
-  store.retryScheduledDispatches(run3.id);
+  store.retryFailedNode(run3.id, failed3.workflowNodeId);
   await executeRun(store, run3.id, { runFilesRoot: join(root, "audit") });
   const complete3 = store.getRunWorkspace(run3.id);
   assert.equal(complete3.run.status, "awaiting_acceptance");

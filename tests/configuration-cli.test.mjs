@@ -171,7 +171,7 @@ test('task collaboration CLI exposes complete dispatch flow in text and JSON wit
   const fetcher = async url => new Response(JSON.stringify(url.endsWith('/api/bootstrap') ? { tasks: [task], runs: [{ id: 'run_flow', taskId: task.id }] } : workspace));
   const args = ['tasks', 'collaboration', task.id, '--all', '--session-file', f.sessionFile];
   const result = await execute(args, { fetcher });
-  assert.deepEqual(result.items.map(item => item.id), ['pause', 'human', 'notice', 'handoff', 'assignment']);
+  assert.deepEqual(result.items.map(item => item.id), ['human', 'handoff', 'assignment']);
   const assignment = result.items.at(-1);
   assert.equal(assignment.to, '需求分析'); assert.equal(assignment.dispatchId, 'work');
   assert.equal(assignment.traceId, 'source-trace'); assert.equal(assignment.executionTraceId, 'execution-trace');
@@ -182,7 +182,7 @@ test('task collaboration CLI exposes complete dispatch flow in text and JSON wit
   assert.deepEqual(JSON.parse(json.stdout).data, JSON.parse(JSON.stringify(result)));
   assert.doesNotMatch(JSON.stringify(result), /INTERNAL_SNAPSHOT|tone|statusCode|全体团队/);
   const schema = await execute(['schema', 'tasks', 'collaboration']);
-  assert.match(JSON.stringify(schema), /实际派工/);
+  assert.match(JSON.stringify(schema), /沟通消息/);
 });
 test('desktop CLI verifies its private live endpoint and never falls back to Web', async () => {
   const root = await mkdtemp(join(tmpdir(), 'af-desktop-cli-'));

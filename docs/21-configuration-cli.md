@@ -6,15 +6,15 @@
 
 CLI tasks create schema 使用 memberAgentIds（至少一项、不重复），从 teams get 返回的 memberAgentIds 合并；移除 teamId 和 tasks list --team。tasks get 返回成员 ID/名称引用，不倾倒员工提示词/Runtime；tasks list 显示成员数。teams create/update 不接受 managerAgentId，memberAgentIds 可以为空。agents delete --yes 逻辑删除并返回 historyRetained，teams delete --yes 不再因任务/群聊历史拒绝。help/schema/example/text/JSON 共用当前协议。长期沟通属于客户端能力，本轮不新增 CLI 群聊权限。
 
-协作读模型以消息/事件为主线，按 sourceMessageId 或唯一的已有定向消息、Dispatch/Trace 引用关联真实派工；不按正文、名字或时间猜测，不回填历史。deliveries 明示投递当前状态，history 保留每次执行与重试的实际时间，经理协调为全流程范围。CLI 保留完整投递/执行事实、验收关联及有界文件 ID/名称引用（files 最多8项、fileCount 为总数）；完整文件列表用 artifacts 查询。已知员工交接结果信封从 rawResponse 提取已记录的报告正文，去除重复结构化结果，原始消息和控制台事实不变。客户端协作区展示成员总结、沟通和关键人类状态，保留单一“本轮控制台”入口；不自动附加投递状态、技术失败/重试通知、验收文件清单或平台验收说明。长消息全文一次渲染 Markdown，超过10行仅收起区域，展开不重建 DOM，Run 内保留阅读状态。控制台无顶部错误摘要，失败记录在日志内标红；员工状态按自己的最新 Trace 显示错误/执行中/正常，重试成功后清除旧错误。未验证事项保留员工原文，不自动判定交付质量；存储、调度、模型输入和人类确认规则不变。
+协作记录只展示员工、经理、人类之间的沟通 Message；系统提示、启动、投递、重试和结算事件不作为记录行。底层不可变事件、Dispatch 和 Trace 继续保留，关联执行元数据供查询。消息保存本轮 `startMessageId`，对应 Trace 的 `inputMessageId`；“本轮控制台”按该 ID 打开、定位本次提示词，不受日志分页影响。成员原生会话贯穿任务且彼此隔离，每次执行拥有独立输入轮次 ID。
 
-任务协作时间线合并同一 Run 的全部 Message、实际 Dispatch 与协调事件。接收人表示处理对象，不表示私密级别：经理派工指向接手员工，工作交接指向经理，咨询/答复保留双方，没有处理对象的发言只显示发送者。sourceMessageId 仅关联同 Run 来源消息，正文与首个实际投递合并；同源额外投递归入同一消息；无法用已存引用关联的投递独立注明，不猜测历史来源。显示节点、尝试次数、重试/错误和真实投递状态；发言与接手执行提供独立控制台入口。任务确认、取消、暂停、恢复等事件按时间保留，不输出原始 Provider 帧或提示词。
+角色可交接给除自己之外的任意参与者；人类显式指定员工直接送达，未指定则交给经理。错误任务拒绝新指令，等待原员工重试。
 
 重复手动导入按同一来源地址＋插件名称匹配插件，按安装名称（去首尾空格、区分大小写）匹配 MCP；不同来源的同名插件保留。成功以新不可变版本覆盖当前目录项，原子更新所有当前员工（含停用）的选择并合并重复引用；Task/Run、排队投递和历史文件不变。失败整批保留原目录及绑定，候选从当前目录退役。首次安装不自动绑定员工；已存在的重复项在下次同标识导入时一并替换，不做全库清理。响应增加 replacements（kind/id/previousId/name）、employees（仅 ID/名称）、historyRetained；原 plugins/mcps 或 MCP 摘要字段不变。
 
 本仓库仅提供客户端；首次管理员设置在应用内。CLI 继续连接客户端私有 endpoint，配置/任务/auth 命令和字段不变。
 
-任务 progress 的 lastError 保留脱敏原始错误；仅明确临时故障最多共三次尝试，确定性/未知错误停止自动重试。修复后通过客户端已有人工恢复入口继续，不自动升级或另派员工；CLI 不新增恢复权限。
+Runtime 外部故障立即保留脱敏原始错误并标记任务失败，禁止新消息；修复后在客户端重试原员工投递和会话，CLI 不新增恢复权限。只有确认的原生会话丢失允许重建一次；经理非终止安排仍尊重已有投递，验收后的协调跟进结算只保留审计事件。
 
 workflows create/update/schema/--help 的 artifactPaths 支持任意规范工作目录相对文件或目录（artifacts/media/、reports/、summary.md），缺省为空；不再限定docs或作为接纳白名单。任务artifacts可查询非docs业务快照；CLI没有当前目录浏览/下载命令，本轮不扩权。
 
@@ -104,3 +104,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 插件兼容语义补充：Runtime v3 对已知 Claude 模型别名在其他 Provider 继承目标模型，保留原名供执行计划核验；不声称使用同一个模型。描述的单行冒号仅在调用私有投影规范化，未知 YAML 结构/标签仍拒绝。list/get 将格式异常限定到相应插件的兼容原因，错误仅包含相对组件路径及行列；既有命令、输入 schema 和关联引用格式不变。
 
 插件导入部分成功时返回 warnings（plugin/component/path/message）；默认文本明确打印 ⚠️ 与每项路径/原因，JSON 保留结构化数组。相应插件 get 可再次查看，不输出原始错误组件正文。
+
+任务协作改为仅角色沟通，文本/JSON 新增 startMessageId（应用本轮输入 ID）。tasks message 的 recipient 直接路由至所选员工，failed 任务拒绝发送；tasks progress 优先提示原员工重试。CLI 不新增恢复或最终确认权限。每 10 秒巡检为空闲的进行中任务唤醒经理，错误不自动重试。

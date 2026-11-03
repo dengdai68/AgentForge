@@ -7,8 +7,9 @@ import { constants } from "node:fs";
 import { extname, join, normalize, isAbsolute, parse, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import hljs from "highlight.js";
+import { createTaskPatrol } from "./task-patrol.mjs";
 import { createStore } from "./store.mjs";
-import { executeRun, pauseRun, resumeRun, terminateRun, stopInquiries } from "./orchestrator.mjs";
+import { executeRun, isRunExecuting, pauseRun, resumeRun, terminateRun, stopInquiries } from "./orchestrator.mjs";
 import { createRunFiles } from "./run-files.mjs";
 import { hasActiveExecution } from "./runtime/registry.mjs";
 import { createAuth } from "./auth.mjs";
@@ -798,7 +799,6 @@ server.listen(port, host, () => {
   }
 });
 
-const managerPatrolIntervalMs = 5 * 60 * 1000;
 server.on('close',()=>pluginUpdates.stop());
 process.once('disconnect',()=>process.kill(process.pid,'SIGTERM'));
 for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{
@@ -826,14 +826,11 @@ process.on('message', message => {
   process.send?.({ type: 'agentforge-update-readiness', id: message.id, ready: !busy });
 });
 setInterval(() => { if (!resettingData && !updateRestartLease) communications.poll().catch(error => diagnostic("communication.poll_error", { error })); }, 15000).unref();
-setInterval(() => {
-  if (resettingData || updateRestartLease) return;
-  for (const run of store.listRuns().filter((item) => !item.task.archivedAt && (["planning", "running", "review"].includes(item.status) || store.listDispatches(item.id).some((delivery) => delivery.interactionOnly && delivery.status === "queued")))) {
-    const workspace = store.getRunWorkspace(run.id);
-    if (hasActiveExecution(run.id) || workspace.traces.some((trace) => trace.status === "running")) continue;
-    const due = store.listDispatches(run.id).filter(item => item.status === 'queued' && (!item.nextRetryAt || Date.parse(item.nextRetryAt) <= Date.now()));
-    if (!due.length || store.hasPendingHumanQuestion(run.id)) continue;
-    store.addEvent({ type: "run.manager_patrol", runId: run.id, message: "平台定时调度器继续已有待执行投递；不代表经理新增派工。", data: { trigger: "scheduled", intervalMs: managerPatrolIntervalMs, dispatchIds: due.map(item => item.id) } });
-    executeRun(store, run.id, runExecutionOptions).catch((error) => console.error(`Run ${run.id} patrol failed: ${error.message}`));
-  }
-}, managerPatrolIntervalMs);
+const taskPatrol = createTaskPatrol({
+  store, execute: runId => executeRun(store, runId, runExecutionOptions),
+  isExecuting: runId => isRunExecuting(store, runId) || hasActiveExecution(runId),
+  blocked: () => resettingData || Boolean(updateRestartLease),
+  onError: (error, runId) => diagnostic("task.patrol_failed", { error, runId })
+});
+taskPatrol.start();
+server.on("close", () => taskPatrol.stop());

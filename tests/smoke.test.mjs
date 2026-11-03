@@ -668,10 +668,10 @@ test("collaboration view projects routing and replies without runtime operation 
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const project = (workspace) => collaborationRecords(workspace, { formatTime: (value) => value });
   const data = { run: { manager: { id: "pm", name: "经理" }, participants: [{ id: "a", name: "架构师" }], task: { workflowSnapshot: { nodes: [{ id: "design", title: "设计" }] } } }, messages: [{ id: "q", createdAt: "2026-01-01", sender: { type: "agent", name: "架构师" }, recipient: { type: "human", name: "你" }, kind: "clarification_question", content: "策略？" }, { id: "a", createdAt: "2026-01-02", sender: { type: "human", name: "你" }, recipient: { type: "agent", name: "架构师" }, replyToMessageId: "q", content: "策略 A" }], dispatches: [{ id: "d", createdAt: "2026-01-01", recipientAgentId: "a", workflowNodeId: "design", purpose: "node", messageIds: [], traceIds: [], attempts: 1, status: "done" }], events: [{ id: "tool", type: "runtime.event", message: "Bash private tool input" }] };
-  const records = project(data); assert.equal(records.length, 3); assert.equal(records.find(item => item.id === "q").status, "当前：已回答"); assert.match(records.find(item => item.id === "a").reply, /策略/); assert.equal(records.some(item => item.id === "tool"), false);
+  const records = project(data); assert.equal(records.length, 2); assert.equal(records.find(item => item.id === "q").status, "当前：已回答"); assert.match(records.find(item => item.id === "a").reply, /策略/); assert.equal(records.some(item => item.id === "tool"), false);
   data.dispatches.unshift({ id: "pm-dispatch", createdAt: "2026-01-01", recipientAgentId: "pm", workflowNodeId: "design", purpose: "manager", messageIds: [], traceIds: [], attempts: 1, status: "done" });
   data.dispatches[1].dedupeKey = "handoff:pm-dispatch"; data.dispatches[1].messageIds = ["q", "a"];
-  assert.equal(project(data).some(item => item.id === "d"), true);
+  assert.equal(project(data).some(item => item.id === "d"), false);
   assert.ok(source.indexOf('id="collaboration-mode"') < source.indexOf('id="directory-mode"')); assert.ok(source.indexOf('id="directory-mode"') < source.indexOf('id="console-mode"'));
   assert.match(source, /data-ws-tab="collaboration"/); assert.doesNotMatch(source, /id="clarification-launcher"/);
   assert.doesNotMatch(source, /<summary>关联记录<\/summary>|data-collaboration-id/);
@@ -1055,7 +1055,7 @@ test("orchestration recovery retains its queued delivery after another preparati
   assert.equal(store.claimDispatch(run.id).id, second.id);
 });
 
-test("nested consultation routes any role to human, rejects wait cycles, and resumes exact parent", () => {
+test("nested consultation routes any role to human, rejects self mentions, and resumes exact parent", () => {
   const store = createStore(), run = store.createRun(fixtureTaskInput(store).id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
   const a = store.enqueueDispatch(run.id, { recipientAgentId: "agent_engineer", workflowNodeId: "development", purpose: "node" });
@@ -1063,7 +1063,7 @@ test("nested consultation routes any role to human, rejects wait cycles, and res
   const ask = (recipientAgentId, audience = "agent") => ({ audience, recipientAgentId, question: "策略是什么？", questionType: "策略选择", routingReason: "依据提示词和能力，技术策略需要责任人确认", consideredMemberIds: ["agent_designer", "agent_engineer", "human_operator"] });
   const first = store.askQuestion(a.id, ask("agent_designer"));
   const b = store.claimDispatch(run.id);
-  assert.throws(() => store.askQuestion(b.id, ask("agent_engineer")), /等待环/);
+  assert.throws(() => store.askQuestion(b.id, ask("agent_designer")), /其他成员/);
   assert.equal(store.pendingQuestions(run.id).length, 1);
   const second = store.askQuestion(b.id, ask("", "human"));
   assert.equal(store.getRun(run.id).status, "awaiting_human");
@@ -1617,21 +1617,21 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     const task = store.createTask({ title: "人工立即重试", objective: "保留失败事实并继续", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
     await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });
-    const waiting = store.getRunWorkspace(run.id), failedTrace = waiting.traces.find((trace) => trace.status === "failed"), waitingDispatch = waiting.dispatches.find((item) => item.nextRetryAt);
-    assert.equal(waiting.run.status, "running");
-    assert.ok(failedTrace); assert.ok(waitingDispatch?.nextRetryAt);
+    const waiting = store.getRunWorkspace(run.id), failedTrace = waiting.traces.find((trace) => trace.status === "failed"), waitingDispatch = waiting.dispatches.find((item) => item.id === waiting.run.failure.dispatchId);
+    assert.equal(waiting.run.status, "failed");
+    assert.ok(failedTrace); assert.equal(waitingDispatch.nextRetryAt,null);
     assert.match(failedTrace.error, /API Error: 503 QUALITY_SENTINEL_PROVIDER_FAILURE/);
     assert.equal(waitingDispatch.lastError, failedTrace.error);
     assert.ok(waiting.events.some((event) => event.type === "trace.failed" && event.data.traceId === failedTrace.id && event.data.auditVersion === 2 && event.data.failureKind === "provider"));
     assert.doesNotMatch(JSON.stringify(waiting), /QUALITY_SENTINEL_TOKEN/);
     assert.doesNotMatch(await readFile(join(root, "run-files", "runs", run.id, "traces", failedTrace.id, "events.ndjson"), "utf8"), /QUALITY_SENTINEL_PROVIDER_FAILURE|QUALITY_SENTINEL_TOKEN/);
-    const retry = store.retryScheduledDispatches(run.id);
-    assert.deepEqual(retry.dispatchIds, [waitingDispatch.id]);
+    if(failedTrace.type === "manager")store.retryFailedOrchestration(run.id);else store.retryFailedNode(run.id, failedTrace.workflowNodeId);
+    assert.equal(store.getDispatch(waitingDispatch.id).status,"queued");
     await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });
     const completed = store.getRunWorkspace(run.id);
     assert.equal(completed.run.status, "awaiting_acceptance", completed.run.error);
     assert.equal(completed.traces.find((trace) => trace.id === failedTrace.id).status, "failed");
-    assert.ok(completed.events.some((event) => event.type === "dispatch.retry_requested"));
+    assert.ok(completed.events.some((event) => event.type === (failedTrace.type === "manager" ? "run.orchestration_retry_requested" : "run.retry_requested")));
     store.confirmRunCompletion(run.id);
     assert.equal(store.getRun(run.id).status, "completed");
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -1681,7 +1681,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     assert.equal(await readFile(join(root, "docs/development/src/main.js"), "utf8"), "export const answer = 42;\n");
     store.close();
     store = createStore({ databasePath });
-    store.retryScheduledDispatches(run.id);
+    store.retryFailedNode(run.id, failed.workflowNodeId);
     await executeRun(store, run.id, { runFilesRoot });
     const retried = store.getRunWorkspace(run.id);
     assert.equal(retried.run.status, "awaiting_acceptance");
@@ -1901,9 +1901,9 @@ test("collaboration is chronological without pinned acceptance duplicates and un
     const html = select("#collaboration-panel").innerHTML;
     assert.equal((html.match(/最终交接结论/g) || []).length, 1);
     assert.ok(html.indexOf('最终交接结论') < html.indexOf('新的提问'));
-    assert.equal(select('#instruction-text').disabled, false);
+    assert.equal(select('#instruction-text').disabled, status === 'failed');
     assert.doesNotMatch(html, /collaboration-review|经理交接说明|停止答疑|共 \d+ 条协作记录|发送新消息时|回复的问题|collaboration-reference/);
-    assert.equal((html.match(/等待人类确认/g) || []).length, 1, "acceptance transition stays in its chronological position");
+    assert.equal((html.match(/等待人类确认/g) || []).length, 0, "lifecycle events stay outside collaboration");
     assert.ok(html.indexOf("等待人类确认") < html.indexOf("新的提问"));
     assert.doesNotMatch(html, /data-open-completion-confirm|workspace-acceptance/);
   }
@@ -2037,13 +2037,13 @@ console.log(JSON.stringify({type:"result",result}));
 });
 
 for (const malformed of [false, true]) {
-  test(`manager ${malformed ? 'incomplete' : 'missing'} decision receives a real correction dispatch instead of silently draining`, async () => {
+  test(`manager ${malformed ? 'incomplete' : 'missing'} decision is resumed by the idle patrol without a system message`, async () => {
     const root = await directory('agentforge-manager-decision-');
     try {
       const executable = join(root, 'provider.mjs');
       await writeFile(executable, `#!${process.execPath}
 const input = process.argv.at(-1) || '';
-const corrected = input.includes('本轮缺少 managerDecision');
+const corrected = input.includes('当前任务仍在进行');
 const result = corrected ? JSON.stringify({summary:'补齐明确的验收决定',managerDecision:{nextNodeId:null,nextAgentId:null,rationale:'经理明确提交人类验收'}}) : ${malformed ? "JSON.stringify({summary:'正文说已提交验收',managerDecision:{rationale:'缺少必填字段'}})" : "'正文说已提交验收'"};
 console.log(JSON.stringify({type:'result',subtype:'success',result}));
 `,{mode:0o755});
@@ -2051,12 +2051,16 @@ console.log(JSON.stringify({type:'result',subtype:'success',result}));
       const task = store.createTask({...fixtureTaskInput(store),workspacePath:root,managerRuntime:{provider:'claude-code',executable}});
       const run = store.createRun(task.id);
       await executeRun(store,run.id,{runFilesRoot:join(root,'audit')});
+      assert.equal(store.getRun(run.id).status,'running');
+      assert.equal(store.listDispatches(run.id).filter(d=>d.status==='queued').length,0);
+      assert.equal(store.prepareRunPatrol(run.id),true);
+      await executeRun(store,run.id,{runFilesRoot:join(root,'audit')});
       const workspace = store.getRunWorkspace(run.id), dispatches=store.listDispatches(run.id);
       assert.equal(workspace.run.status,'awaiting_acceptance');
       assert.equal(workspace.traces.length,2);
-      assert.ok(dispatches.some(d=>d.dedupeKey.startsWith('routing:') && d.coordinationFollowup && d.status==='done'));
+      assert.ok(dispatches.some(d=>d.dedupeKey.startsWith('patrol:') && d.coordinationFollowup && d.status==='done'));
       assert.ok(workspace.messages.some(m=>m.content==='正文说已提交验收'),'original report is preserved');
-      assert.ok(workspace.messages.some(m=>m.kind==='coordination_notice' && m.content.includes('本轮缺少 managerDecision')));
+      assert.ok(workspace.messages.every(m=>m.sender.type!=='system'));
       assert.equal(workspace.run.acceptanceRequest.traceId,workspace.traces.at(-1).id,'acceptance comes from the explicit corrected decision');
       store.close();
     } finally { await rm(root,{recursive:true,force:true}); }

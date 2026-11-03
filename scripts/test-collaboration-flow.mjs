@@ -38,6 +38,8 @@ s.claimDispatch(run.id); const t1 = trace(work, analyst);
 assert.ok(run.workspacePath.startsWith(root + '/'));
 await mkdir(run.workspacePath, { recursive: true });
 const files = createRunFiles({ root: join(data, 'agentforge-runs') });
+s.attachTracePrompt(t0.id, await files.writePromptSnapshot(run.id,t0.id,promptSnapshot('FLOW_TURN_START: original manager input')));
+for(let i=0;i<120;i++)s.addEvent({type:'runtime.event',runId:run.id,actor:actor(run.manager),message:'FLOW_MANAGER_LOG_'+i,data:{traceId:t0.id,auditVersion:2,providerEventType:'assistant',presentation:'text'}});
 const before = await files.snapshotWorkspace(run.workspacePath);
 await writeFile(join(run.workspacePath, 'review.md'), '# FLOW_FILE\n技术检查完成，听感未验证。\n');
 const captured = await files.captureWorkspaceChanges({ runId: run.id, traceId: t1.id, workspacePath: run.workspacePath, before });
@@ -94,6 +96,7 @@ try {
     };
   });
   const origin = new URL(page.url()).origin;
+  assert.equal((await page.request.get(origin + '/api/health')).status(), 200);
   await page.goto(origin + '/login');
   await page.locator('#username').fill('flow-qa'); await page.locator('#password').fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click();
@@ -108,7 +111,7 @@ try {
     assert.equal(await row('FLOW_ASSIGN').count(), 1, 'assignment body is not duplicated by its Dispatch');
     assert.ok((await row('FLOW_ASSIGN').locator('header strong').textContent()).includes(analyst.name));
     assert.ok((await row('FLOW_HANDOFF').locator('header strong').textContent()).includes(run.manager.name));
-    for (const marker of ['FLOW_QUESTION', 'FLOW_ANSWER', 'FLOW_NOTICE', 'FLOW_HUMAN']) assert.equal(await row(marker).count(), 1, marker);
+    for (const marker of ['FLOW_QUESTION', 'FLOW_ANSWER', 'FLOW_HUMAN']) assert.equal(await row(marker).count(), 1, marker);
     assert.equal(await rows.locator('header strong').filter({ hasText: '全体团队' }).count(), 0);
     assert.equal(await page.locator('.collaboration-delivery').count(), 0, 'no delivery status block below messages');
     assert.equal(await page.locator('.human-message-list').getByText('FLOW_FAILURE_NOTICE：执行失败', { exact: true }).count(), 0, 'technical failures are confined to console');
@@ -117,6 +120,15 @@ try {
     assert.ok(!(await row('FLOW_HANDOFF').textContent()).includes('全流程协调'), 'execution metadata stays out of message body');
     const sourceLink = row('FLOW_ASSIGN').getByRole('button', { name: '本轮控制台 ↗' });
     assert.equal(await sourceLink.getAttribute('data-open-collaboration-trace'), t0.id, 'source invocation is retained');
+    assert.equal(await sourceLink.getAttribute('data-start-message-id'),t0.inputMessageId);
+    await sourceLink.click();
+    const startPrompt=page.locator(`[data-turn-message-id="${t0.inputMessageId}"]`);
+    await startPrompt.waitFor();await page.waitForFunction(id=>document.querySelector(`[data-turn-message-id="${id}"]`)?.open,t0.inputMessageId);
+    await startPrompt.locator('.prompt-snapshot-text').waitFor();
+    assert.ok(await startPrompt.evaluate(e=>{const stream=e.closest('.chat-stream');return e.getBoundingClientRect().top>=stream.getBoundingClientRect().top && e.getBoundingClientRect().top<stream.getBoundingClientRect().top+140;}),'link targets the prompt even with paginated logs');
+    await page.locator('#collaboration-mode').click();
+    while(await page.locator('[data-collaboration-older]').count())await page.locator('[data-collaboration-older]').click();
+
     await sourceLink.click();
     assert.equal(await page.locator('#console-mode').getAttribute('aria-selected'), 'true');
     assert.equal(await page.locator('.role-card.selected').getAttribute('data-select-agent'), run.manager.id);
@@ -214,7 +226,8 @@ try {
     const records = await cli(['tasks', 'collaboration', run.taskId, '--all', ...args]);
     assert.ok(records.items.some(r => r.dispatchId === work.id && r.to === analyst.name));
     assert.ok(records.items.some(r => r.content === handoffReport),'CLI projects the same human report');
-    assert.ok(records.items.some(r => r.content.includes('FLOW_NOTICE')));
+    assert.ok(records.items.every(r => r.category === 'message' && r.senderType !== 'system'));
+    assert.ok(!records.items.some(r => r.content.includes('FLOW_NOTICE')));
     assert.ok(records.items.some(r => r.deliveries?.some(d => d.history.some(h => h.content?.includes('FLOW_RETRY')))), 'CLI retains execution facts');
     assert.ok(records.items.every(r => !('tone' in r) && !('statusCode' in r)));
     await writeFile(join(root, 'cli-records.json'), JSON.stringify(records, null, 2));

@@ -98,3 +98,5 @@ CLI 员工 systemPrompt、任务消息与精确澄清命令继续生效，不新
 DeepSeek Harness 调用把同一份应用/角色系统文本保存于 Trace 私有指令文件，由原生 Cordis bridge 注册 systemPrompt.section（interpolate=false），不会塞进 session/prompt 用户消息。输出 schema 以独立系统段说明；SDK 无原生 response_format，返回值须由现有入口解析校验，非法 JSON 不猜测修补。每次调用重载最新/冻结上下文，原生会话仍保留历史；不声称抹除了既有指令影响。
 
 DeepSeek Harness 根据原生 system/message 中的完整应用指令匹配保存布尔验证事实，不倾倒系统正文；该事实证明传入，不保证模型逐条遵循。
+
+角色可通过 handoff.recipientAgentId 交接给任意其他参与者，不能指向自己；@ 人类转换为精确澄清。handoff、consultation、managerDecision 互斥。人类重试以动态“继续”输入恢复原投递，不形成 Message；经理空闲巡检输入携带当前执行状态与角色沟通记录。Trace.inputMessageId 是平台生成的不可变本轮输入 ID，输出 Message.startMessageId 关联它，控制台依据该 ID 定位私有脱敏提示词。

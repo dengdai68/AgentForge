@@ -303,6 +303,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       dispatch = state.dispatches.find(item => item.runId === current.id && item.status === "queued" && !item.interactionOnly)
         || enqueue(current.id, { recipientAgentId: current.manager.id, workflowNodeId: nodeId, purpose: "manager", messageIds: current.pendingMessageIds || [], dedupeKey });
     }
+    dispatch.continueRequested = true;
     current.pendingRetryDispatchId = dispatch.id;
     addEvent({ ...event, runId: current.id, actor: humanMember, data: { ...event.data, dispatchId: dispatch.id, recipientAgentId: dispatch.recipientAgentId, cancelledDispatchIds: [] } });
     return clone(current);
@@ -445,6 +446,26 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       addEvent({ type: "session.reset", runId: current.id, actor: { type: "agent", id: trace.agentId, name: runAgent(current, trace.agentId).name }, message: "原生会话不可用，下次创建新会话；已确认的平台消息不重放，需要过去资料时查询历史工具。", data: { traceId, sessionId: previousSessionId, reason } });
       save();
     },
+    listPatrolRunIds() {
+      return state.runs.filter(run => !getTask(run.taskId).archivedAt && (["planning", "running", "review"].includes(run.status) || ["completed", "cancelled", "paused"].includes(run.status) && state.dispatches.some(item => item.runId === run.id && item.interactionOnly && item.status === "queued"))).map(run => run.id);
+    },
+    prepareRunPatrol(runId) {
+      // Detection only reads metadata; clone/persist only when creating work.
+      const current = getRun(runId);
+      if (!current || getTask(current.taskId).archivedAt || current.status === "failed" || this.hasPendingHumanQuestion(runId)) return false;
+      const deliveries = state.dispatches.filter(item => item.runId === runId);
+      if (deliveries.some(item => item.status === "claimed") || state.traces.some(trace => trace.runId === runId && trace.status === "running")) return false;
+      const active = ["planning", "running", "review"].includes(current.status);
+      const queued = deliveries.filter(item => item.status === "queued" && (active || item.interactionOnly));
+      if (queued.length) return queued.some(item => !item.nextRetryAt || Date.parse(item.nextRetryAt) <= Date.now());
+      if (!active) return false;
+      return this.transaction(() => {
+        const lastTrace = state.traces.filter(trace => trace.runId === runId).at(-1);
+        this.enqueueDispatch(runId, { recipientAgentId: current.manager.id, workflowNodeId: current.currentFocus?.nodeId || getTask(current.taskId).workflowSnapshot.nodes[0].id, purpose: "manager", dedupeKey: "patrol:" + (lastTrace?.id || "initial"), coordinationFollowup: true, patrol: true });
+        addEvent({ type: "run.manager_patrol", runId, message: "运行中暂无执行者，已触发经理继续推进。", data: { trigger: "idle", intervalMs: 10000 } });
+        return true;
+      });
+    },
     initializeDispatches(runId) {
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current.taskId);
@@ -464,7 +485,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const current = getRun(runId);
       if (input.parentDispatchId && find(state.dispatches, input.parentDispatchId)?.runId !== runId) throw new Error("父投递不属于当前 Run");
       const interactionOnly = input.purpose === "inquiry" || Boolean(input.parentDispatchId && find(state.dispatches, input.parentDispatchId)?.interactionOnly);
-      if (!current || getTask(current.taskId).archivedAt || (["completed", "cancelled", "failed"].includes(current.status) && !interactionOnly)) throw new Error("Run 不接受新投递");
+      if (!current || getTask(current.taskId).archivedAt || (current.status === "failed" || ["completed", "cancelled"].includes(current.status) && !interactionOnly)) throw new Error("Run 不接受新投递");
       if (!runAgent(current, input.recipientAgentId)) throw new Error("投递收件人必须是 Run 数字员工");
       assertNode(current, input.workflowNodeId);
       if (!["manager", "node", "consultation", "instruction", "delivery_review", "inquiry"].includes(input.purpose)) throw new Error("投递用途无效");
@@ -473,13 +494,13 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (existing) return clone(existing);
       const messageIds = [...new Set(input.messageIds || [])];
       if (messageIds.some((value) => find(state.messages, value)?.runId !== runId)) throw new Error("投递消息不属于 Run");
-      const item = { id: id("dispatch"), runId, recipientAgentId: input.recipientAgentId, workflowNodeId: input.workflowNodeId, purpose: input.purpose, interactionOnly, messageIds, sourceMessageId: input.sourceMessageId || null, parentDispatchId: input.parentDispatchId || null, waitingMessageId: null, status: "queued", attempts: 0, nextRetryAt: null, traceIds: [], dedupeKey: input.dedupeKey || null, ...(input.coordinationFollowup ? { coordinationFollowup: true } : {}), ...(input.deferredRevisit ? { deferredRevisit: true } : {}), createdAt: now(), updatedAt: now() };
+      const item = { id: id("dispatch"), runId, recipientAgentId: input.recipientAgentId, workflowNodeId: input.workflowNodeId, purpose: input.purpose, interactionOnly, messageIds, sourceMessageId: input.sourceMessageId || null, parentDispatchId: input.parentDispatchId || null, waitingMessageId: null, status: "queued", attempts: 0, nextRetryAt: null, traceIds: [], dedupeKey: input.dedupeKey || null, ...(input.patrol ? { patrol: true } : {}), ...(input.coordinationFollowup ? { coordinationFollowup: true } : {}), ...(input.deferredRevisit ? { deferredRevisit: true } : {}), createdAt: now(), updatedAt: now() };
       state.dispatches.push(item); save(); return clone(item);
     },
     hasPendingHumanQuestion(runId) { return this.pendingQuestions(runId).some((item) => item.recipient.type === "human"); },
     canExecuteDispatch(dispatchId) {
       const item = find(state.dispatches, dispatchId), current = getRun(item?.runId);
-      return Boolean(current && !this.hasPendingHumanQuestion(current.id) && !getTask(current.taskId).archivedAt && item.status === "claimed" && (["running", "review"].includes(current.status) || item.interactionOnly));
+      return Boolean(current && current.status !== "failed" && !this.hasPendingHumanQuestion(current.id) && !getTask(current.taskId).archivedAt && item.status === "claimed" && (["running", "review"].includes(current.status) || item.interactionOnly));
     },
     cancelInquiries(runId) {
       if (!getRun(runId)) throw new Error("Run 不存在");
@@ -489,7 +510,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     claimDispatch(runId) {
       const current = getRun(runId);
-      if (!current || getTask(current.taskId).archivedAt || state.dispatches.some((item) => item.runId === runId && item.status === "claimed")) return null;
+      if (!current || current.status === "failed" || getTask(current.taskId).archivedAt || state.dispatches.some((item) => item.runId === runId && item.status === "claimed")) return null;
       if (this.hasPendingHumanQuestion(runId)) return null;
       const ready = item => item.runId === runId && item.status === "queued" && (["planning", "running", "review"].includes(current.status) || item.interactionOnly) && (!item.nextRetryAt || Date.parse(item.nextRetryAt) <= Date.now());
       const requested = find(state.dispatches, current.pendingRetryDispatchId);
@@ -552,7 +573,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     completeDispatch(dispatchId) {
       const item = find(state.dispatches, dispatchId);
       if (!item || item.status !== "claimed") throw new Error("投递未领取，不能确认");
-      item.status = "done"; item.updatedAt = now(); item.nextRetryAt = null; save();
+      item.status = "done"; item.updatedAt = now(); item.nextRetryAt = null; delete item.continueRequested; save();
     },
     pendingQuestions(runId) {
       const ids = state.dispatches.filter((item) => item.runId === runId && item.status === "waiting").map((item) => item.waitingMessageId);
@@ -570,6 +591,28 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       }
       save();
     },
+    handoffDispatch(dispatchId, recipientAgentId, content, traceId) {
+      return this.transaction(() => {
+        const delivery = find(state.dispatches, dispatchId), current = getRun(delivery?.runId);
+        if (!delivery || !this.canExecuteDispatch(dispatchId)) throw new Error("当前投递不能交接");
+        if (recipientAgentId === delivery.recipientAgentId) throw new Error("不能 @ 自己");
+        const sender = runAgent(current, delivery.recipientAgentId);
+        if (recipientAgentId === humanMember.id) return this.askQuestion(dispatchId, { audience: "human", question: content }, traceId);
+        if (!runAgent(current, recipientAgentId)) throw new Error("交接接收者不属于当前 Run");
+        if (delivery.purpose === "consultation") {
+          const parent = find(state.dispatches, delivery.parentDispatchId);
+          if (parent?.recipientAgentId === recipientAgentId) {
+            const message = this.answerQuestion(current.id, parent.waitingMessageId, content, { type: "agent", id: sender.id, name: sender.name }, traceId);
+            this.completeDispatch(dispatchId); return message;
+          }
+          return this.askQuestion(dispatchId, { audience: "agent", recipientAgentId, question: content }, traceId);
+        }
+        const message = this.addMessage({ runId: current.id, workflowNodeId: delivery.workflowNodeId, traceId, sender: { type: "agent", id: sender.id, name: sender.name }, recipientAgentId, kind: "handoff", content });
+        this.completeDispatch(dispatchId);
+        this.enqueueDispatch(current.id, { recipientAgentId, workflowNodeId: this.memberResponsibility(current.id, recipientAgentId) || delivery.workflowNodeId, purpose: recipientAgentId === current.manager.id ? "manager" : "instruction", messageIds: [message.id], sourceMessageId: message.id, dedupeKey: "handoff-message:" + message.id });
+        return message;
+      });
+    },
     askQuestion(dispatchId, consultation, traceId) {
       return this.transaction(() => {
         const delivery = find(state.dispatches, dispatchId), current = getRun(delivery?.runId);
@@ -579,10 +622,6 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         const human = consultation.audience === "human", recipientId = consultation.recipientAgentId;
         if (!human && consultation.audience !== "agent") throw new Error("咨询受众无效");
         if (!human && (!runAgent(current, recipientId) || recipientId === delivery.recipientAgentId)) throw new Error("消息需要一个可送达的其他成员");
-        // An ancestor is suspended waiting for this very answer; asking it again deadlocks.
-        for (let ancestor = delivery; ancestor; ancestor = find(state.dispatches, ancestor.parentDispatchId)) {
-          if (!human && ancestor.recipientAgentId === recipientId) throw new Error("咨询形成等待环：请使用已有上下文、咨询其他成员或说明原因后询问人类");
-        }
         const sender = runAgent(current, delivery.recipientAgentId);
         const message = this.addMessage({ runId: current.id, workflowNodeId: delivery.workflowNodeId, traceId, conversationId: id("conversation"), sender: { type: "agent", id: sender.id, name: sender.name }, recipientHuman: human, recipientAgentId: human ? null : recipientId, kind: human ? "clarification_question" : "agent_consultation", content: consultation.question, questionType, routingReason, consideredMemberIds: considered });
         delivery.status = "waiting"; delivery.waitingMessageId = message.id; delivery.updatedAt = now(); delivery.messageIds.push(message.id);
@@ -606,7 +645,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current?.taskId);
         if (!current || task.archivedAt) throw new Error("任务已归档，不接受新消息");
-        const interactionOnly = ["completed", "cancelled", "failed", "paused"].includes(current.status);
+        if (current.status === "failed") throw new Error("任务因错误中断，请先重试失败员工；当前不能发送消息或 @ 其他成员");
+        const interactionOnly = ["completed", "cancelled", "paused"].includes(current.status);
         if (current.status === "awaiting_acceptance" && !input.replyToMessageId) {
           current.status = "running"; current.deliveryReview = null; current.acceptanceRequest = null; task.status = "running"; task.updatedAt = now();
           addEvent({ type: "run.acceptance_reopened", runId, actor: humanMember, message: "人类追加消息，重新进入团队协作并等待新的验收结论。", data: {} });
@@ -618,18 +658,12 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         if (interactionOnly && getAgent(recipient.sourceAgentId || recipient.id)?.status === "deleted") throw new Error("此员工已删除，任务结束后不再接收新答疑");
         const message = this.addMessage({ runId, recipientAgentId: recipientId, content: input.content, kind: interactionOnly ? "inquiry" : "instruction" });
         const ownNode = this.memberResponsibility(runId, recipientId);
-        // Never fabricate a nodes[0] binding. An instruction to a member without
-        // an assigned node goes to the manager, who formally dispatches node +
-        // member via managerDecision; the original message keeps the @ intent
-        // visible in the collaboration record. Read-only inquiries may still be
-        // answered directly by the addressed member (no Artifact boundary is
-        // opened for inquiry traces regardless of the labelled node).
         if (interactionOnly) {
           this.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: ownNode || task.workflowSnapshot.nodes[0].id, purpose: "inquiry", messageIds: [message.id], sourceMessageId: message.id, dedupeKey: "message:" + message.id });
-        } else if (recipientId === current.manager.id || !ownNode) {
+        } else if (recipientId === current.manager.id) {
           this.enqueueDispatch(runId, { recipientAgentId: current.manager.id, workflowNodeId: task.workflowSnapshot.nodes[0].id, purpose: "manager", messageIds: [message.id], sourceMessageId: message.id, dedupeKey: "message:" + message.id });
         } else {
-          this.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: ownNode, purpose: "instruction", messageIds: [message.id], sourceMessageId: message.id, dedupeKey: "message:" + message.id });
+          this.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: ownNode || current.currentFocus?.nodeId || task.workflowSnapshot.nodes[0].id, purpose: "instruction", messageIds: [message.id], sourceMessageId: message.id, dedupeKey: "message:" + message.id });
         }
         this.syncWaiting(runId); return { message, queued: true, resumed: false, interactionOnly };
       });
@@ -913,14 +947,14 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       for (const employee of frozen) assertRuntimeEnabled(employee.runtime);
       const manager = { ...withRoleSnapshot(clone(sourceManager)), id: id("manager"), sourceAgentId: sourceManager.id, runtime: clone(currentTask.managerRuntime) };
       const participants = [...currentTask.memberSnapshots.map(item => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...manager, type: "agent" }, clone(humanMember)];
-      const runId = id("run"), item = { id: runId, workspacePath: currentTask.workspaceManaged ? resolve(currentTask.workspacePath, runId) : currentTask.workspacePath, taskId, manager, participants, status: "planning", currentFocus: null, waitingConversationId: null, waitingNodeId: null, waitingAgentId: null, pendingMessageIds: [], startedAt: now(), completedAt: null, failure: null, summary: null, deliveryReview: null };
-      state.runs.unshift(item); currentTask.status = "planning"; save(); return clone(item);
+      const runId = id("run"), item = { id: runId, workspacePath: currentTask.workspaceManaged ? resolve(currentTask.workspacePath, runId) : currentTask.workspacePath, taskId, manager, participants, status: "running", currentFocus: null, waitingConversationId: null, waitingNodeId: null, waitingAgentId: null, pendingMessageIds: [], startedAt: now(), completedAt: null, failure: null, summary: null, deliveryReview: null };
+      state.runs.unshift(item); currentTask.status = "running"; save(); return clone(item);
     },
     updateRun(runId, patch = {}) { if (patch.status === "completed") throw new Error("完成必须由人类确认"); const current = getRun(runId); if (!current) throw new Error("Run 不存在"); if (patch.status && patch.status !== current.status && !runTransitions[current.status]?.includes(patch.status)) throw new Error(`Run 不能从 ${current.status} 变更为 ${patch.status}`); Object.assign(current, clone(patch)); save(); return clone(current); }, setTaskStatus(taskId, status) { if (status === "done") throw new Error("完成必须由人类确认"); const current = getTask(taskId); if (!current || (status !== current.status && !taskTransitions[current.status]?.includes(status))) throw new Error("Task 状态变更不合法"); current.status = status; current.updatedAt = now(); save(); return clone(current); },
     getRunRecoveryPlan(runId) {
       const current = getRun(runId);
       const empty = { shouldExecute: false, interruptedTraceIds: [], recoveredDispatchIds: [] };
-      if (!current || getTask(current.taskId).archivedAt) return empty;
+      if (!current || current.status === "failed" || getTask(current.taskId).archivedAt) return empty;
       const deliveries = state.dispatches.filter((item) => item.runId === runId);
       const pending = deliveries.filter((item) => ["queued", "claimed"].includes(item.status));
       const inquiryPending = pending.some((item) => item.interactionOnly);
@@ -998,7 +1032,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     pauseRun(runId, reason = "用户暂停") { const current = getRun(runId), task = getTask(current?.taskId); if (!current || !["planning", "running", "awaiting_human", "review"].includes(current.status)) throw new Error("只有活跃 Run 可以暂停"); current.pausedFromStatus = current.status; current.status = "paused"; task.status = "paused"; task.updatedAt = now(); addEvent({ type: "run.paused", runId, message: "Run 已暂停；当前本机角色执行已停止，历史 Trace 与产物保留。", data: { reason } }); save(); return clone(current); },
     resumeRun(runId) { const current = getRun(runId), task = getTask(current?.taskId); if (!current || current.status !== "paused") throw new Error("只有已暂停 Run 可以继续"); const restoredStatus = this.hasPendingHumanQuestion(runId) ? "awaiting_human" : ["awaiting_human", "review"].includes(current.pausedFromStatus) ? current.pausedFromStatus : "running"; current.status = restoredStatus; task.status = restoredStatus; task.updatedAt = now(); delete current.pausedFromStatus; addEvent({ type: "run.resumed", runId, message: "Run 已继续；项目经理将依据当前状态决定后续角色协作。", data: {} }); save(); return clone(current); },
     collaborationCandidates(runId) { const current = getRun(runId); return clone(getTask(current.taskId).workflowSnapshot.nodes); }, setCurrentFocus(runId, nodeId, reason = "项目经理已选择下一次协作") { const current = getRun(runId); assertNode(current, nodeId); current.currentFocus = { nodeId, reason: text(reason, "当前工作重心说明"), updatedAt: now() }; save(); return clone(current.currentFocus); },
-    createTrace(runId, input = {}) { const current = getRun(runId); assertNode(current, input.workflowNodeId); if (!runAgent(current, input.agentId)) throw new Error("Trace Agent 不属于 Run"); const item = { id: id("trace"), runId, workflowNodeId: input.workflowNodeId, agentId: input.agentId, type: input.type || "node", status: "running", startedAt: now(), endedAt: null, tracePath: `runs/${runId}/traces/`, inputArtifactIds: [], outputArtifactIds: [], promptRef: null, error: null }; state.traces.push(item); save(); return clone(item); }, completeTrace(traceId, patch = {}) { const current = getTrace(traceId); if (!current) throw new Error("Trace 不存在"); current.status = patch.status || "completed"; current.endedAt = now(); current.tracePath = patch.tracePath || `runs/${current.runId}/traces/${current.id}/events.ndjson`; current.error = patch.error || null; save(); return clone(current); },
+    createTrace(runId, input = {}) { const current = getRun(runId); assertNode(current, input.workflowNodeId); if (!runAgent(current, input.agentId)) throw new Error("Trace Agent 不属于 Run"); const item = { id: id("trace"), inputMessageId: id("input"), runId, workflowNodeId: input.workflowNodeId, agentId: input.agentId, type: input.type || "node", status: "running", startedAt: now(), endedAt: null, tracePath: `runs/${runId}/traces/`, inputArtifactIds: [], outputArtifactIds: [], promptRef: null, error: null }; state.traces.push(item); save(); return clone(item); }, completeTrace(traceId, patch = {}) { const current = getTrace(traceId); if (!current) throw new Error("Trace 不存在"); current.status = patch.status || "completed"; current.endedAt = now(); current.tracePath = patch.tracePath || `runs/${current.runId}/traces/${current.id}/events.ndjson`; current.error = patch.error || null; save(); return clone(current); },
     attachTracePrompt(traceId, reference = {}) { const current = getTrace(traceId); if (!current) throw new Error("Trace 不存在"); if (current.promptRef || reference.storagePath !== `runs/${current.runId}/traces/${current.id}/prompt-snapshot.json` || !/^[0-9a-f]{64}$/.test(reference.sha256 || "") || !Number.isInteger(reference.bytes) || reference.bytes < 1 || reference.bytes > 300000) throw new Error("提示词快照关联无效"); current.promptRef = { storagePath: reference.storagePath, bytes: reference.bytes, sha256: reference.sha256 }; save(); return clone(current); },
     getTracePromptReference(runId, traceId) { const trace = getTrace(traceId); const reference = trace?.promptRef; if (!getRun(runId) || !trace || trace.runId !== runId || !reference) throw new Error("提示词快照不存在或当时未保存"); if (reference.storagePath !== `runs/${runId}/traces/${trace.id}/prompt-snapshot.json` || !/^[0-9a-f]{64}$/.test(reference.sha256 || "") || !Number.isInteger(reference.bytes) || reference.bytes < 1 || reference.bytes > 300000) throw new Error("提示词快照关联无效"); return clone(reference); },
     acceptNodeResult(runId, nodeId, traceId, output, inputs = []) {
@@ -1021,7 +1055,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return clone(currentTrace);
     }, failNode(runId, nodeId, traceId, error) { const current = getRun(runId); assertNode(current, nodeId); this.completeTrace(traceId, { status: "failed", error }); save(); },
     addMessage(input = {}) { const current = getRun(input.runId); if (!current) throw new Error("Run 不存在"); const recipient = input.recipientHuman ? { type: "human", id: "human_operator", name: "你" } : input.recipientAgentId ? runAgent(current, input.recipientAgentId) : { type: "team", id: "team", name: "全体团队" }; if (!recipient) throw new Error("消息接收者不属于当前 Run");
-        const item = { id: id("message"), runId: current.id, conversationId: input.conversationId || `conversation_${current.id}_${input.workflowNodeId || "general"}`, workflowNodeId: input.workflowNodeId || null, sender: input.sender || { type: "human", id: "human_operator", name: "你" }, recipient: { type: recipient.type || "agent", id: recipient.id, name: recipient.name }, traceId: input.traceId || null, replyToMessageId: input.replyToMessageId || null, questionType: input.questionType || null, routingReason: input.routingReason || null, consideredMemberIds: input.consideredMemberIds || [], kind: input.kind || "instruction", content: text(input.content, "消息内容"), createdAt: now() }; state.messages.push(item); addEvent({ type: "message.sent", runId: current.id, actor: item.sender, message: item.content, data: { messageId: item.id, conversationId: item.conversationId, workflowNodeId: item.workflowNodeId } }); return clone(item); }, waitForHuman(runId, nodeId, conversationId) { const current = getRun(runId); current.waitingNodeId = nodeId; current.waitingAgentId = null; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待人类澄清", updatedAt: now() }; current.status = "awaiting_human"; getTask(current.taskId).status = "awaiting_human"; save(); }, resumeHuman(runId, messageId) { const current = getRun(runId), message = find(state.messages, messageId); if (!current?.waitingNodeId || !message || message.conversationId !== current.waitingConversationId) throw new Error("当前 Run 没有匹配的人类澄清"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; current.status = "running"; getTask(current.taskId).status = "running"; save(); return clone(current); }, waitForAgent(runId, nodeId, agentId, conversationId) { const current = getRun(runId); if (!runAgent(current, agentId)) throw new Error("被咨询数字员工不属于当前 Run"); current.waitingNodeId = nodeId; current.waitingAgentId = agentId; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待角色协作答复", updatedAt: now() }; save(); }, resumeAgent(runId, conversationId) { const current = getRun(runId); if (!current?.waitingNodeId || !current.waitingAgentId || current.waitingConversationId !== conversationId) throw new Error("当前 Run 没有匹配的角色协作"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; save(); return clone(current); },
+        const item = { id: id("message"), runId: current.id, conversationId: input.conversationId || `conversation_${current.id}_${input.workflowNodeId || "general"}`, workflowNodeId: input.workflowNodeId || null, sender: input.sender || { type: "human", id: "human_operator", name: "你" }, recipient: { type: recipient.type || "agent", id: recipient.id, name: recipient.name }, traceId: input.traceId || null, startMessageId: input.traceId ? getTrace(input.traceId)?.inputMessageId || null : null, replyToMessageId: input.replyToMessageId || null, questionType: input.questionType || null, routingReason: input.routingReason || null, consideredMemberIds: input.consideredMemberIds || [], kind: input.kind || "instruction", content: text(input.content, "消息内容"), createdAt: now() }; state.messages.push(item); addEvent({ type: "message.sent", runId: current.id, actor: item.sender, message: item.content, data: { messageId: item.id, conversationId: item.conversationId, workflowNodeId: item.workflowNodeId } }); return clone(item); }, waitForHuman(runId, nodeId, conversationId) { const current = getRun(runId); current.waitingNodeId = nodeId; current.waitingAgentId = null; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待人类澄清", updatedAt: now() }; current.status = "awaiting_human"; getTask(current.taskId).status = "awaiting_human"; save(); }, resumeHuman(runId, messageId) { const current = getRun(runId), message = find(state.messages, messageId); if (!current?.waitingNodeId || !message || message.conversationId !== current.waitingConversationId) throw new Error("当前 Run 没有匹配的人类澄清"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; current.status = "running"; getTask(current.taskId).status = "running"; save(); return clone(current); }, waitForAgent(runId, nodeId, agentId, conversationId) { const current = getRun(runId); if (!runAgent(current, agentId)) throw new Error("被咨询数字员工不属于当前 Run"); current.waitingNodeId = nodeId; current.waitingAgentId = agentId; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待角色协作答复", updatedAt: now() }; save(); }, resumeAgent(runId, conversationId) { const current = getRun(runId); if (!current?.waitingNodeId || !current.waitingAgentId || current.waitingConversationId !== conversationId) throw new Error("当前 Run 没有匹配的角色协作"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; save(); return clone(current); },
     requestReplan(runId, messageId) { const current = getRun(runId); current.pendingMessageIds.push(messageId); save(); }, pendingMessages(runId) { const current = getRun(runId); return clone(state.messages.filter((item) => current?.pendingMessageIds.includes(item.id))); }, consumePendingMessages(runId) { getRun(runId).pendingMessageIds = []; save(); }, noteReassessment(runId, nodeIds, reason = "项目经理确认变更影响") { const current = getRun(runId); for (const nodeId of nodeIds) assertNode(current, nodeId); addEvent({ type: "run.reassessment_requested", runId, message: reason, data: { nodeIds } }); save(); return clone(current); },
     listDefects(runId = null) { return clone(state.defects.filter((item) => !runId || item.runId === runId)); }, updateDefect(runId, defectId) { const current = find(state.defects, defectId); if (!current || current.runId !== runId) throw new Error("Defect 不存在"); throw new Error("Defect 是 Trace-bound 审计事实，不能直接修改；请通过修复和回归 Trace 更新状态"); },
     cancelRun(runId, reason) {
