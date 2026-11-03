@@ -589,7 +589,9 @@ test("communication execution queues replies, resumes exact sessions, separates 
     const failing = createCommunicationService(store, { root, invoke: async () => { throw new RuntimeSessionMissingError("missing"); } });
     await failing.kick(chat.id);
     const failed = store.getCommunication(chat.id).deliveries.find((item) => item.status === "failed");
-    assert.ok(failed.nextAttemptAt);
+    assert.equal(failed.nextAttemptAt, null);
+    assert.equal(store.claimCommunication(chat.id),null);
+    assert.deepEqual(store.pendingCommunications(),[]);
     store.retryCommunication(chat.id, failed.id);
     await service.kick(chat.id);
     assert.equal(calls.at(-1).session.resume, false);
@@ -603,7 +605,7 @@ test("communication execution queues replies, resumes exact sessions, separates 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("conversation summary keeps automatic retry deliveries visibly pending", () => {
+test("conversation summary keeps failed deliveries actionable without scheduling automatic retries", () => {
   const store = createStore(), chat = store.openCommunication({ kind: "agent", targetId: "agent_analyst" });
   send(store, chat.id, "retry later");
   const delivery = store.claimCommunication(chat.id);

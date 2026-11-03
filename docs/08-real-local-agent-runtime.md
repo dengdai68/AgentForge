@@ -73,3 +73,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 源插件计划 v3 与旧 v2 的冻结边界、模型/工具映射及原生 YAML 私有投影见 docs/26；真实 ai-minions 验收通过独立来源目录导入和三个真实 Runtime 调用，不修改操作者插件/任务。
 
 插件导入的定义错误隔离详见 docs/26：原始源保留，错误组件排除在原生执行副本外，三种 Runtime 接收相同有效部分及各自方言配置；执行时不放宽摘要与冻结计划核验。
+
+Codex 在 Provider 确认 thread.started 之前出现明确鉴权/未登录错误时，JSONL 与 app-server 调用立即失败并释放进程；此时控制台没有原生会话 ID 是真实事实，不使用应用占位 ID 续接。JSONL 的连续错误事件计入有上限的重试等待，不会无限重置空闲计时。已确认会话的 Provider 原生恢复仍按最终成功/失败结算。登录修复后，手动重试启动新的 CLI 进程读取当前账号状态，无需删除员工；已有已确认会话继续原 ID。

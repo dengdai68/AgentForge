@@ -102,3 +102,5 @@ DeepSeek Harness 根据原生 system/message 中的完整应用指令匹配保�
 角色可通过 handoff.recipientAgentId 交接给任意其他参与者，不能指向自己；@ 人类转换为精确澄清。handoff、consultation、managerDecision 互斥。人类重试以动态“继续”输入恢复原投递，不形成 Message；经理空闲巡检输入携带当前执行状态与角色沟通记录。Trace.inputMessageId 是平台生成的不可变本轮输入 ID，输出 Message.startMessageId 关联它，控制台依据该 ID 定位私有脱敏提示词。
 
 问题发现、处理与核验结果写入 summary/consultation.question，并通过 handoff/consultation 交接。提示词不再附加独立开放问题列表；已废弃的清单输出字段由 Store 明确拒绝，不能悄悄生成另一套状态。
+
+沟通应用提示词保留沟通与 Task/Run 的入口区分、讨论答疑边界和实际交付指引；移除固定中文、逐项 Git/发布/凭据限制、代表自己/经理无特权以及附件读取/非指令的重复句子。输出协议、真实附件路径与统一来源/如实表达规则保持；不改变 API 权限或存量原生历史。

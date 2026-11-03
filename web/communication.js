@@ -106,7 +106,9 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     const html = messages.map((message) => {
       const addressed = (message.mentionAgentIds || []).map(id => state.conversation.members.find(member => member.id === id)?.name).filter(Boolean);
       const attachments = (message.attachments || []).map(file => `<a class="communication-attachment" href="/api/communications/${encodeURIComponent(currentId)}/attachments/${encodeURIComponent(file.id)}" download="${escapeHtml(file.name)}" data-attachment-download><span aria-hidden="true">↧</span><span>${escapeHtml(file.name)}</span><small>${file.bytes} B</small></a>`).join('');
-      return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header>${addressed.length ? `<small class="communication-addressed">→ ${escapeHtml(addressed.join("、"))}</small>` : ""}<div class="communication-body communication-markdown">${renderContent(message.content, (state.conversation?.members || []).map(member => member.name))}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}</article>`;
+      const failed = [...state.deliveries.values()].filter(item => item.messageId === message.id && item.status === 'failed');
+      const recovery = failed.map(item => `<div class="communication-recovery"><span>${escapeHtml(state.conversation.members.find(member=>member.id===item.agentId)?.name || '员工')} 回复失败</span><button type="button" class="text-action" data-chat-failure-console="${escapeHtml(item.agentId)}">查看控制台</button><button type="button" class="text-action" data-retry-chat-delivery="${escapeHtml(item.id)}">重试</button></div>`).join('');
+      return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header>${addressed.length ? `<small class="communication-addressed">→ ${escapeHtml(addressed.join("、"))}</small>` : ""}<div class="communication-body communication-markdown">${renderContent(message.content, (state.conversation?.members || []).map(member => member.name))}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}${recovery}</article>`;
     }).join("") || `<div class="communication-empty">${state.latestError ? "聊天记录读取失败，正在重连。" : state.loaded ? "从一句话开始沟通。消息将持续保留。" : "正在读取聊天记录…"}</div>`;
     if (list.innerHTML !== html) {
       list.innerHTML = html;
@@ -192,6 +194,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     panel.hidden = !state.consoleOpen; panel.dataset.open = String(state.consoleOpen);
     query('.communication-panes').classList.toggle('console-open', state.consoleOpen);
     query('[data-toggle-communication-console]').setAttribute('aria-expanded', String(state.consoleOpen));
+    query('[data-chat-roster]').querySelectorAll('[data-chat-member-console]').forEach(button => button.setAttribute('aria-pressed', String(state.consoleOpen && button.dataset.chatMemberConsole === state.consoleAgentId)));
     if (!state.consoleOpen) return;
     query('[data-communication-console-error]').textContent = state.consoleError;
     const page = consolePage(state);
@@ -344,6 +347,14 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       fileInput.value = ''; state.requestId = null; renderAttachments();
     };
     query('.communication-messages').onclick = async event => {
+      const consoleButton = event.target.closest('[data-chat-failure-console]');
+      if (consoleButton) { openMemberConsole(consoleButton.dataset.chatFailureConsole); return; }
+      const retry = event.target.closest('[data-retry-chat-delivery]');
+      if (retry) {
+        const key = currentId; retry.disabled = true;
+        try { await api(`/api/communications/${key}/deliveries/${retry.dataset.retryChatDelivery}/retry`, {method:'POST',body:'{}'}); if(currentId===key)await loadMessages(); }
+        catch(error){notify(error.message,true);}finally{retry.disabled=false;} return;
+      }
       const link = event.target.closest('[data-attachment-download]');
       if (!link) return;
       event.preventDefault();
@@ -418,7 +429,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     query('[data-toggle-chat-members]').textContent = `成员 ${members.length}`;
     query('[data-toggle-communication-console]').hidden = group;
     query('[data-chat-member-count]').textContent = `成员 ${members.length}`;
-    const html = members.map(member => `<div class="communication-roster-member"><button type="button" class="text-action communication-member-identity" data-chat-member-detail="${escapeHtml(member.id)}" title="${escapeHtml(member.name)}">${renderAvatar(member)}<span class="communication-member-name">${escapeHtml(member.name)}</span></button><button type="button" class="text-action member-console-icon" data-chat-member-console="${escapeHtml(member.id)}" aria-label="查看 ${escapeHtml(member.name)} 的控制台" title="查看控制台">${consoleIcon}</button></div>`).join('') || '<p class="field-hint">暂无员工</p>';
+    const html = members.map(member => `<div class="communication-roster-member"><button type="button" class="text-action communication-member-identity" data-chat-member-detail="${escapeHtml(member.id)}" title="${escapeHtml(member.name)}">${renderAvatar(member)}<span class="communication-member-name">${escapeHtml(member.name)}</span></button><button type="button" class="text-action member-console-icon" data-chat-member-console="${escapeHtml(member.id)}" aria-pressed="${state.consoleOpen && state.consoleAgentId === member.id}" aria-label="查看 ${escapeHtml(member.name)} 的控制台" title="查看控制台">${consoleIcon}</button></div>`).join('') || '<p class="field-hint">暂无员工</p>';
     if (container.innerHTML !== html) container.innerHTML = html;
     container.onclick = event => {
       const detail = event.target.closest('[data-chat-member-detail]'), consoleButton = event.target.closest('[data-chat-member-console]');

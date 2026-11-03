@@ -106,10 +106,17 @@ try {
   await page.locator('.collaboration-row').first().waitFor();
   await page.locator('[data-toggle-task-details]').click();
   assert.equal(await page.locator('.quality-risk-panel').count(), 0);
+  const typography=await page.evaluate(()=>({description:getComputedStyle(document.querySelector('#task-description-content p')).fontSize,path:getComputedStyle(document.querySelector('.workspace-path span')).fontSize,descriptionHeading:getComputedStyle(document.querySelector('#task-description-content').previousElementSibling).fontSize,pathHeading:getComputedStyle(document.querySelector('.workspace-directory-details h5')).fontSize}));
+  assert.equal(typography.description,typography.path);assert.equal(typography.descriptionHeading,typography.pathHeading);
   assert.doesNotMatch(await page.locator('#workspace-details').innerText(), /Defect|未关闭/);
   await page.locator('[data-toggle-task-details]').click();
   assert.equal(await page.locator('.collaboration-toolbar small, .collaboration-reference, .human-guide').count(), 0);
   assert.equal(await page.locator('#instruction-text').getAttribute('placeholder'), '输入消息…');
+  let releaseDirectory;const directoryWait=new Promise(resolve=>releaseDirectory=resolve);
+  let handledDirectory;const directoryHandled=new Promise(resolve=>handledDirectory=resolve);
+  const delayDirectory=async route=>{await directoryWait;await route.continue();handledDirectory();};
+  await page.route('**/working-directory?*',delayDirectory);await page.locator('#directory-mode').click();await page.locator('.directory-loading').first().waitFor();
+  assert.doesNotMatch(await page.locator('#working-directory-panel').innerText(),/读取中|正在读取|加载中/);releaseDirectory();await directoryHandled;await page.unroute('**/working-directory?*',delayDirectory);await page.locator('[data-ws-tab="collaboration"]').click();
   while (await page.locator('[data-collaboration-older]').count()) await page.locator('[data-collaboration-older]').click();
   const rows = page.locator('.collaboration-row');
   const row = marker => rows.filter({ has: page.locator('.collaboration-markdown, .collaboration-plain').filter({ hasText: marker }) });

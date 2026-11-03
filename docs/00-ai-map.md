@@ -154,3 +154,5 @@ ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别�
 任务协作：`server/task-patrol.mjs`（10 秒非阻塞检测）→ Store 经理巡检投递 → Orchestrator；错误只由人工续接原员工。共享协作投影仅角色消息，Trace.inputMessageId / Message.startMessageId 连接本轮提示词。契约见 docs/03、docs/22；回归见 tests/task-patrol.test.mjs、scripts/test-task-collaboration-real.mjs。
 
 问题沟通统一进入 Message：Store 不再维护独立问题清单，Runtime 结果中的旧清单字段明确拒绝；prompts 引导用 summary/consultation/handoff 报告和交接。UI 移除风险面板及角标，CLI progress 移除 openDefects，历史索引只索引当前领域记录。见 docs/03、docs/21、docs/22。
+
+Runtime 启动恢复：local-cli/codex-app-server 在原生会话建立前识别鉴权失败并结束，communication-store 失败只等显式重试。web/communication 提供失败重试入口和蓝色控制台选中态；web/app/styles 同步描述字号与无文字目录加载。真实验收见 scripts/test-codex-login-recovery-real.mjs。

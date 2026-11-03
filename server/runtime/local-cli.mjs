@@ -26,6 +26,9 @@ export class RuntimeSessionMissingError extends Error {}
 export function runtimeFailureDetail(value, prompt = '') {
   return diagnosticRedactor({ prompt })(value instanceof Error ? value.message : String(value || 'Unknown runtime error'));
 }
+export function runtimeAuthenticationFailure(value) {
+  return /\b(?:401|403)\b|unauthori[sz]ed|authentication (?:failed|failure|error|required)|(?:failed|invalid|missing).{0,20}authentication|not (?:logged|signed) in|(?:please|must|requires?).{0,25}(?:log ?in|sign ?in)|missing.{0,15}(?:api.?key|credentials)|(?:invalid|expired).{0,15}(?:api.?key|token)|codex login|未登录/i.test(String(value?.message || value || ''));
+}
 export function retryableRuntimeFailure(error) {
   if (typeof error?.retryable === 'boolean') return error.retryable;
   const text = String(error?.message || error || '');
@@ -297,6 +300,7 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
       for await (const line of stderrLines) {
         diagnostic("provider.stderr", { text: line });
         stderr = `${stderr}${line}\n`.slice(-8000);
+        if (provider === "Codex" && !sessionObserved && runtimeAuthenticationFailure(line)) stopForWatchdog(runtimeFailureDetail(line));
         if (!stderrReported) {
           stderrReported = true;
           await onEvent({ providerEventType: "stderr", message: "Provider 诊断输出已隐藏", data: { auditVersion: 2, presentation: "system" } });
@@ -317,6 +321,8 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
       }
       diagnostic("provider.stdout", { frame: providerEvent });
       try {
+        const preSessionError = provider === "Codex" && !sessionObserved && ["error", "turn.failed"].includes(providerEvent.type) ? providerEvent.error?.message || providerEvent.message : null;
+        if (preSessionError && runtimeAuthenticationFailure(preSessionError)) stopForWatchdog(runtimeFailureDetail(preSessionError));
         const normalizedEvents = normalizeEvent(providerEvent);
         for (const normalized of (Array.isArray(normalizedEvents) ? normalizedEvents : [normalizedEvents]).filter(Boolean)) {
           if (providerEvent.type === "thread.started") {
@@ -327,9 +333,9 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
             sessionObserved = true;
             if (session && providerEvent.session_id !== session.sessionId) stopForWatchdog("Provider 返回的会话 ID 与当前成员绑定不一致");
           }
-          const isApiRetry = normalized.providerEventType === "system" && normalized.data?.subtype === "api_retry";
+          const isApiRetry = normalized.providerEventType === "system" && normalized.data?.subtype === "api_retry" || provider === "Codex" && providerEvent.type === "error";
           if (isApiRetry && !apiRetryTimer) {
-            apiRetryTimer = setTimeout(() => stopForWatchdog(`Provider API 连续重试超过 ${Math.round(apiRetryTimeoutMs / 1000)} 秒，已释放执行槽位并交由节点自动重试`), apiRetryTimeoutMs);
+            apiRetryTimer = setTimeout(() => stopForWatchdog(`Provider API 连续重试超过 ${Math.round(apiRetryTimeoutMs / 1000)} 秒，已停止本次调用，请处理错误后重试`), apiRetryTimeoutMs);
             apiRetryTimer.unref();
           }
           if (!isApiRetry) {
@@ -548,7 +554,7 @@ async function invokeCodexCli(input) {
     async getFinal() { return (await readFile(finalPath, "utf8").catch(error => { diagnostic("provider.final_file_error", { error }); return ""; })) || finalText; }
   };
   return runtime.skillPaths?.length
-    ? runCodexAppServer({...input,runtime:nativeRuntime}, {args:nativeArgs, normalizeEvent:transport.normalizeEvent, cancelledError:message=>new RuntimeCancelledError(message), missingSessionError:message=>new RuntimeSessionMissingError(message)})
+    ? runCodexAppServer({...input,runtime:nativeRuntime}, {args:nativeArgs, normalizeEvent:transport.normalizeEvent, authenticationFailure:runtimeAuthenticationFailure, cancelledError:message=>new RuntimeCancelledError(message), missingSessionError:message=>new RuntimeSessionMissingError(message)})
     : executeJsonl(transport);
 }
 

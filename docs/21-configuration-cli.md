@@ -108,3 +108,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 任务协作改为仅角色沟通，文本/JSON 新增 startMessageId（应用本轮输入 ID）。tasks message 的 recipient 直接路由至所选员工，failed 任务拒绝发送；tasks progress 优先提示原员工重试。CLI 不新增恢复或最终确认权限。每 10 秒巡检为空闲的进行中任务唤醒经理，错误不自动重试。
 
 tasks progress 不再输出 openDefects；任务与执行摘要不再提供独立问题计数。问题、修复与核验反馈使用 tasks collaboration 查询，tasks message/reply 发送。无新增参数或权限，最终确认仍在客户端；旧清单消费者应改用角色沟通记录，无需重置实例。
+
+本次为沟通恢复、Runtime 启动鉴权和展示调整。CLI 配置与任务命令/参数/输出保持；tasks progress 继续提示失败后在客户端重试。长期沟通尚无 CLI 命令，不新增权限。

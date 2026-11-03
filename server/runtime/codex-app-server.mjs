@@ -16,7 +16,7 @@ export function nativeItem(item) {
     aggregated_output: item.aggregatedOutput, exit_code: item.exitCode };
 }
 
-export async function runCodexAppServer(input, { args, normalizeEvent, cancelledError, missingSessionError }) {
+export async function runCodexAppServer(input, { args, normalizeEvent, authenticationFailure = () => false, cancelledError, missingSessionError }) {
   const {runtime, workspacePath, traceDirectory, onEvent, session} = input;
   const key = input.executionKey || input.runId;
   if (input.canStart && !input.canStart()) throw cancelledError('执行在启动前已暂停或终止');
@@ -45,7 +45,7 @@ export async function runCodexAppServer(input, { args, normalizeEvent, cancelled
   child.on('error',error=>{diagnostic('provider.spawn_error',{error});abort(error)});
   child.on('close',(code,signal)=>{closed=true;diagnostic('provider.exit',{code,signal,childPid:child.pid});if(!finalText || failure)abort(failure || new Error(`Codex 原生进程提前退出 (${code ?? signal})`));});
   const errors=createInterface({input:child.stderr});
-  const stderrTask=(async()=>{for await(const line of errors)diagnostic('provider.stderr',{text:line});})();
+  const stderrTask=(async()=>{for await(const line of errors){diagnostic('provider.stderr',{text:line});if(!threadId && authenticationFailure(line))abort(new Error(line));}})();
   const reader=createInterface({input:child.stdout});
   const receive=(async()=>{
     try { for await(const line of reader) {
@@ -58,6 +58,7 @@ export async function runCodexAppServer(input, { args, normalizeEvent, cancelled
       }
       if(message.id !== undefined) {send({id:message.id,error:{code:-32601,message:'Interactive server requests are not supported by this unattended Runtime'}});throw new Error(`Codex 需要交互式处理：${message.method}`);}
       const p=message.params || {};
+      if(message.method==='error' && !threadId && authenticationFailure(p.error?.message))throw new Error(p.error.message);
       if(message.method==='error' && p.willRetry && !retryTimer){retryTimer=setTimeout(()=>abort(new Error('Codex API 连续重试超过等待时间')),input.apiRetryTimeoutMs || 300000);retryTimer.unref();}
       if(message.method==='thread/started')await bind(p.thread.id);
       if(['item/started','item/completed'].includes(message.method)) {

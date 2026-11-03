@@ -767,7 +767,7 @@ function manualDetails(key) {
     ],
     "system-architecture": [
       ["只读历史工具", "Store 内 history 模块提供完整分页、中文关键词搜索、全部 Trace 与交付读取，SQLite 搜索索引可重建。每次 CLI 调用通过私有 Unix socket + MCP 标注员工，不暴露管理员 Cookie；历史查询不共享模型会话、不更改任务状态。"],
-      ["沟通执行", "三个入口打开同一会话；communication-store 是 Store 内部命令，communication 服务驱动独立本机 CLI。群聊有 @ 定向回复，无 @ 全部活跃数字成员回复，没有默认经理。失败按成员排队重试，不阻塞其他成员；可取消待回复而不删除消息。"],
+      ["沟通执行", "三个入口打开同一会话；communication-store 是 Store 内部命令，communication 服务驱动独立本机 CLI。群聊有 @ 定向回复，无 @ 全部活跃数字成员回复，没有默认经理。失败等待人类重试，不阻塞其他成员；可取消待回复而不删除消息。"],
       ["写入边界", "web 只通过 HTTP 发命令；index 只做传输；Store 是唯一能改变领域状态的模块；Orchestrator 不直改内部数组。"],
       ["运行边界", "Runtime 启动本机 Claude Code（默认）或 Codex，并标准化 JSONL 事件。最终 node_result 必须被 Orchestrator 验证后才能成为交付事实。Provider 登录和模型可用性由本机配置决定。"],
       ["登录与执行", "客户端自带本机服务，仅监听随机 loopback 端口；页面、API 和 SSE 均需单管理员登录。数字员工以本机用户权限执行，平台不设置任务级操作权限。"],
@@ -778,7 +778,7 @@ function manualDetails(key) {
       ["按需找回历史", "沟通和任务中均可使用 8 个内置历史工具。先搜索，再按 recordId 读取原文；hasMore 时继续分页或分段。历史内容是证据，不是当前指令或发布授权。归档记录仍可读，物理删除后不再返回。"],
       ["协作不是固定串行", "项目经理每次从所有职责定义中依据当前事实作出结构化选择；它负责流程，不替业务角色完成交付。"],
       ["澄清与回路", "业务问题优先点对点咨询相应角色；只有团队无法回答的产品取舍、验收标准或外部事实才等待人类。发现问题后通过协作消息交接处理和反馈结果。"],
-      ["恢复与暂停", "Provider、工具或结构化输出错误封存失败 Trace 并重试原 Dispatch；五分钟无活跃成员巡检恢复调度。人类可暂停全部执行并手动继续，也可终止；等待澄清不会被巡检强行跳过。"],
+      ["恢复与暂停", "Provider、工具或结构化输出错误封存失败 Trace 并重试原 Dispatch；十秒巡检非失败、非人类等待的空闲任务。人类可暂停全部执行并手动继续，也可终止；等待澄清不会被巡检强行跳过。"],
       ["完成与后续咨询", "经理提交人类验收后进入 awaiting_acceptance，只有人类确认才 completed。未归档仍能咨询，停止状态下答疑不恢复开发；普通新指令进入队列，不打断正在执行的成员。归档后只读。"],
     ],
   };
@@ -1524,7 +1524,7 @@ function workingFileTree(entries = [], view, theme, changes = false) {
 function directoryPageMarkup(path,view,theme) {
   const page=path?view.directoryPages?.[path]:view.directory;
   const entries=page?.entries || [];
-  return `${workingFileTree(entries,view,theme)}${page?.loading?'<p role="status">正在读取…</p>':page?.error?`<p role="alert">${esc(page.error)}</p><button class="text-action" data-load-directory="${esc(path)}">重试</button>`:!page?'<p>展开后读取</p>':!entries.length?'<p class="muted">空目录</p>':''}${page?.nextOffset!=null?`<button class="text-action" data-load-more-directory="${esc(path)}" ${page.loading?'disabled':''}>加载更多</button>`:''}`;
+  return `${workingFileTree(entries,view,theme)}${page?.loading?'<span class="directory-loading" role="status" aria-label="正在读取目录"></span>':page?.error?`<p role="alert">${esc(page.error)}</p><button class="text-action" data-load-directory="${esc(path)}">重试</button>`:!page?'<p>展开后读取</p>':!entries.length?'<p class="muted">空目录</p>':''}${page?.nextOffset!=null?`<button class="text-action" data-load-more-directory="${esc(path)}" ${page.loading?'disabled':''}>加载更多</button>`:''}`;
 }
 
 function renderWorkingDirectory(runId) {
@@ -1539,13 +1539,13 @@ function renderWorkingDirectory(runId) {
   host.dataset.directoryTheme = theme;
   let content = '<div class="artifact-placeholder">选择文件查看内容</div>';
   if (preview) {
-    if (preview.error || preview.loading) content = `<div class="artifact-placeholder">${esc(preview.error || "正在读取文件…")}</div>`;
+    if (preview.error || preview.loading) content = preview.error ? `<div class="artifact-placeholder" role="alert">${esc(preview.error)}</div>` : '<div class="artifact-placeholder"><span class="directory-loading" role="status" aria-label="正在读取文件"></span></div>';
     else if (preview.image) content = `<img class="artifact-image-preview" src="/api/runs/${encodeURIComponent(runId)}/working-directory/content?raw=1&path=${encodeURIComponent(view.selectedPath)}" alt="${esc(view.selectedPath)}" />`;
     else if (preview.content == null) content = '<div class="artifact-placeholder">二进制文件不支持文本预览</div>';
     else if (/\.md$/i.test(view.selectedPath) && window.marked && window.DOMPurify) content = `<article class="markdown-preview">${window.DOMPurify.sanitize(window.marked.parse(preview.content))}</article>`;
     else content = `<pre class="artifact-preview code-preview hljs"><code>${preview.highlightedHtml || esc(preview.content)}</code></pre>`;
   }
-  host.innerHTML = `<div class="directory-toolbar"><div><strong>文件</strong></div><div class="directory-actions"><button class="ghost-button" data-download-working-file ${!view.selectedPath || view.downloadingPath ? "disabled" : ""} ${view.downloadingPath ? 'aria-busy="true"' : ""}>${view.downloadingPath ? "下载中…" : "下载"}</button><button class="ghost-button" data-refresh-directory ${view.directoryLoading ? "disabled" : ""}>${view.directoryLoading ? "读取中…" : "刷新"}</button></div></div>
+  host.innerHTML = `<div class="directory-toolbar"><div><strong>文件</strong></div><div class="directory-actions"><button class="ghost-button" data-download-working-file ${!view.selectedPath || view.downloadingPath ? "disabled" : ""} ${view.downloadingPath ? 'aria-busy="true"' : ""}>${view.downloadingPath ? "下载中…" : "下载"}</button><button class="ghost-button" data-refresh-directory ${view.directoryLoading ? 'disabled aria-busy="true"' : ""}>刷新</button></div></div>
     ${view.directoryError ? `<p role="alert">${esc(view.directoryError)}</p>` : ""}
     <div class="artifact-layout"><div class="artifact-files"><section class="artifact-root">${directoryPageMarkup('',view,theme)}</section></div><div class="artifact-viewer document"><div class="artifact-viewer-head"><strong>${esc(view.selectedPath || "文件预览")}</strong><small>当前工作文件 ${preview?.modifiedAt ? "· " + esc(preview.modifiedAt) : ""}</small></div>${content}</div></div>`;
   host.querySelector(".artifact-files").scrollTop = view.directoryScroll.tree || 0;

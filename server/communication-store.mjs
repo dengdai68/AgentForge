@@ -49,7 +49,7 @@ export function communicationCommands(state, save) {
       thread.memberAgentIds = rosterIds(thread); thread.kind = "group"; delete thread.targetId;
     }
   };
-  // A failed delivery remains actionable while its scheduled backoff can retry it.
+  // Failed replies remain visible and require explicit retry after the cause is fixed.
   const pending = (item) => !["done", "cancelled"].includes(item.status);
   const summary = (thread, details = false) => {
     const target = thread.kind === "agent" ? state.agents.find(row => row.id === thread.targetId) : null;
@@ -178,7 +178,7 @@ export function communicationCommands(state, save) {
       const item = queue.find((candidate) => {
         if (seen.has(candidate.agentId)) return false;
         seen.add(candidate.agentId);
-        return candidate.status === "queued" || (candidate.status === "failed" && Date.parse(candidate.nextAttemptAt) <= Date.now());
+        return candidate.status === "queued";
       });
       if (!item) return null;
       item.status = "running"; item.attempts++; item.updatedAt = now(); event(item, "started", "开始回复"); save();
@@ -251,7 +251,7 @@ export function communicationCommands(state, save) {
       const item = delivery(key, deliveryId);
       if (item.status !== "running") return;
       item.status = "failed"; item.error = String(reason).slice(0, 2000); item.updatedAt = now();
-      item.nextAttemptAt = new Date(Date.now() + Math.min(300000, 15000 * 2 ** Math.min(item.attempts - 1, 5))).toISOString();
+      item.nextAttemptAt = null;
       event(item, "failed", item.error);
       if (resetSession) { const session = conversation(key).sessions[item.agentId]; if (session) { session.sessionId = null; session.confirmed = false; } event(item, "session_reset", "模型会话不存在，创建新会话但不重放已确认消息；历史仍可按需查询"); }
       save();
@@ -276,7 +276,7 @@ export function communicationCommands(state, save) {
       }
       save();
     },
-    pendingCommunications() { return [...new Set(state.communicationDeliveries.filter(pending).map((row) => row.conversationId))]; },
+    pendingCommunications() { return [...new Set(state.communicationDeliveries.filter(row => row.status === "queued").map((row) => row.conversationId))]; },
     getCommunicationConsole(key, { agentId, before = null, limit = 50 } = {}) {
       const thread = conversation(key), deliveries = state.communicationDeliveries.filter(row => row.conversationId === key);
       const roster = new Map(members(thread).map(row => [row.id, { id: row.id, name: row.name }]));

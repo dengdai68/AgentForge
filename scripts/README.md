@@ -123,3 +123,5 @@ test-roles-ui 覆盖角色/插件/MCP 框内多选添加/移除、无排序操�
 `AGENTFORGE_TASK_COLLABORATION_REAL=1 node scripts/test-task-collaboration-real.mjs` 使用隔离 Electron 和真实 Claude：首轮真实经理输出注入丢失协调字段，验证正式 10 秒巡检接续；真实员工首轮结束后注入鉴权错误，验证 failed 锁定、原员工/会话重试、完成交付和界面人类确认。故障是验收注入，不冒充 Provider 实际故障。证据保存在 .data/task-collaboration-real-*；可用 AGENTFORGE_TASK_COLLABORATION_RESUME 指定该脚本失败的隔离目录续验。`test-collaboration-flow.mjs` 覆盖角色消息过滤和跨日志分页的提示词定位。
 
 协作 UI 验收额外检查任务详情无独立问题面板；真实任务验收要求员工在交接正文报告问题、处理过程和验证结果。Provider 夹具不再输出已移除的问题清单字段。
+
+AGENTFORGE_CODEX_LOGIN_REAL=1 node scripts/test-codex-login-recovery-real.mjs 在隔离 Electron 中注入一次未登录、会话建立前持续报错；恢复时调用当前真实 Codex 账号，验证同一员工/私聊手动重试、真实会话 ID，以及任务派工、失败重试、产物测试和界面人类确认。不会登出或改写操作者凭据。沟通与任务 UI 脚本覆盖蓝色选中态、字号一致和目录加载无可见中文提示。

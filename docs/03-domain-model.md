@@ -112,3 +112,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 问题发现、修复交接和核验结果全部由角色 Message 表达。移除独立 Defect 集合的创建/更新、状态流转和读模型，废弃 defects、resolvesDefectIds、verifiedDefectIds 输出字段，出现时明确拒绝并提示使用 summary/consultation 与 handoff。工作流焦点不再根据独立问题记录高亮，任务进度不含 openDefects/openDefectCount，原独立列表接口移除。
 
 这是输出与查询协议变更：调用方须移除旧字段并改用协作消息，无需重新初始化当前实例；不重写冻结消息、Trace、文件或存量数据库历史，不将旧清单伪造成角色发言。已有执行会话继续使用，后续调用遵循当前消息协议。
+
+沟通失败保留原消息、投递和调用历史，nextAttemptAt 为 null，不由轮询自动重试。失败消息下提供“查看控制台”和“重试”；重试使用当前员工配置，未确认原生会话时创建真实新会话，已确认时续接。同员工 FIFO、其他群成员并行及服务重启恢复在途调用保持原规则。

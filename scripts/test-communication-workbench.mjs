@@ -89,6 +89,7 @@ try {
   const draft = page.locator('#communication-input'); await draft.fill('切换控制台时保留的草稿');
   const toggle = page.locator('[data-toggle-communication-console]'); await toggle.click();
   await page.locator('[data-communication-console]:not([hidden])').waitFor();
+  assert.equal(await toggle.evaluate(el=>{const probe=document.createElement('span');probe.style.color='var(--accent)';el.append(probe);const matches=getComputedStyle(el).color===getComputedStyle(probe).color;probe.remove();return matches;}),true);
   const widths = await page.locator('.communication-chat, .communication-console').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().width));
   assert.ok(Math.abs(widths[0] - widths[1]) < 2);
   const assertSplitHeaders = async p => {
@@ -270,6 +271,7 @@ try {
       if(width===760){await page.locator('[data-close-chat-members]').click();assert.equal(await page.locator('.communication-roster').isVisible(),false);await page.locator('[data-toggle-chat-members]').click();}
       await page.locator(`[data-chat-member-console="${employee.id}"]`).click();await page.locator('[data-chat-console-name]').filter({hasText:employee.name}).waitFor();
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      const selected=page.locator(`[data-chat-member-console="${employee.id}"]`);assert.equal(await selected.getAttribute('aria-pressed'),'true');assert.equal(await selected.evaluate(el=>{const probe=document.createElement('span');probe.style.color='var(--accent)';el.append(probe);const matches=getComputedStyle(el).color===getComputedStyle(probe).color;probe.remove();return matches;}),true);
       await page.screenshot({path:join(root,`group-console-${theme}-${width}.png`)});await page.locator('[data-close-chat-console]').click();
     }
   }

@@ -216,7 +216,8 @@
       "taskContextProjection": "Preserve message provenance, reply links and complete business bodies; omit storage/routing audit metadata, empty repository config, employee staffing guidance and automatic bulk Artifact digests. Handoff paths remain; full immutable evidence is queried through history tools.",
       "communicationContract": "Private chat uses reply-only; independent groups add explicit mentionAgentIds for peer questions. No handoff fields; Task managerDecision/consultation and frozen historical repository context remain separate.",
       "membershipContract": "Only the Run coordinator ID receives manager/workflow rules. Private replies stay reply-only; independent groups carry explicit mentionAgentIds and bounded per-human-round member delivery.",
-      "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten."
+      "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
+      "communicationPrompt": "Keep chat entry and discussion/file-change boundary; remove fixed language and enumerated Git/publish/credential, self/manager and attachment reminder sentences."
     },
     {
       "id": "cli.configuration",
@@ -532,7 +533,8 @@
       ],
       "tests": [
         "tests/communication.test.mjs",
-        "tests/communication-workbench.test.mjs"
+        "tests/communication-workbench.test.mjs",
+        "scripts/test-codex-login-recovery-real.mjs"
       ],
       "allowedDependencies": [
         "node:crypto",
@@ -555,7 +557,8 @@
           "sessions"
         ]
       },
-      "membershipContract": "Independent group rosters/names, editable through Store; omitted creation names join the selected employee names with Chinese commas. Member projections preserve directory avatar fields. Team deletion does not affect groups; employee deletion hides current members and retains frozen history. See docs/17-communication.md."
+      "membershipContract": "Independent group rosters/names, editable through Store; omitted creation names join the selected employee names with Chinese commas. Member projections preserve directory avatar fields. Team deletion does not affect groups; employee deletion hides current members and retains frozen history. See docs/17-communication.md.",
+      "loginRecovery": "Pre-session Codex authentication errors stop the process. Communication failures wait for explicit retry, which launches fresh CLI state without deleting the employee or inventing native session IDs."
     },
     {
       "id": "server.communication",
@@ -645,7 +648,7 @@
       "workingFileDownload": "Authenticated attachment/octet-stream response streams selected current files through Run Files; transmission errors are diagnosed without attempting a second JSON response.",
       "kind": "runtime",
       "owner": "server",
-      "purpose": "Translate bounded JSON CRUD, status-only authenticated GitHub/GitLab pull-credential configuration, a guarded Electron-first-run setup route, workspace reads, message submission and explicit clarification replies, human-requested immediate retry of queued Dispatch backoffs, pause/resume/terminate, archive, recoverable Task deletion with Store-owned eligibility precheck before isolated Run-file cleanup reporting, SSE, restricted files with stable path-free Artifact read failures and frozen SHA-256/byte integrity checks, startup dispatch recovery and five-minute idle patrol into Store and Orchestrator commands; inject the private URL-to-credential resolver only into Run execution. The owning Electron process starts this loopback service on an OS-assigned port through a private IPC handshake.",
+      "purpose": "Translate bounded JSON CRUD, status-only authenticated GitHub/GitLab pull-credential configuration, a guarded Electron-first-run setup route, workspace reads, message submission and explicit clarification replies, human-requested immediate retry of queued Dispatch backoffs, pause/resume/terminate, archive, recoverable Task deletion with Store-owned eligibility precheck before isolated Run-file cleanup reporting, SSE, restricted files with stable path-free Artifact read failures and frozen SHA-256/byte integrity checks, startup dispatch recovery and ten-second idle patrol into Store and Orchestrator commands; inject the private URL-to-credential resolver only into Run execution. The owning Electron process starts this loopback service on an OS-assigned port through a private IPC handshake.",
       "sourceOfTruth": [
         "docs/02-system-architecture.md",
         "docs/03-domain-model.md",
@@ -1112,7 +1115,8 @@
       "employeeConfiguration": "Employee forms offer ordinary workers and managers only, without repository inputs; cards do not show a developer/bound-repository badge. Chat renders direct replies without handoff labels; saved history is not rewritten.",
       "configurationPresentation": "MCP cards hide internal installation IDs; plugin cards show actual versions only. Employee system prompts and shared role prompts use eight visible rows for create/edit. HTTP/CLI references and payloads unchanged.",
       "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action.",
-      "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten."
+      "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
+      "communicationRecovery": "Failed replies expose console/retry actions; selected console icons use accent blue. Description/path typography matches and directory loading uses accessible visual indicators."
     },
     {
       "id": "web.manual-graphs",

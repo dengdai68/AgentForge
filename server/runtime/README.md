@@ -55,3 +55,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 插件执行计划 v3 对已知 Claude 模型别名在非 Claude Runtime 继承目标模型并保留 sourceModel；DeepSeek 选择现有 Codex 清单时使用完整方言而不混合 Hook。单行 description 冒号仅在原生调用副本中编码，原文/正文/支持文件保留；解析错误只暴露组件相对路径和行列，格式错误不使其他已安装插件目录不可用。旧 v2 引用仍验原摘要。实际源验证为 test-ai-minions-real，机制验证仍为 test-plugin-runtimes-real。
 
 导入逐组件隔离定义错误：Skill/Command/Subagent Markdown 与 Hook JSON/事件/匹配组/处理器仅跳过失败单元。原始 source 不变，原生执行副本只含有效 Markdown 与规范化清单/Hook；warnings 由市场/HTTP/CLI/界面共享。越界/链接/完整性/清单错误仍阻断，执行期保持严格。详见 docs/26。
+
+Codex 在 Provider 确认 thread.started 之前出现明确鉴权/未登录错误时，JSONL 与 app-server 调用立即失败并释放进程；此时控制台没有原生会话 ID 是真实事实，不使用应用占位 ID 续接。JSONL 的连续错误事件计入有上限的重试等待，不会无限重置空闲计时。已确认会话的 Provider 原生恢复仍按最终成功/失败结算。登录修复后，手动重试启动新的 CLI 进程读取当前账号状态，无需删除员工；已有已确认会话继续原 ID。

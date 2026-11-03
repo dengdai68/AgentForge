@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {runtimeAuthenticationFailure} from '../server/runtime/local-cli.mjs';
 import {runCodexAppServer,nativeItem} from '../server/runtime/codex-app-server.mjs';
 import {hasActiveExecution,terminateExecution} from '../server/runtime/registry.mjs';
 
@@ -16,6 +17,7 @@ const send=v=>console.log(JSON.stringify(v));
 createInterface({input:process.stdin}).on('line',line=>{
  const r=JSON.parse(line);appendFileSync(${JSON.stringify(capture)},line+'\\n');if(r.id===undefined)return;
  const reply=result=>send({id:r.id,result});
+ if(r.method==='initialize'&&mode==='unauthenticated'){send({method:'error',params:{willRetry:true,error:{message:'401 Unauthorized: not logged in'}}});return;}
  if(r.method==='initialize'||r.method==='skills/extraRoots/set')return reply({});
  if(r.method==='skills/list')return reply({data:[{skills:mode==='missing'?[]:[{name:'selected',path:${JSON.stringify(join(root,'SKILL.md'))}},{name:'ambient',path:'/ambient/SKILL.md'}],errors:[]}]});
  if(r.method==='thread/resume'&&mode==='missing-session')return send({id:r.id,error:{code:-1,message:'no rollout found for thread id'}});
@@ -30,7 +32,7 @@ createInterface({input:process.stdin}).on('line',line=>{
  }
 });`,{mode:0o700});
   const input={runtime:{executable,skillPaths:[join(root,'SKILL.md')]},workspacePath:root,traceDirectory:root,finalPath:join(root,'final.json'),runId:root,systemPrompt:'PERSONA_ONLY',prompt:'USER_ONLY',idleTimeoutMs:10000,onEvent:async()=>{}};
-  const options={args:['app-server'],normalizeEvent:e=>e,cancelledError:m=>Object.assign(new Error(m),{name:'RuntimeCancelledError'}),missingSessionError:m=>Object.assign(new Error(m),{name:'RuntimeSessionMissingError'})};
+  const options={args:['app-server'],authenticationFailure:runtimeAuthenticationFailure,normalizeEvent:e=>e,cancelledError:m=>Object.assign(new Error(m),{name:'RuntimeCancelledError'}),missingSessionError:m=>Object.assign(new Error(m),{name:'RuntimeSessionMissingError'})};
   return {root,input,options,capture,invoke:(patch={})=>runCodexAppServer({...input,...patch},options)};
 }
 
@@ -95,3 +97,5 @@ test('native items preserve public command/file/MCP bodies and distinct call IDs
   assert.equal(nativeItem({type:'reasoning',summary:['public'],content:['summary']}).text,'public\nsummary');
   assert.equal(nativeItem({type:'unknown'}),null);
 });
+
+test('native app-server exits pre-thread authentication retries without creating a session',async t=>{const f=await fixture(t,'unauthenticated');await assert.rejects(f.invoke(),/401.*not logged in/);assert.equal(hasActiveExecution(f.input.runId),false);const requests=await readFile(f.capture,'utf8');assert.doesNotMatch(requests,/thread\/start|thread\/resume/);});

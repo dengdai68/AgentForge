@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRuntimeConfiguration, parseMcpJson, readPluginCatalog, gitPluginSource } from "../server/runtime/configuration.mjs";
 import { createCatalogFixtureStore as createStore } from "./fixture-store.mjs";
-import { runClaudeCodeCli, runCodexCli, separateRuntimeSession, runtimeFailureSummary, runtimeFailureDetail, retryableRuntimeFailure, executionContent, promptSnapshot } from "../server/runtime/local-cli.mjs";
+import { runClaudeCodeCli, runCodexCli, separateRuntimeSession, runtimeFailureSummary, runtimeFailureDetail, retryableRuntimeFailure, runtimeAuthenticationFailure, executionContent, promptSnapshot } from "../server/runtime/local-cli.mjs";
 const codexProbeFixture = 'if(process.argv.includes("features")){console.log("skip_host_skill_discovery stable false");process.exit(0);}if(process.argv.includes("mcp")&&process.argv.includes("list")){console.log("[]");process.exit(0);}\n';
 
 test("dispatch prompt snapshots keep business text but redact credential shapes", () => {
@@ -308,7 +308,7 @@ for (const provider of ['claude-code', 'codex']) for (const ending of ['recovere
       const laterFailure = provider === 'codex'
         ? { type: 'turn.failed', error: { message: 'API Error: 503 final request failed' } }
         : { type: 'result', subtype: 'success', is_error: true, result: 'API Error: 503 final request failed' };
-      const frames = [failure, text, ...(ending === 'incomplete' ? [] : [success]), ...(ending === 'later-failure' ? [laterFailure] : [])];
+      const frames = [...(provider === "codex" ? [{type:"thread.started",thread_id:randomUUID()}] : []), failure, text, ...(ending === 'incomplete' ? [] : [success]), ...(ending === 'later-failure' ? [laterFailure] : [])];
       await writeFile(executable, '#!/usr/bin/env node\n' + (provider === 'codex' ? codexProbeFixture : '') +
         `for(const frame of ${JSON.stringify(frames)})console.log(JSON.stringify(frame));process.exitCode=${ending === 'nonzero' ? 1 : 0};`);
       await chmod(executable, 0o755);
@@ -479,3 +479,17 @@ if (mode === 'background' || mode === 'cancel') {
     assert.equal(hasActiveExecution(runId),false);
   });
 }
+
+for (const channel of ['stdout','stderr']) test(`Codex pre-thread authentication retries stop on ${channel}, and a later invocation recovers`, async()=>{
+  const root=await mkdtemp(join(tmpdir(),'af-codex-login-recovery-'));
+  try {
+    const executable=join(root,'fixture.mjs'),marker=join(root,'login-ready');
+    await writeFile(executable,'#!/usr/bin/env node\n'+codexProbeFixture+`import {existsSync} from 'node:fs';
+if(!existsSync(${JSON.stringify(marker)})){const error=()=>${channel==='stderr'?"console.error('401 Unauthorized: not logged in; reconnecting')":"console.log(JSON.stringify({type:'error',message:'401 Unauthorized: not logged in; reconnecting'}))"};error();setInterval(error,25);}else{console.log(JSON.stringify({type:'thread.started',thread_id:'confirmed-native-thread-12345'}));console.log(JSON.stringify({type:'item.completed',item:{id:'answer',type:'agent_message',text:'{"reply":"recovered"}'}}));console.log(JSON.stringify({type:'turn.completed'}));}`);
+    await chmod(executable,0o755);const input={runtime:{executable},workspacePath:root,traceDirectory:root,prompt:'login recovery',runId:randomUUID(),onEvent:async()=>{},idleTimeoutMs:10000,apiRetryTimeoutMs:5000};
+    const started=Date.now();await assert.rejects(runCodexCli(input),/401.*not logged in/);assert.ok(Date.now()-started<5000,'auth fails before retry watchdog');
+    await writeFile(marker,'authenticated');const events=[];const result=await runCodexCli({...input,onEvent:async e=>events.push(e)});assert.equal(JSON.parse(result.finalText).reply,'recovered');assert.ok(events.some(e=>e.data?.sessionId==='confirmed-native-thread-12345'));
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test("successful authentication diagnostics do not stop native startup",()=>{for(const text of ["authentication initialized", "authentication status: success", "using cached authentication"])assert.equal(runtimeAuthenticationFailure(text),false);});
