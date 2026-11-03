@@ -1,5 +1,7 @@
 # CLI
 
+任务失败人工恢复在客户端继续原失败员工的投递与会话；CLI 无恢复命令，不扩展操作权限。progress 保留累计 attempts/脱敏错误，协作查询保留失败及恢复事件。
+
 任务从团队与员工 ID 合并成独立成员集合，必须恰好有一位可用项目经理；团队不拥有任务或群聊。领域规则见 [领域模型](../docs/03-domain-model.md)，CLI 输入输出见 [CLI 指南](../docs/21-configuration-cli.md)。
 
 任务写入使用 memberAgentIds；移除 --team。团队 managerAgentId 废弃，成员可空；员工删除保留持久标记及历史。详情只输出成员 ID/名称引用，不包含员工提示词/扩展配置。长期群聊仍不属于 CLI 命令覆盖范围。

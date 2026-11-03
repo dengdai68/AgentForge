@@ -1,5 +1,7 @@
 # 代码导航
 
+失败人工恢复：Store.retryFailedNode/retryFailedOrchestration 重新排队原失败 Dispatch，pendingRetryDispatchId 优先领取，保留会话、指令引用、咨询父链及累计次数；排除已完成投递的历史错误。app.js 恢复入口与提示同步，CLI 不新增恢复命令。真实会话续接验收见 scripts/test-task-retry-real.mjs。
+
 发行回退：`.github/workflows/release-macos-beta.yml` 的 `draft_assets_only` 从冻结标签构建并只上传草稿完整附件；`tests/electron.test.mjs` 验证公开/未知状态拒绝上传，签名正式工作流保持独立。
 
 下拉定位：`web/floating-list.mjs` 以原生 Popover 顶层容器统一成员/扩展、Runtime 模型和 @ 列表的窗口定位与生命周期，避免弹框滚动裁剪；视觉与退出规则见 docs/06。沟通列表头像复用员工身份颜色，新建对话默认不聚焦选人；表单弹框仅显式退出，textarea 拖动不改变弹框顶部。

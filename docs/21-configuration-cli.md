@@ -1,5 +1,7 @@
 # CLI 指南
 
+客户端人工恢复会继续原失败员工的 Dispatch 与会话，保留累计 attempts、消息引用和失败 Trace；CLI progress/协作查询继续展示真实历史，本轮不新增恢复命令或输入字段。
+
 任务通过独立成员集合创建，Store 校验恰好一位可用项目经理，团队仅用来批量选人。删除员工与团队的冻结历史语义见 [领域模型](03-domain-model.md)。
 
 CLI tasks create schema 使用 memberAgentIds（至少一项、不重复），从 teams get 返回的 memberAgentIds 合并；移除 teamId 和 tasks list --team。tasks get 返回成员 ID/名称引用，不倾倒员工提示词/Runtime；tasks list 显示成员数。teams create/update 不接受 managerAgentId，memberAgentIds 可以为空。agents delete --yes 逻辑删除并返回 historyRetained，teams delete --yes 不再因任务/群聊历史拒绝。help/schema/example/text/JSON 共用当前协议。长期沟通属于客户端能力，本轮不新增 CLI 群聊权限。

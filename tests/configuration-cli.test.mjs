@@ -682,3 +682,10 @@ test('employee CLI rejects retired developer/repository writes and directs repos
  for(const input of [{name:'old',kind:'developer'},{name:'old',repository:null},{name:'old',repository:{url:'https://example.invalid/app.git'}}])assert.throws(()=>validateInput(input,resources.agents.schema));
  validateInput({name:'worker',kind:'business',systemPrompt:'按本次任务说明处理仓库。'},resources.agents.schema);
 });
+
+
+test('task progress help describes original employee recovery without granting a CLI retry operation', async () => {
+  const help = await execute(['tasks','progress','--help']);
+  assert.match(JSON.stringify(help), /原失败员工的投递与会话/);
+  await assert.rejects(execute(['tasks','retry']), /未知|不支持|命令/);
+});

@@ -262,8 +262,17 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     return { memberAgentIds: memberIds(input.memberAgentIds, { empty: true }) };
   }
   const taskReadModel = task => { const { teamId, team, ...record } = task; return clone({ ...record, memberAgentIds: task.memberAgentIds || [...(task.memberSnapshots || []).map(member => member.id), task.managerSnapshot?.id || task.managerAgentId].filter(Boolean) }); };
+  function recoverableFailedTraces(runId) {
+    const current = getRun(runId);
+    return state.traces.filter(trace => {
+      if (trace.runId !== runId || trace.status !== "failed" || trace.type === "inquiry") return false;
+      const delivery = state.dispatches.find(item => item.runId === runId && item.traceIds.includes(trace.id));
+      if (current.failure?.dispatchId && delivery?.id !== current.failure.dispatchId) return false;
+      return !delivery || (!delivery.interactionOnly && !delivery.escalatedAt && ["cancelled", "queued"].includes(delivery.status) && delivery.traceIds.at(-1) === trace.id);
+    });
+  }
   function failedBusinessTraces(runId) {
-    return state.traces.filter((trace) => trace.runId === runId && trace.status === "failed" && ["node", "instruction", "consultation"].includes(trace.type));
+    return recoverableFailedTraces(runId).filter(trace => ["node", "instruction", "consultation"].includes(trace.type));
   }
   function taskDeletionBlock(taskId) {
     const relatedRuns = state.runs.filter((run) => run.taskId === taskId);
@@ -278,15 +287,24 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   }
   function resumeFailedRun(current, task, nodeId, dedupeKey, event, enqueue) {
     if (state.traces.some((trace) => trace.runId === current.id && trace.status === "running") || state.dispatches.some((item) => item.runId === current.id && item.status === "claimed")) throw new Error("仍有活跃执行，不能重新启动失败 Run");
-    const cancelledDispatchIds = [];
-    for (const item of state.dispatches.filter((item) => item.runId === current.id && !["done", "cancelled"].includes(item.status))) {
-      item.status = "cancelled"; item.nextRetryAt = null; item.updatedAt = now(); cancelledDispatchIds.push(item.id);
-    }
+    const failedTrace = recoverableFailedTraces(current.id).filter(trace => trace.workflowNodeId === nodeId).at(-1);
+    const original = failedTrace && state.dispatches.find(item => item.traceIds.includes(failedTrace.id));
     current.completedAt = null; current.failure = null; current.status = "running";
     current.waitingConversationId = null; current.waitingNodeId = null; current.waitingAgentId = null;
     task.status = "running"; task.updatedAt = now();
-    const dispatch = enqueue(current.id, { recipientAgentId: current.manager.id, workflowNodeId: nodeId, purpose: "manager", messageIds: current.pendingMessageIds || [], dedupeKey });
-    addEvent({ ...event, runId: current.id, actor: humanMember, data: { ...event.data, dispatchId: dispatch.id, cancelledDispatchIds } });
+    // Resume the exact delivery so inbox references, consultation parents and the
+    // member's native session survive. Other pending work remains in the queue.
+    let dispatch = original;
+    if (dispatch) {
+      dispatch.status = "queued"; dispatch.nextRetryAt = null; dispatch.updatedAt = now();
+    } else if (failedTrace) {
+      dispatch = enqueue(current.id, { recipientAgentId: failedTrace.agentId, workflowNodeId: nodeId, purpose: failedTrace.type, messageIds: current.pendingMessageIds || [], dedupeKey });
+    } else {
+      dispatch = state.dispatches.find(item => item.runId === current.id && item.status === "queued" && !item.interactionOnly)
+        || enqueue(current.id, { recipientAgentId: current.manager.id, workflowNodeId: nodeId, purpose: "manager", messageIds: current.pendingMessageIds || [], dedupeKey });
+    }
+    current.pendingRetryDispatchId = dispatch.id;
+    addEvent({ ...event, runId: current.id, actor: humanMember, data: { ...event.data, dispatchId: dispatch.id, recipientAgentId: dispatch.recipientAgentId, cancelledDispatchIds: [] } });
     return clone(current);
   }
   return {
@@ -473,8 +491,11 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const current = getRun(runId);
       if (!current || getTask(current.taskId).archivedAt || state.dispatches.some((item) => item.runId === runId && item.status === "claimed")) return null;
       if (this.hasPendingHumanQuestion(runId)) return null;
-      const item = state.dispatches.find((item) => item.runId === runId && item.status === "queued" && (["planning", "running", "review"].includes(current.status) || item.interactionOnly) && (!item.nextRetryAt || Date.parse(item.nextRetryAt) <= Date.now()));
+      const ready = item => item.runId === runId && item.status === "queued" && (["planning", "running", "review"].includes(current.status) || item.interactionOnly) && (!item.nextRetryAt || Date.parse(item.nextRetryAt) <= Date.now());
+      const requested = find(state.dispatches, current.pendingRetryDispatchId);
+      const item = requested && ready(requested) ? requested : state.dispatches.find(ready);
       if (!item) return null;
+      if (current.pendingRetryDispatchId === item.id) delete current.pendingRetryDispatchId;
       item.status = "claimed"; item.attempts += 1; item.updatedAt = now(); save(); return clone(item);
     },
     attachDispatchTrace(dispatchId, traceId) {
@@ -497,7 +518,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         item.status = 'cancelled'; item.nextRetryAt = null; item.updatedAt = now(); item.lastError = String(error);
         item.lastErrorKind = failure?.kind; item.lastErrorSignature = failure?.signature; item.errorStreak = failure?.streak || 1;
         addEvent({ type: 'dispatch.retry_stopped', runId: item.runId, message: '自动重试已停止；请先排查原始错误，再由人类明确恢复。', data: { dispatchId, error: item.lastError, attempts: item.attempts, failureKind: failure?.kind } });
-        if (!item.interactionOnly && ['planning', 'running', 'review'].includes(current.status)) this.failRun(item.runId, item.lastError, 'runtime');
+        if (!item.interactionOnly && ['planning', 'running', 'review'].includes(current.status)) { this.failRun(item.runId, item.lastError, 'runtime'); current.failure.dispatchId = item.id; }
         return clone(item);
       });
     },
@@ -951,7 +972,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         const traceIds = failures.map((trace) => trace.id);
         return resumeFailedRun(current, task, nodeId, `manual-node-retry:${randomUUID()}`, {
           type: "run.retry_requested",
-          message: `人类请求项目经理重新评估「${nodeId}」的失败交付；历史 Trace 已保留。`,
+          message: `人类请求原员工继续「${nodeId}」的失败投递；原会话与历史 Trace 已保留。`,
           data: { workflowNodeId: nodeId, failedTraceIds: traceIds }
         }, this.enqueueDispatch.bind(this));
       });
@@ -963,12 +984,13 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         if (current.failure?.phase === "workspace_baseline_missing") throw new Error("工作目录基线缺失，旧 Run 不能安全重试；请核对文件并在干净工作区新建 Task/Run");
         const businessFailures = failedBusinessTraces(runId);
         if (businessFailures.length) throw new Error("存在失败的业务职责，请从该职责的恢复操作重新开始");
-        const failedTraceIds = state.traces.filter((trace) => trace.runId === runId && trace.status === "failed").map((trace) => trace.id);
-        const nodeId = current.currentFocus?.nodeId || task.workflowSnapshot.nodes[0].id;
+        const failures = recoverableFailedTraces(runId);
+        const failedTraceIds = failures.map(trace => trace.id);
+        const nodeId = failures.at(-1)?.workflowNodeId || current.currentFocus?.nodeId || task.workflowSnapshot.nodes[0].id;
         assertNode(current, nodeId);
         return resumeFailedRun(current, task, nodeId, `manual-orchestration-retry:${randomUUID()}`, {
           type: "run.orchestration_retry_requested",
-          message: "人类请求重新准备运行环境，并由项目经理基于保留事实重新评估。",
+          message: "人类请求重新准备运行环境，继续原失败投递或待执行队列。",
           data: { failedTraceIds }
         }, this.enqueueDispatch.bind(this));
       });

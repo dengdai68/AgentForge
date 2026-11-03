@@ -810,3 +810,75 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   assert.ok(store.getRunWorkspace(run3.id).messages.some(item => item.content === "这不是合法JSON"));
   assert.equal(store.timeline(run3.id).some(item => item.type === "dispatch.escalated"), false);
 });
+
+test('manual recovery resumes the failed delivery and native member session without cancelling pending work', () => {
+  for (const purpose of ['node', 'instruction', 'consultation', 'manager']) {
+    const store = createFixtureStore();
+    try {
+      const run = store.createRun(store.listTasks()[0].id);
+      store.updateRun(run.id, {status:'running'}); store.setTaskStatus(run.taskId,'running');
+      const agentId = purpose === 'manager' ? run.manager.id : 'agent_analyst';
+      const parent = purpose === 'consultation' ? store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager'}) : null;
+      if (parent) { store.claimDispatch(run.id); store.completeDispatch(parent.id); }
+      const message = store.addMessage({runId:run.id,recipientAgentId:agentId,content:'Keep original assignment'});
+      const delivery = store.enqueueDispatch(run.id,{recipientAgentId:agentId,workflowNodeId:'requirements',purpose,messageIds:[message.id],sourceMessageId:message.id,parentDispatchId:parent?.id});
+      store.claimDispatch(run.id);
+      const trace=store.createTrace(run.id,{agentId,workflowNodeId:'requirements',type:purpose});store.attachDispatchTrace(delivery.id,trace.id);
+      const session=store.prepareMemberSession(delivery.id,trace.id,store.getRunTask(run.id).workspacePath);
+      const pending=store.enqueueDispatch(run.id,{recipientAgentId:'agent_tester',workflowNodeId:'testing',purpose:'node'});
+      store.completeTrace(trace.id,{status:'failed',error:'401 token expired'});store.stopFailedDispatch(delivery.id,'401 token expired',{kind:'provider'});
+      const saved=store.getDispatch(delivery.id);
+      assert.equal(store.getRun(run.id).failure.dispatchId,delivery.id);
+      const retry=()=>purpose==='manager'?store.retryFailedOrchestration(run.id):store.retryFailedNode(run.id,'requirements');
+      retry();assert.throws(retry,/失败 Run/);
+      assert.equal(store.getDispatch(pending.id).status,'queued');
+      const resumed=store.claimDispatch(run.id); assert.equal(resumed.id,delivery.id);assert.equal(resumed.recipientAgentId,agentId);
+      assert.deepEqual(resumed.messageIds,saved.messageIds);assert.equal(resumed.sourceMessageId,saved.sourceMessageId);assert.equal(resumed.parentDispatchId,saved.parentDispatchId);
+      assert.equal(resumed.attempts,2);assert.equal(resumed.lastError,saved.lastError);assert.deepEqual(resumed.traceIds,[trace.id]);
+      const next=store.createTrace(run.id,{agentId,workflowNodeId:'requirements',type:purpose});store.attachDispatchTrace(delivery.id,next.id);
+      const continuation=store.prepareMemberSession(delivery.id,next.id,store.getRunTask(run.id).workspacePath);
+      assert.equal(continuation.sessionId,session.sessionId);assert.equal(continuation.resume,true);
+      store.completeTrace(next.id,{status:'failed',error:'quota exceeded'});store.stopFailedDispatch(delivery.id,'quota exceeded',{kind:'provider'});
+      assert.equal(store.getRun(run.id).status,'failed');retry();assert.equal(store.claimDispatch(run.id).id,delivery.id);
+    } finally {store.close();}
+  }
+});
+
+test('completed historical worker errors cannot redirect recovery away from a failed manager',()=>{
+  const store=createFixtureStore();
+  try {
+    const run=store.createRun(store.listTasks()[0].id);store.updateRun(run.id,{status:'running'});store.setTaskStatus(run.taskId,'running');
+    const worker=store.enqueueDispatch(run.id,{recipientAgentId:'agent_analyst',workflowNodeId:'requirements',purpose:'node'});store.claimDispatch(run.id);
+    const t=store.createTrace(run.id,{agentId:'agent_analyst',workflowNodeId:'requirements',type:'node'});store.attachDispatchTrace(worker.id,t.id);store.completeTrace(t.id,{status:'failed',error:'503 unavailable'});store.retryDispatch(worker.id,'503 unavailable',0);store.claimDispatch(run.id);store.completeDispatch(worker.id);
+    const manager=store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'design',purpose:'manager'});store.claimDispatch(run.id);
+    const mt=store.createTrace(run.id,{agentId:run.manager.id,workflowNodeId:'design',type:'manager'});store.attachDispatchTrace(manager.id,mt.id);store.completeTrace(mt.id,{status:'failed',error:'quota exceeded'});store.stopFailedDispatch(manager.id,'quota exceeded',{kind:'provider'});
+    assert.throws(()=>store.retryFailedNode(run.id,'requirements'),/没有可恢复/);store.retryFailedOrchestration(run.id);assert.equal(store.claimDispatch(run.id).id,manager.id);assert.equal(store.getDispatch(worker.id).status,'done');
+  }finally{store.close();}
+});
+
+test('explicit recovery takes priority over an older queued manager and survives reopening the Store',()=>{
+  const root=mkdtempSync(join(tmpdir(),'af-manual-recovery-')),databasePath=join(root,'state.sqlite');let store=createFixtureStore({databasePath});
+  try{
+    const run=store.createRun(store.listTasks()[0].id);store.updateRun(run.id,{status:'running'});store.setTaskStatus(run.taskId,'running');
+    const earlier=store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager'});store.claimDispatch(run.id);store.retryDispatch(earlier.id,'temporary manager outage',300000);
+    const work=store.enqueueDispatch(run.id,{recipientAgentId:'agent_analyst',workflowNodeId:'requirements',purpose:'node'});store.claimDispatch(run.id);
+    const trace=store.createTrace(run.id,{agentId:'agent_analyst',workflowNodeId:'requirements',type:'node'});store.attachDispatchTrace(work.id,trace.id);store.completeTrace(trace.id,{status:'failed',error:'quota exceeded'});store.stopFailedDispatch(work.id,'quota exceeded',{kind:'provider'});
+    store.retryFailedNode(run.id,'requirements');store.retryScheduledDispatches(run.id);store.close();store=createFixtureStore({databasePath});
+    assert.equal(store.claimDispatch(run.id).id,work.id);assert.equal(store.getDispatch(earlier.id).status,'queued');assert.equal(store.getRun(run.id).pendingRetryDispatchId,undefined);
+  }finally{store.close();}
+});
+
+test('retrying a failed consulted employee preserves the suspended parent and returns its answer',()=>{
+  const store=createFixtureStore();
+  try{
+    const run=store.createRun(store.listTasks()[0].id);store.updateRun(run.id,{status:'running'});store.setTaskStatus(run.taskId,'running');
+    const parent=store.enqueueDispatch(run.id,{recipientAgentId:'agent_engineer',workflowNodeId:'development',purpose:'node'});store.claimDispatch(run.id);
+    const pt=store.createTrace(run.id,{agentId:'agent_engineer',workflowNodeId:'development',type:'node'});store.attachDispatchTrace(parent.id,pt.id);
+    const question=store.askQuestion(parent.id,{audience:'agent',recipientAgentId:'agent_tester',question:'Please verify the test case'},pt.id);store.completeTrace(pt.id);
+    const child=store.claimDispatch(run.id),ct=store.createTrace(run.id,{agentId:'agent_tester',workflowNodeId:child.workflowNodeId,type:'consultation'});store.attachDispatchTrace(child.id,ct.id);store.completeTrace(ct.id,{status:'failed',error:'401 expired'});store.stopFailedDispatch(child.id,'401 expired',{kind:'provider'});
+    store.retryFailedNode(run.id,child.workflowNodeId);assert.equal(store.getDispatch(parent.id).status,'waiting');assert.equal(store.claimDispatch(run.id).id,child.id);
+    const next=store.createTrace(run.id,{agentId:'agent_tester',workflowNodeId:child.workflowNodeId,type:'consultation'});store.attachDispatchTrace(child.id,next.id);
+    store.answerQuestion(run.id,question.id,'Verified',{type:'agent',id:'agent_tester',name:'Tester'},next.id);store.completeTrace(next.id);store.completeDispatch(child.id);
+    assert.equal(store.claimDispatch(run.id).id,parent.id);
+  }finally{store.close();}
+});

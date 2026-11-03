@@ -1008,7 +1008,7 @@ test("human retry now clears a scheduled backoff without rewriting failed eviden
   assert.throws(() => store.retryScheduledDispatches(run.id), /当前没有等待退避/);
 });
 
-test("failed Run recovery preserves failed evidence and queues a manager reassessment", () => {
+test("failed Run recovery preserves failed evidence and resumes the original employee", () => {
   const store = createStore(), run = store.createRun(fixtureTaskInput(store).id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
   const delivery = store.enqueueDispatch(run.id, { recipientAgentId: "agent_analyst", workflowNodeId: "requirements", purpose: "node", dedupeKey: "failed-requirements" });
@@ -1024,24 +1024,25 @@ test("failed Run recovery preserves failed evidence and queues a manager reasses
   assert.throws(() => store.retryFailedOrchestration(run.id), /失败的业务职责/);
   assert.throws(() => store.retryFailedNode(run.id, "design"), /没有可恢复/);
   store.retryFailedNode(run.id, "requirements");
-  const dispatches = store.listDispatches(run.id), recovery = dispatches.find((item) => item.purpose === "manager" && item.status === "queued");
+  const recovery = store.getDispatch(delivery.id);
   assert.equal(store.getRun(run.id).status, "running");
   assert.equal(store.getRunTask(run.id).status, "running");
   assert.equal(store.getRun(run.id).failure, null);
-  assert.equal(store.getDispatch(delivery.id).status, "cancelled");
+  assert.equal(store.getDispatch(delivery.id).status, "queued");
+  assert.equal(recovery.recipientAgentId, "agent_analyst");
   assert.equal(recovery.workflowNodeId, "requirements");
   store.failRun(run.id, "恢复时运行文件仍未准备好。", "workspace_preparation");
   store.retryFailedNode(run.id, "requirements");
-  const retryRecovery = store.listDispatches(run.id).find((item) => item.purpose === "manager" && item.status === "queued");
-  assert.notEqual(retryRecovery.id, recovery.id);
-  assert.equal(store.getDispatch(recovery.id).status, "cancelled");
+  const retryRecovery = store.getDispatch(delivery.id);
+  assert.equal(retryRecovery.id, recovery.id);
+  assert.equal(store.getDispatch(recovery.id).status, "queued");
   assert.equal(store.claimDispatch(run.id).id, retryRecovery.id);
   const retries = store.timeline(run.id).filter((event) => event.type === "run.retry_requested");
   assert.deepEqual(retries.map((event) => event.data.failedTraceIds), [[trace.id], [trace.id]]);
-  assert.deepEqual(retries.map((event) => event.data.cancelledDispatchIds), [[delivery.id], [recovery.id]]);
+  assert.deepEqual(retries.map((event) => event.data.cancelledDispatchIds), [[], []]);
 });
 
-test("orchestration recovery replaces a cancelled manager dispatch after another preparation failure", () => {
+test("orchestration recovery retains its queued delivery after another preparation failure", () => {
   const store = createStore(), run = store.createRun(fixtureTaskInput(store).id);
   store.updateRun(run.id, { status: "failed" }); store.setTaskStatus(run.taskId, "blocked");
   store.retryFailedOrchestration(run.id);
@@ -1049,8 +1050,8 @@ test("orchestration recovery replaces a cancelled manager dispatch after another
   store.failRun(run.id, "运行文件仍未准备好。", "workspace_preparation");
   store.retryFailedOrchestration(run.id);
   const second = store.listDispatches(run.id).find((item) => item.purpose === "manager" && item.status === "queued");
-  assert.notEqual(second.id, first.id);
-  assert.equal(store.getDispatch(first.id).status, "cancelled");
+  assert.equal(second.id, first.id);
+  assert.equal(store.getDispatch(first.id).status, "queued");
   assert.equal(store.claimDispatch(run.id).id, second.id);
 });
 
@@ -1812,6 +1813,12 @@ test("Console exposes immediate retry only for executable scheduled Dispatches",
   assert.deepEqual(retryableDispatches({ run: { status: "running", task: { archivedAt: "2026-09-21T00:00:00.000Z" } }, dispatches: [scheduled] }), []);
   assert.deepEqual(failedRunRecovery({ run: { status: "failed", task: {} }, traces: [{ status: "failed", type: "node", workflowNodeId: "requirements" }] }), { type: "node", nodeIds: ["requirements"] });
   assert.deepEqual(failedRunRecovery({ run: { status: "failed", task: {} }, traces: [{ status: "failed", type: "manager", workflowNodeId: "requirements" }] }), { type: "orchestration", nodeIds: [] });
+  const oldFailure = {id:"old", status:"failed", type:"node", workflowNodeId:"requirements"};
+  const currentFailure = {id:"current", status:"failed", type:"node", workflowNodeId:"testing"};
+  const recoveryWorkspace = {run:{status:"failed",task:{},failure:{dispatchId:"active"}},traces:[oldFailure,currentFailure],dispatches:[{id:"done",status:"done",traceIds:["old"]},{id:"active",status:"cancelled",traceIds:["current"]}]};
+  assert.deepEqual(failedRunRecovery(recoveryWorkspace),{type:"node",nodeIds:["testing"]});
+  recoveryWorkspace.traces[1]={...currentFailure,type:"manager"};
+  assert.deepEqual(failedRunRecovery(recoveryWorkspace),{type:"orchestration",nodeIds:[]});
   assert.equal(failedRunRecovery({ run: { status: "failed", task: { archivedAt: "2026-09-21T00:00:00.000Z" } }, traces: [] }), null);
   assert.equal(failedRunMessage({ run: { status: "failed", failure: { message: "运行文件尚未准备好" } }, traces: [] }), "运行文件尚未准备好");
   assert.equal(failedRunRecovery({ run: { status: "failed", failure: { phase: "workspace_baseline_missing" }, task: {} }, traces: [{ status: "failed", type: "node", workflowNodeId: "requirements" }] }), null);

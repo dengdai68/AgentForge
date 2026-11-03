@@ -271,7 +271,8 @@
       "extensionContract": "plugins list/get/import/delete, mcps list/get/create/delete and employee pluginIds/mcpIds; authenticated removal rejects current employee references and preserves frozen files. Claude/Codex local and remote Git marketplace entries install atomically; list shows supported Runtime names while get discloses compatibility/reasons. Progressive help/schema describe unsupported source types and Codex-only cwd/env_vars MCP fields. No individual Skill or employee mcpJson input. Source-internal links materialize on installation; progressive help/schema explain per-plugin/path failures and atomic rollback for dangling, cyclic, escaping or special files.",
       "connectionContract": "Client-only: source and packaged CLI verify one private live endpoint before session access; no target flag, Web default or fallback. One private cli-session.json; offline help/validation remain offline.",
       "fixedRuntimes": "list/get/update/test/models only; model/effort/enabled patch and fixed provider references. Default uses a host-published parent-session-linked credential after endpoint/instance verification; explicit session-file isolates separate login.",
-      "employeeConfiguration": "agents help/schema accept business/manager and prompt-based repository guidance; developer/repository writes reject and retired repository metadata is omitted from current employee output. No new ordinary-chat CLI commands."
+      "employeeConfiguration": "agents help/schema accept business/manager and prompt-based repository guidance; developer/repository writes reject and retired repository metadata is omitted from current employee output. No new ordinary-chat CLI commands.",
+      "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action."
     },
     {
       "id": "server.data-reset",
@@ -730,7 +731,8 @@
       "humanMessageRouting": "submitHumanMessage defaults an omitted/null recipientAgentId to the frozen Run manager; explicit members are validated, exact question replies retain priority, terminal runs remain inquiry-only and archived tasks read-only.",
       "roleProtocol": "roleIds is ordered, unique, existence-validated; roleSnapshots freeze all text. Old roleId input rejects; loaded nonempty old bindings require explicit operator preparation, no migration/reset. Frozen historical roleSnapshot retains its original text.",
       "employeeTypeContract": "Current kind accepts only business/manager and repository writes reject. Explicit employee edits drop retired repository metadata; no startup migration or reset. New Tasks freeze no repository sources/bindings and use the shared Run root. Existing frozen repository snapshots keep their original preparation/cwd facts.",
-      "membershipContract": "Tasks freeze independent memberAgentIds with exactly one active manager; no teamId input. Teams are employee collections and need no manager. Employee deletion marks status=deleted/deletedAt, hides current directories and detaches current memberships; frozen in-flight tasks/history remain. See docs/03-domain-model.md."
+      "membershipContract": "Tasks freeze independent memberAgentIds with exactly one active manager; no teamId input. Teams are employee collections and need no manager. Employee deletion marks status=deleted/deletedAt, hides current directories and detaches current memberships; frozen in-flight tasks/history remain. See docs/03-domain-model.md.",
+      "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action."
     },
     {
       "id": "server.sqlite-persistence",
@@ -1105,7 +1107,8 @@
       "applicationUpdates": "One Settings/updates tab directly contains application and plugin configuration sections using the standard settings heading level, without a repeated Updates title. Application state/progress/actions are inline only; download percent follows the native progress bar on one unboxed row and the separate note is hidden while downloading; a compact GitHub text link follows the current version and survives status refreshes. Plugin settings preserve drafts and pause hidden-page polling. No notification cards, renderer URL/path arguments or CLI expansion.",
       "employeeMultiSelect": "marketplace.mjs createEmployeeMultiSelect is shared by roles/plugins/MCP: removable chips and searchable input share one field border, wrap inside it, and use continuous hover/focus/keyboard behavior; no role numbering or priority/reorder controls. HTTP/CLI binding arrays and frozen facts unchanged.",
       "employeeConfiguration": "Employee forms offer ordinary workers and managers only, without repository inputs; cards do not show a developer/bound-repository badge. Chat renders direct replies without handoff labels; saved history is not rewritten.",
-      "configurationPresentation": "MCP cards hide internal installation IDs; plugin cards show actual versions only. Employee system prompts and shared role prompts use eight visible rows for create/edit. HTTP/CLI references and payloads unchanged."
+      "configurationPresentation": "MCP cards hide internal installation IDs; plugin cards show actual versions only. Employee system prompts and shared role prompts use eight visible rows for create/edit. HTTP/CLI references and payloads unchanged.",
+      "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action."
     },
     {
       "id": "web.manual-graphs",
@@ -1184,7 +1187,8 @@
           "coverage gap",
           "new contract"
         ]
-      }
+      },
+      "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action."
     },
     {
       "id": "docs",
@@ -1271,7 +1275,12 @@
         "path": "scripts/test-communication-direct-real.mjs",
         "purpose": "Isolated real Claude/Codex/DeepSeek communication verifies replacement of a legacy handoff schema in the same native session, reply-only outputs and no automatic group child delivery."
       },
-      "configurationPresentationVerification": "test-roles-ui checks eight actual text lines in prompt editors across themes/window sizes and removes MCP short IDs without changing reference IDs."
+      "configurationPresentationVerification": "test-roles-ui checks eight actual text lines in prompt editors across themes/window sizes and removes MCP short IDs without changing reference IDs.",
+      "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action.",
+      "taskRetryReal": {
+        "path": "scripts/test-task-retry-real.mjs",
+        "purpose": "Isolated Electron real Claude manager/worker task: inject one worker process failure after a real turn, click retry in the UI, verify same Dispatch/native session, execute delivered code tests, query CLI progress and visibly confirm completion."
+      }
     },
     {
       "id": "web.floating-list",

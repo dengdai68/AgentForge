@@ -69,14 +69,19 @@ function failedRunRecovery(workspace = {}) {
   const run = workspace.run;
   if (!run || run.status !== "failed" || run.task?.archivedAt) return null;
   if (run.failure?.phase === "workspace_baseline_missing") return null;
-  const nodeIds = [...new Set((workspace.traces || []).filter((trace) => trace.status === "failed" && ["node", "instruction", "consultation"].includes(trace.type)).map((trace) => trace.workflowNodeId))];
+  const nodeIds = [...new Set((workspace.traces || []).filter(trace => {
+    if (trace.status !== "failed" || !["node", "instruction", "consultation"].includes(trace.type)) return false;
+    const delivery = (workspace.dispatches || []).find(item => item.traceIds.includes(trace.id));
+    if (run.failure?.dispatchId && delivery?.id !== run.failure.dispatchId) return false;
+    return !delivery || (!delivery.interactionOnly && !delivery.escalatedAt && ["cancelled", "queued"].includes(delivery.status) && delivery.traceIds.at(-1) === trace.id);
+  }).map(trace => trace.workflowNodeId))];
   return nodeIds.length ? { type: "node", nodeIds } : { type: "orchestration", nodeIds: [] };
 }
 function failedRunMessage(workspace = {}) {
   const failure = workspace.run?.failure;
   if (failure?.message) return failure.message;
   return failedRunRecovery(workspace)?.type === "node"
-    ? "已有失败的业务 Trace；请选择需要由项目经理重新评估的职责。"
+    ? "已有失败的业务 Trace；请选择需要由原员工继续的职责。"
     : "本轮没有完成；请查看保留的 Trace 与协作记录。";
 }
 function acceptanceReview(workspace = {}, { history = false } = {}) {
@@ -962,17 +967,17 @@ function renderWorkspace() {
         ${pill(run.status)}
         ${acceptance?.verified ? `<button class="primary-button compact" data-open-completion-confirm="${esc(run.id)}">确认完成</button>` : ""}
         ${scheduledRetries.length ? `<button class="small-button amber" data-retry-scheduled="${run.id}" title="立即启动等待退避的调用；失败 Trace 与原投递会保留。">立即重试 ${scheduledRetries.length} 项调用</button>` : ""}
-        ${failedRecovery?.type === "orchestration" ? `<button class="small-button amber" data-retry-orchestration="${run.id}" title="重新准备运行环境，并由项目经理基于保留事实重新评估。">修复后重新尝试</button>` : ""}
+        ${failedRecovery?.type === "orchestration" ? `<button class="small-button amber" data-retry-orchestration="${run.id}" title="重新准备运行环境，继续原失败投递或待执行队列。">修复后重新尝试</button>` : ""}
         ${failedRecovery?.type === "node" ? failedRecovery.nodeIds.map((nodeId) => {
           const node = run.task.workflowSnapshot.nodes.find((item) => item.id === nodeId);
-          return `<button class="small-button amber" data-retry-failed-node="${run.id}" data-workflow-node-id="${esc(nodeId)}" title="由项目经理重新评估此职责；历史 Trace 与产物会保留。">从「${esc(node?.title || nodeId)}」恢复</button>`;
+          return `<button class="small-button amber" data-retry-failed-node="${run.id}" data-workflow-node-id="${esc(nodeId)}" title="由原员工继续失败投递；原会话、历史 Trace 与产物会保留。">从「${esc(node?.title || nodeId)}」恢复</button>`;
         }).join("") : ""}
         ${activeStatus ? `<button class="small-button amber" data-pause-run="${run.id}">Ⅱ 暂停</button><button class="danger-button" data-terminate-run="${run.id}">■ 终止 Run</button>` : run.status === "paused" ? `<button class="small-button primary" data-resume-run="${run.id}">▶ 继续 Run</button><button class="danger-button" data-terminate-run="${run.id}">■ 终止 Run</button>` : run.status === "awaiting_acceptance" ? `<button class="danger-button" data-terminate-run="${run.id}">■ 终止 Run</button>` : ""}
       </div>
     </div>
     <div class="workspace-body ${view.detailsOpen ? "details-open" : ""}">
     <div class="workspace-main">
-    ${failureMessage ? `<div class="workspace-failure" role="alert"><strong>本轮未完成</strong><span>${esc(failureMessage)}</span><small>${run.failure?.phase === "workspace_baseline_missing" ? "旧 Run、Trace 和 Artifact 保留供核对；此 Run 无法安全重试。" : failedRecovery ? "修复原因后可请求项目经理重新评估；历史 Trace、产物和消息都会保留。" : "任务已归档，不能重新启动。"}</small>${run.failure?.phase === "workspace_baseline_missing" ? '<button class="small-button" data-action="new-task">新建任务</button>' : ""}</div>` : ""}
+    ${failureMessage ? `<div class="workspace-failure" role="alert"><strong>本轮未完成</strong><span>${esc(failureMessage)}</span><small>${run.failure?.phase === "workspace_baseline_missing" ? "旧 Run、Trace 和 Artifact 保留供核对；此 Run 无法安全重试。" : failedRecovery ? "修复原因后可重试原员工的失败投递；原会话、历史 Trace、产物和消息都会保留。" : "任务已归档，不能重新启动。"}</small>${run.failure?.phase === "workspace_baseline_missing" ? '<button class="small-button" data-action="new-task">新建任务</button>' : ""}</div>` : ""}
     <div class="ws-tabs workspace-mode-tabs" role="tablist" aria-label="任务工作区">
       <button id="collaboration-mode" class="ws-tab ${tab === "collaboration" ? "active" : ""}" data-ws-tab="collaboration" role="tab" aria-controls="collaboration-panel" aria-selected="${tab === "collaboration"}">协作记录${workspace.pendingQuestions?.some((item) => item.recipient.type === "human") ? `<span class="collaboration-unread">${workspace.pendingQuestions.filter((item) => item.recipient.type === "human").length} 待你回复</span>` : ""}</button>
       <button id="directory-mode" class="ws-tab ${["directory", "diff"].includes(tab) ? "active" : ""}" data-ws-tab="directory" role="tab" aria-controls="working-directory-panel working-diff-panel" aria-selected="${["directory", "diff"].includes(tab)}">工作目录</button>
@@ -1959,7 +1964,7 @@ async function retryScheduledWorkspace(runId) {
 async function retryFailedWorkspace(runId, workflowNodeId) {
   try {
     await api(`/api/runs/${runId}/retry-failed-node`, { method: "POST", body: JSON.stringify({ workflowNodeId }) });
-    toast("已请求项目经理重新评估失败职责；历史证据已保留。");
+    toast("已请求原员工继续失败投递；原会话与历史证据已保留。");
     await refresh({ quiet: true });
     if (state.selectedRunId === runId) await loadWorkspace(runId);
   } catch (error) { toast(error.message, true); }
@@ -1967,7 +1972,7 @@ async function retryFailedWorkspace(runId, workflowNodeId) {
 async function retryFailedOrchestration(runId) {
   try {
     await api(`/api/runs/${runId}/retry-orchestration`, { method: "POST", body: "{}" });
-    toast("已请求重新准备运行环境，并由项目经理重新评估。");
+    toast("已请求重新准备运行环境并继续原投递。");
     await refresh({ quiet: true });
     if (state.selectedRunId === runId) await loadWorkspace(runId);
   } catch (error) { toast(error.message, true); }
