@@ -95,7 +95,7 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 - 工作目录：当前文件与 CHANGE 共用 `workingFileTree`；不再提供交付版本页面，历史文件仍由 Run Files/API/CLI 管理。提示词组装、澄清与新指令的代码路径见 [提示词组装](22-prompt-assembly.md)。
 - 文件下载：`web/app.js` 的下载命令 → 认证 `content?download=1` → Run Files 的共享路径校验和流式读取；根目录间距使用 界面中两个文件面板共享的样式。现有 CLI 查询 Artifact 历史，不包含当前文件下载命令，本轮不扩展 CLI 权限或协议。
 - 新增模块：先更新注册表；契约变化同步 source of truth、测试和变更记录。
-- CHANGE 空态由 `renderWorkingChanges` 统一呈现，目录下不重复显示无更改；保留读取错误与 Git 未初始化提示，CLI/API 不受影响。
+- `renderWorkingChanges` 与 `directoryPageMarkup` 保持左侧纯目录树，不展示空态和说明段落；读取错误移至树外，右侧预览保留比较基准，CLI/API 不受影响。
 
 发布检查：`scripts/test-packaged-electron.mjs` 验证控制台默认选择最近执行者，再显式切换员工读取历史；无选择时不再期待旧的空白提示，仍触发真实按需加载。沟通夹具创建独立群聊，并按实际输出 schema 区分私聊 reply 与群聊 mentionAgentIds。
 
@@ -158,3 +158,5 @@ ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别�
 Runtime 启动恢复：local-cli/codex-app-server 在原生会话建立前识别鉴权失败并结束，communication-store 失败只等显式重试。web/communication 提供失败重试入口和蓝色控制台选中态；web/app/styles 同步描述字号与无文字目录加载。真实验收见 scripts/test-codex-login-recovery-real.mjs。
 
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
+
+当前文件与 CHANGE 左侧目录树仅展示文件/目录及必要操作，移除空目录、展开后读取、无更改、仓库基准等提示段落及 CHANGE 解释副标题；实际读取错误移至树外，比较基准保留在右侧预览头部。仅展示变更，无 CLI/API 协议变化。

@@ -1122,7 +1122,8 @@
       "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action.",
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
       "communicationRecovery": "Failed replies expose console/retry actions; selected console icons use accent blue. Description/path typography matches and directory loading uses accessible visual indicators.",
-      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
+      "directoryTreePresentation": "Current files and CHANGE left trees contain entries and operational controls only; no explanatory, empty-directory, missing-baseline or no-change paragraphs. Actual read errors appear outside the tree; diff baseline remains in the preview header."
     },
     {
       "id": "web.manual-graphs",

@@ -358,7 +358,7 @@ test('CHANGE is independent of the current-file directory page and can show dele
   assert.deepEqual(view.changes,{repositories:[]});assert.equal(view.changesLoading, false);assert.equal(view.changesError,null);
 });
 
-test('CHANGE omits per-directory no-change labels and only declares a truthful overall empty state', async () => {
+test('CHANGE keeps its tree free of explanatory text and surfaces read errors outside it', async () => {
   const source = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
   const view = { changes: { repositories: [] } }, tree = { scrollTop: 0 };
   const host = { innerHTML: '', dataset: {}, querySelector: () => tree };
@@ -375,10 +375,10 @@ test('CHANGE omits per-directory no-change labels and only declares a truthful o
     assert.ok([...host.innerHTML.matchAll(/<section class="artifact-root">(.*?)<\/section>/g)].every(match => !match[1].includes('没有更改')));
   };
   check([repo(''), repo('repos/clean'), repo('repos/changed', [{ path: 'repos/changed/a.js', status: 'M' }])], 0);
-  check([repo(''), repo('repos/clean')], 1);
-  assert.match(host.innerHTML, /role="status" data-changes-empty/);
+  check([repo(''), repo('repos/clean')], 0);
+  assert.doesNotMatch(host.innerHTML, /data-changes-empty/);
   check([repo(''), repo('repos/broken', [], { error: '读取失败' })], 0); assert.match(host.innerHTML, /读取失败/);
-  check([repo('', [], { initialized: false })], 0); assert.match(host.innerHTML, /尚未初始化 Git/);
+  check([repo('', [], { initialized: false })], 0); assert.doesNotMatch(host.innerHTML, /尚未初始化 Git/);
   check([repo('')], 0, { changesLoading: true });
   check([repo('')], 0, { changesError: '请求失败' });
   check([], 0);
