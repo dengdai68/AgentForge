@@ -358,10 +358,9 @@ export function roleExecutionStatus(run = {}, traces = [], agentId) {
   };
 }
 
-export function workflowFocus(run = {}, traces = [], defects = []) {
+export function workflowFocus(run = {}, traces = []) {
   const focus = {};
   for (const trace of asArray(traces)) if (trace.workflowNodeId && trace.agentId !== run.manager?.id) focus[trace.workflowNodeId] = trace.status === "running" ? "active" : "recent";
-  for (const defect of asArray(defects).filter((item) => item.status !== "closed")) for (const nodeId of asArray(defect.affectedNodeIds)) focus[nodeId] = "attention";
   if (run.waitingNodeId) focus[run.waitingNodeId] = run.status === "awaiting_human" ? "waiting_human" : "waiting_agent";
   if (run.currentFocus?.nodeId && !run.waitingNodeId && !asArray(traces).some((trace) => trace.workflowNodeId === run.currentFocus.nodeId && trace.status === "running")) focus[run.currentFocus.nodeId] = "current";
   return focus;

@@ -146,7 +146,7 @@ const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
 writeFileSync(${JSON.stringify(capture)}, prompt);
-const result = { kind: "node_result", summary: "need human clarification", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: true, consultation: { audience: "human", recipientAgentId: "", question: "确认下一步", questionType: "scope", routingReason: "需人类确认", consideredMemberIds: ["agent_analyst"] }, inputAssessment: { sufficient: false, sourceNodeIds: [], rationale: "需澄清", missingEvidence: ["人类范围"] }, deliveryReview: null, managerDecision: null };
+const result = { kind: "node_result", summary: "need human clarification", artifacts: [], decisions: [], needsHuman: true, consultation: { audience: "human", recipientAgentId: "", question: "确认下一步", questionType: "scope", routingReason: "需人类确认", consideredMemberIds: ["agent_analyst"] }, inputAssessment: { sufficient: false, sourceNodeIds: [], rationale: "需澄清", missingEvidence: ["人类范围"] }, deliveryReview: null, managerDecision: null };
 console.log(JSON.stringify({ type: "result", result: JSON.stringify(result) }));
 `);
   await chmod(executable, 0o755);
@@ -562,7 +562,7 @@ const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
 const promptHash = createHash("sha256").update(prompt, "utf8").digest("hex");
-const out = { kind: "node_result", summary: "fixture 交付", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入充分", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "fixture 交付", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入充分", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes("任务：失败重试代码")) {
   if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdict: "pass", restartFromNodeId: "", findings: ["源码、测试和报告均已接纳"] };
   else if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "development", nextAgentId: "agent_engineer", rationale: "核对代码交付" };
@@ -738,7 +738,7 @@ const userPrompt = process.argv.at(-1) || "";
 const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
-const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入充分", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入充分", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes('"purpose":"delivery_review"')) {
   out.deliveryReview = { verdict: "pass", restartFromNodeId: "testing", findings: ["团队已修复并复核真实交付"] };
 } else if (prompt.includes("任务级项目经理") && prompt.includes("确定性工作区失败")) {

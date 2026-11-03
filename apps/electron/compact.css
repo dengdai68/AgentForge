@@ -283,11 +283,9 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 #run-workspace .directory-toolbar > div { min-width:0; flex:1; }
 #run-workspace .directory-toolbar > .directory-actions { flex:0 0 auto; justify-content:flex-end; }
 #run-workspace .directory-toolbar > button { flex-shrink:0; white-space:nowrap; }
-.quality-risk-count { background:var(--surface-soft); color:var(--muted); }
 #run-workspace .artifact-tree-file:hover { background:var(--desktop-hover); }
 #run-workspace .artifact-tree-file.selected { background:var(--selection-bg); box-shadow:inset 2px 0 var(--ink); }
-.quality-risk-panel { padding:10px 12px; border:1px solid var(--line); border-left:2px solid var(--amber); border-radius:5px; box-shadow:none; }
-.defect-risk-card,.human-acceptance-card,.human-acceptance-dialog { border-radius:6px; box-shadow:none; }
+.human-acceptance-card,.human-acceptance-dialog { border-radius:6px; box-shadow:none; }
 #run-workspace .workspace-acceptance { background:var(--surface-soft); color:var(--ink); border:1px solid var(--line); }
 #run-workspace .workspace-acceptance.incomplete { background:#fff8e7; color:#805500; }
 #run-workspace .workspace-acceptance-kicker,#run-workspace .workspace-acceptance p,#run-workspace .workspace-acceptance strong,#run-workspace .workspace-acceptance li,#run-workspace .workspace-acceptance-actions > span { color:inherit; }

@@ -19,7 +19,7 @@ function catalogSnapshot() {
       { id: "bug_fix", system: true, name: "缺陷修复", description: "测试目录：复现、设计、修复与验证。", nodes: [fixtureNode("reproduce", "问题复现", "测试工程师", []), fixtureNode("fix_design", "修复方案", "产品设计师", ["reproduce"]), fixtureNode("fix_implementation", "修复实现", "研发工程师", ["fix_design"]), fixtureNode("verify_fix", "修复验证", "测试工程师", ["fix_implementation"])] },
       { id: "content_delivery", system: true, name: "内容交付", description: "测试目录：内容简报、创作编辑与独立审校。", nodes: [fixtureNode("content_brief", "内容简报与验收标准", "需求分析师", [], { artifactPaths: ["docs/content-brief/"] }), fixtureNode("content_creation", "内容创作与编辑", "产品设计师", ["content_brief"], { artifactPaths: ["docs/content/"] }), fixtureNode("content_review", "内容审校与质量核查", "测试工程师", ["content_creation"], { artifactPaths: ["docs/content-review/"] })] }
     ],
-    tasks: [], runs: [], traces: [], artifacts: [], messages: [], decisions: [], defects: [], events: []
+    tasks: [], runs: [], traces: [], artifacts: [], messages: [], decisions: [], events: []
   };
 }
 

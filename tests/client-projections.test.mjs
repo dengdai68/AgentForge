@@ -255,11 +255,10 @@ test("shared client projections tolerate incomplete workspace read models", () =
       currentFocus: { nodeId: "requirements" }
     },
     traces: [{ workflowNodeId: "requirements", agentId: "analyst", status: "running", agent: analyst }],
-    defects: [{ status: "open", affectedNodeIds: ["requirements"] }],
     messages: [], dispatches: [], events: []
   };
   assert.deepEqual(workspaceAgents(workspace, [analyst]).map((agent) => agent.id), ["manager", "analyst"]);
-  assert.deepEqual(workflowFocus(workspace.run, workspace.traces, workspace.defects), { requirements: "attention" });
+  assert.deepEqual(workflowFocus(workspace.run, workspace.traces), { requirements: "active" });
   assert.deepEqual(mentionables([analyst, analyst]), [{ id: "analyst", name: "分析师", color: undefined }]);
   assert.deepEqual(collaborationRecords({}), []);
 });

@@ -62,3 +62,5 @@ runtime-paths.mjs 复用 server/data-home.mjs 的纯路径函数，将默认任�
 应用更新由 updates.mjs 管理，仅检查公开仓库 latest 正式 Release；Beta/draft/预发布标签排除，启动20秒及每6小时检查，用户点击才下载。主进程限定 settings/updates 的检查/下载/安装 IPC，状态订阅只发主窗口。Developer ID 安装版使用 electron-updater/Squirrel.Mac，临时签名版流式下载并校验 DMG 后手动安装。原生重启需自有服务的原子空闲锁，繁忙/未知拒绝，失败或30秒超时释放；普通退出不自动安装。详见 docs/24-desktop-updates.md。
 
 更新信息仅在设置/updates 区域展示，不创建全局通知卡；主进程继续检查并保存进程内状态，用户打开该区域时读取最新值，区域内订阅状态和进度。HTTP/CLI、下载及重启安装协议不变。
+
+任务问题与处理反馈统一阅读协作消息；宿主紧凑样式移除独立问题清单/风险面板覆盖，客户端不再提供该面板或问题计数。

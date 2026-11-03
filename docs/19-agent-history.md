@@ -23,3 +23,5 @@
 每次调用在系统临时目录创建私有 socket/config，结束后清理。打包使用 Electron 内置 Node，避免依赖系统 Node；不会把管理员会话交给员工。
 
 测试见 `tests/history.test.mjs`；真实模型专项入口为客户端 `scripts/test-prompt-e2e.mjs`。
+
+历史索引不再生成独立问题清单实体；问题反馈通过任务协作消息和已有 Trace 查询。索引重建不迁移或删除权威存储中的历史内容，不伪造员工消息。

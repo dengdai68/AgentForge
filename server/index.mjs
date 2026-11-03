@@ -607,16 +607,6 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     sendJson(response, 200, await runFiles.listRepositoryTree(workspace.run.task.workspacePath, repositoryPath));
     return true;
   }
-  const defectMatch = pathname.match(/^\/api\/runs\/([^/]+)\/defects(?:\/([^/]+))?$/);
-  if (defectMatch && request.method === "GET" && !defectMatch[2]) {
-    sendJson(response, 200, { defects: store.listDefects(defectMatch[1]) });
-    return true;
-  }
-  if (defectMatch && request.method === "PUT" && defectMatch[2]) {
-    const input = await readJson(request);
-    sendJson(response, 200, { defect: store.updateDefect(defectMatch[1], defectMatch[2], input) });
-    return true;
-  }
   const artifactMatch = pathname.match(/^\/api\/runs\/([^/]+)\/artifacts\/([^/]+)\/content$/);
   if (request.method === "GET" && artifactMatch) {
     const workspace = store.getRunWorkspace(artifactMatch[1]);

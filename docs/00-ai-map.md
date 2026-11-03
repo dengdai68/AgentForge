@@ -152,3 +152,5 @@ ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别�
 员工配置简化：app.js/CLI 只展示并接受 business/manager，不再接收 repository。Store 新 Task 的仓库来源/绑定为空，工作根统一；旧任务冻结仓库仍由 Run Files/Orchestrator 原逻辑执行。沟通真实续接验证见 test-communication-direct-real，完整新任务验收见 test-dsh-real。
 
 任务协作：`server/task-patrol.mjs`（10 秒非阻塞检测）→ Store 经理巡检投递 → Orchestrator；错误只由人工续接原员工。共享协作投影仅角色消息，Trace.inputMessageId / Message.startMessageId 连接本轮提示词。契约见 docs/03、docs/22；回归见 tests/task-patrol.test.mjs、scripts/test-task-collaboration-real.mjs。
+
+问题沟通统一进入 Message：Store 不再维护独立问题清单，Runtime 结果中的旧清单字段明确拒绝；prompts 引导用 summary/consultation/handoff 报告和交接。UI 移除风险面板及角标，CLI progress 移除 openDefects，历史索引只索引当前领域记录。见 docs/03、docs/21、docs/22。

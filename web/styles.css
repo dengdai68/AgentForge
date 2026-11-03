@@ -460,7 +460,6 @@ button { cursor:pointer; }
 .loop-state.accepted,.loop-state.completed { background:#eaf5e9; color:#4f9157; }
 .loop-state.awaiting_answer,.loop-state.failed { background:#fdf0e6; color:#ae712b; }
 .loop-state.invalidated,.loop-state.superseded { background:#f0eff0; color:#89908a; }
-.issue-kind.defect { background:#fdeaea; color:#b95050; }
 .issue-kind.risk { background:#fff2dd; color:#a8782d; }
 .issue-kind.decision { background:#e9effa; color:#526d9c; }
 .step-chips { display:flex; gap:5px; flex-wrap:wrap; margin-top:-4px; }
@@ -978,7 +977,7 @@ button { cursor:pointer; }
 .architecture-svg .diagram-node.task rect,.architecture-svg .diagram-node.result rect { fill:#edf5fa; stroke:#d3e5ed; }
 .architecture-svg .diagram-node.run rect,.architecture-svg .diagram-node.trace rect { fill:#f7f6ef; stroke:#e7e3d3; }
 .architecture-svg .diagram-node.message rect,.architecture-svg .diagram-node.consultation rect,.architecture-svg .diagram-node.human rect { fill:#fff6e9; stroke:#f1dfbd; }
-.architecture-svg .diagram-node.defect rect,.architecture-svg .diagram-node.retry rect { fill:#fdf0ec; stroke:#f0d3c8; }
+.architecture-svg .diagram-node.retry rect { fill:#fdf0ec; stroke:#f0d3c8; }
 .architecture-svg .diagram-node.artifact rect,.architecture-svg .diagram-node.files rect,.architecture-svg .diagram-node.storage rect { fill:#eff6f0; stroke:#d1e5d4; }
 .architecture-svg .diagram-node.decision rect,.architecture-svg .diagram-node.reflection rect { fill:#f4f1fb; stroke:#dfd7f3; }
 .architecture-svg .diagram-node.provider rect { fill:#202720; stroke:#202720; }
@@ -1239,34 +1238,6 @@ button { cursor:pointer; }
 .collaboration-toolbar small { display:block; margin-top:4px; color:var(--muted); font-size:12px; }
 .collaboration-filters { display:flex; gap:6px; flex-wrap:wrap; }
 .collaboration-unread { margin-left:8px; color:var(--ink); background:var(--amber); padding:3px 7px; border-radius:20px; font-size:11px; }
-.quality-risk-panel { flex:none; padding:14px 16px; border-radius:16px; background:var(--paper); box-shadow:inset 3px 0 var(--amber),var(--shadow); }
-.quality-risk-panel > header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-.quality-risk-panel h4 { margin:4px 0 0; font-size:14px; letter-spacing:-.025em; }
-.quality-risk-count { flex:none; padding:4px 8px; border-radius:20px; background:#fdf3e5; color:#95652a; font-size:11px; white-space:nowrap; }
-.quality-risk-note { margin:8px 0 0; color:var(--muted); font-size:12px; line-height:1.55; }
-.defect-risk-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; margin-top:12px; }
-.defect-risk-card { min-width:0; padding:13px 14px; border-radius:14px; background:var(--bg); box-shadow:inset 3px 0 var(--amber); }
-.defect-risk-card.closed { box-shadow:none; background:#f4f6f1; }
-.defect-risk-card header,.defect-risk-card footer,.defect-evidence-actions { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
-.defect-risk-card header { justify-content:space-between; }
-.defect-risk-card > strong { display:block; margin-top:10px; overflow-wrap:anywhere; font-size:13px; }
-.defect-risk-card p { margin:7px 0; color:#596157; font-size:12px; line-height:1.55; overflow-wrap:anywhere; }
-.defect-risk-card > small { display:block; color:var(--muted); font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
-.defect-severity,.defect-status { padding:3px 7px; border-radius:20px; font-size:10px; white-space:nowrap; }
-.defect-severity { background:var(--danger-soft); color:var(--danger-ink); }
-.defect-severity.medium { background:#fdf3e5; color:#95652a; }
-.defect-severity.low { background:#eef1ed; color:#687267; }
-.defect-status { background:#fdf3e5; color:#95652a; }
-.defect-status.fixed,.defect-status.verified { background:#edf3df; color:#5f772c; }
-.defect-status.closed { background:#eef1ed; color:#687267; }
-.defect-risk-card footer { margin-top:10px; }
-.defect-evidence-actions { color:var(--muted); font-size:10px; }
-.defect-evidence-missing { color:var(--muted); font-size:10px; }
-.defect-reproduction { margin-top:9px; color:var(--muted); font-size:11px; }
-.defect-reproduction summary,.closed-defect-list summary { cursor:pointer; }
-.defect-reproduction ol { margin:7px 0 0; padding-left:20px; }
-.closed-defect-list { margin-top:12px; color:var(--muted); font-size:12px; }
-.closed-defect-list > .defect-risk-list { margin-top:10px; }
 #run-workspace .collaboration-panel .human-message-list { flex:1; min-height:100px; height:auto; border:0; border-radius:0; padding:0; background:var(--paper); }
 .collaboration-row { display:grid; grid-template-columns:155px minmax(0,1fr); gap:16px; padding:16px 8px; border-bottom:1px solid var(--line); font-size:13px; line-height:1.65; }
 .collaboration-row > time { font:11px/1.7 ui-monospace,monospace; color:var(--muted); padding-top:2px; }
@@ -1311,7 +1282,6 @@ button { cursor:pointer; }
 @media (max-width:760px), (max-height:620px) {
   #run-workspace .collaboration-panel { overflow:visible; flex:none; padding:0 12px 12px; }
   #run-workspace .collaboration-panel .human-message-list { flex:none; height:50dvh; }
-  .defect-risk-list { grid-template-columns:1fr; }
   .collaboration-row { grid-template-columns:minmax(0,1fr); gap:4px; }
   .collaboration-status { margin-left:0; }
 }
@@ -1607,12 +1577,6 @@ button { cursor:pointer; }
 #run-workspace .workspace-brief > small { font-size:11px; line-height:1.6; }
 #run-workspace .workspace-details .workspace-path { display:block; padding:8px; border-radius:5px; background:var(--paper); line-height:1.7; }
 #run-workspace .workspace-details .workflow-focus-reason { font-size:12px; }
-#run-workspace .workspace-details .quality-risk-panel { margin-top:8px; padding:14px 0 0; border:0; border-top:1px solid var(--line); border-radius:0; box-shadow:none; background:transparent; }
-#run-workspace .workspace-details .quality-risk-panel h4 { font-size:12px; letter-spacing:0; }
-#run-workspace .workspace-details .quality-risk-count { padding:2px 5px; font-size:10px; border-radius:4px; }
-#run-workspace .workspace-details .defect-risk-list { grid-template-columns:minmax(0,1fr); }
-#run-workspace .workspace-details .defect-risk-card { padding:10px; border-radius:5px; background:var(--paper); }
-#run-workspace .workspace-details .defect-risk-card details { border:0; }
 #run-workspace .workspace-mode-tabs { padding:0 20px; gap:18px; border-bottom:1px solid var(--line); }
 #run-workspace .workspace-mode-tabs .ws-tab { padding:10px 0; border-radius:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); }
 #run-workspace .workspace-mode-tabs .ws-tab.active { border-bottom-color:var(--lime-dark); color:var(--ink); }

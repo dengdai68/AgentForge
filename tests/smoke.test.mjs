@@ -410,7 +410,7 @@ test("content delivery workflow freezes boundaries and never resurrects deleted 
   const root = await mkdtemp(join(tmpdir(), "agentforge-content-workflow-")), path = join(root, "state.sqlite"), persistence = createSqlitePersistence(path);
   let persistenceClosed = false;
   try {
-    persistence.save({ agents: [], teams: [], tasks: [], workflowTemplates: [{ id: "workflow_custom_content", system: false, name: "内容交付", description: "历史自定义内容流", nodes: [{ id: "draft", title: "已有草稿", ownerRole: "产品设计师", dependsOn: [], artifactPaths: ["docs/draft/"] }] }], runs: [], traces: [], artifacts: [], messages: [], decisions: [], defects: [], events: [] });
+    persistence.save({ agents: [], teams: [], tasks: [], workflowTemplates: [{ id: "workflow_custom_content", system: false, name: "内容交付", description: "历史自定义内容流", nodes: [{ id: "draft", title: "已有草稿", ownerRole: "产品设计师", dependsOn: [], artifactPaths: ["docs/draft/"] }] }], runs: [], traces: [], artifacts: [], messages: [], decisions: [], events: [] });
     persistence.close(); persistenceClosed = true;
     const migrated = createStore({ databasePath: path }), migratedTemplates = migrated.listWorkflowTemplates();
     const custom = migratedTemplates.find((item) => item.id === "workflow_custom_content"), builtin = migratedTemplates.find((item) => item.id === "content_delivery");
@@ -508,7 +508,7 @@ const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFi
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
 const reviewCriteria = JSON.parse((prompt.split("任务验收标准：")[1] || "[]").split(String.fromCharCode(10))[0]);
 const reviewEvidence = [...prompt.matchAll(/"id":"(artifact_[^"]+)"/g)].map((match) => match[1]).slice(0, 1);
-const out = { kind: "node_result", summary: "恢复后的本地交付", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "恢复后可继续", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "恢复后的本地交付", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "恢复后可继续", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdict: "pass", restartFromNodeId: "requirements", findings: ["恢复后的 Trace 已复核"] };
 else if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "requirements", rationale: "恢复后先完成需求职责" };
 else { mkdirSync("docs/requirements", { recursive: true }); writeFileSync("docs/requirements/recovery.md", "# Recovery\\nverified after checkout."); }
@@ -818,19 +818,18 @@ test("task center exposes deletion only when the Store says it is safe", async (
   assert.match(server, /runFileCleanup: "pending"/);
   assert.match(server, /recoverStagedTaskDeletions/);
 });
-const result = (patch = {}) => ({ kind: "node_result", summary: "真实交付", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "已有输入足以完成当前目标", missingEvidence: [] }, deliveryReview: null, managerDecision: null, ...patch });
+const result = (patch = {}) => ({ kind: "node_result", summary: "真实交付", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "已有输入足以完成当前目标", missingEvidence: [] }, deliveryReview: null, managerDecision: null, ...patch });
 
 test("employee reports retain extra fields and do not require a result schema", () => {
-  const report = readNodeResult({ summary: "员工结论", customReport: "保留", defects: [{ title: "问题", severity: "custom", affectedNodeIds: ["unknown"] }] });
+  const report = readNodeResult({ summary: "员工结论", customReport: "保留" });
   assert.equal(report.customReport, "保留");
-  assert.equal(report.defects[0].severity, "custom");
   assert.equal(readNodeResult("普通文字交接").summary, "普通文字交接");
 });
 
 
 test("manager conclusions are interpreted without content validation", () => {
   assert.equal(readNodeResult({ deliveryReview: { verdict: "pass", findings: [] } }).deliveryReview.verdict, "pass");
-  assert.deepEqual(readNodeResult({ summary: "完成" }).defects, []);
+  assert.equal(readNodeResult({ summary: "完成" }).summary, "完成");
 });
 
 test("recording a manager conclusion never rewrites pass or checks workflow coverage", () => {
@@ -843,22 +842,20 @@ test("recording a manager conclusion never rewrites pass or checks workflow cove
 test("the manager can request human acceptance without platform completion conditions", () => {
   const store = createStore(), run = store.createRun(fixtureTaskInput(store).id);
   const trace = store.createTrace(run.id, { workflowNodeId: "requirements", agentId: "agent_analyst" });
-  store.acceptNodeResult(run.id, "requirements", trace.id, result({ defects: [{ title: "员工记录的问题", severity: "high" }] }));
+  store.acceptNodeResult(run.id, "requirements", trace.id, result({ summary: "员工报告尚有问题，由经理决定下一步" }));
   store.requestHumanAcceptance(run.id, { summary: "经理决定交人类验收" });
   assert.equal(store.getRun(run.id).status, "awaiting_acceptance");
   assert.equal(store.confirmRunCompletion(run.id).status, "completed");
-  assert.equal(store.listDefects(run.id)[0].status, "open");
   assert.equal(store.getRunWorkspace(run.id).traces[0].status, "running");
 });
 
-test("Store records employee decisions and defects without business validation", () => {
+test("Store records employee decisions without business validation", () => {
   const store = createStore(), run = store.createRun(fixtureTaskInput(store).id);
   const trace = store.createTrace(run.id, { workflowNodeId: "requirements", agentId: "agent_analyst" });
-  store.acceptNodeResult(run.id, "requirements", trace.id, result({ decisions: [{ summary: "员工决定", impact: "custom", affectedNodeIds: ["external"] }], defects: [{ title: "员工问题", severity: "custom", affectedNodeIds: ["external"] }], resolvesDefectIds: ["unknown"] }));
+  store.acceptNodeResult(run.id, "requirements", trace.id, result({ decisions: [{ summary: "员工决定", impact: "custom", affectedNodeIds: ["external"] }] }));
   const workspace = store.getRunWorkspace(run.id);
   assert.equal(workspace.decisions[0].impact, "custom");
-  assert.equal(workspace.defects[0].severity, "custom");
-  assert.deepEqual(workspace.defects[0].affectedNodeIds, ["external"]);
+  assert.deepEqual(workspace.decisions[0].affectedNodeIds, ["external"]);
 });
 
 test("repository snapshots ignore runtime logs but retain tracked files, new source and document evidence", async () => {
@@ -1257,47 +1254,12 @@ test("paused inquiry resumes its own nested consultation without claiming busine
   assert.equal(store.getDispatch(stopped.id).status, "cancelled"); assert.equal(store.claimDispatch(run.id), null);
 });
 
-test("unmatched defect IDs do not reject a node handoff", () => {
-  const store = createStore(), run = store.createRun(fixtureTaskInput(store).id), trace = store.createTrace(run.id, { workflowNodeId: "requirements", agentId: "agent_analyst" }); store.acceptNodeResult(run.id, "requirements", trace.id, result({ resolvesDefectIds: ["invented"] })); assert.equal(store.getRunWorkspace(run.id).defects.length, 0);
-});
-test("a testing node can report a Defect without a Markdown file", () => {
-  const store = createStore(), run = store.createRun(fixtureTaskInput(store).id), trace = store.createTrace(run.id, { workflowNodeId: "requirements", agentId: "agent_analyst" });
-  const defect = (evidenceArtifactIds = []) => ({ title: "登录校验失败", description: "回归测试失败", severity: "high", reproduction: ["提交空密码"], evidenceArtifactIds, affectedNodeIds: ["requirements"] });
-  const artifact = (name) => ({ name, storagePath: `runs/${run.id}/traces/${trace.id}/workspace/${name}`, sha256: "a".repeat(64), bytes: 24, mediaType: "text/plain" });
-  store.acceptNodeResult(run.id, "requirements", trace.id, result({ defects: [defect()] }));
-  const workspace = store.getRunWorkspace(run.id);
-  assert.equal(workspace.artifacts.length, 0);
-  assert.deepEqual(workspace.defects[0].evidenceArtifactIds, []);
-  assert.equal(workspace.defects[0].traceId, trace.id);
-});
-test("Defect audit facts cannot be directly edited while verified Traces close them", () => {
-  const store = createStore(), run = store.createRun(fixtureTaskInput(store).id);
-  const artifact = (trace, name) => ({ name, storagePath: `runs/${run.id}/traces/${trace.id}/workspace/${name}`, sha256: "b".repeat(64), bytes: 24, mediaType: "text/markdown" });
-  const discovery = store.createTrace(run.id, { workflowNodeId: "requirements", agentId: "agent_analyst" });
-  store.acceptNodeResult(run.id, "requirements", discovery.id, result({ defects: [{ title: "输入校验缺失", description: "空输入没有被拒绝", severity: "high", reproduction: ["提交空值"], evidenceArtifactIds: [], affectedNodeIds: ["requirements"] }] }), [artifact(discovery, "docs/requirements/input-validation.md")]);
-  store.completeTrace(discovery.id);
-  const [defect] = store.listDefects(run.id), before = structuredClone(defect);
-  assert.throws(() => store.updateDefect(run.id, defect.id, { status: "closed" }), /Trace-bound 审计事实/);
-  assert.throws(() => store.updateDefect(run.id, defect.id, { evidenceArtifactIds: [] }), /Trace-bound 审计事实/);
-  assert.deepEqual(store.listDefects(run.id), [before]);
-  const fix = store.createTrace(run.id, { workflowNodeId: "bug_fix", agentId: "agent_engineer" });
-  store.acceptNodeResult(run.id, "bug_fix", fix.id, result({ resolvesDefectIds: [defect.id] }), [artifact(fix, "docs/development/fix.md")]);
-  store.completeTrace(fix.id);
-  assert.equal(store.listDefects(run.id)[0].status, "fixed");
-  assert.equal(store.canCompleteRun(run.id), true);
-  const regression = store.createTrace(run.id, { workflowNodeId: "regression", agentId: "agent_tester" });
-  store.acceptNodeResult(run.id, "regression", regression.id, result({ verifiedDefectIds: [defect.id] }), [artifact(regression, "docs/testing/regression.md")]);
-  store.completeTrace(regression.id);
-  assert.equal(store.listDefects(run.id)[0].status, "closed");
-  assert.equal(store.canCompleteRun(run.id), true);
-});
 test("task properties render safe recorded facts independently of the active tab", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const start = source.indexOf("function workspaceDirectoryDetails("), end = source.indexOf("\nfunction renderWorkspace()", start);
   assert.ok(start >= 0 && end > start);
   const esc = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
-  const risk = '<section aria-label="记录的质量风险">同 Trace 证据</section>';
-  const details = new Function("esc", "workflowDiagramCanvas", "qualityRiskMarkup", `${source.slice(start, end)}; return workspaceDetailsMarkup;`)(esc, () => '<div class="workflow-diagram">职责图</div>', () => risk);
+  const details = new Function("esc", "workflowDiagramCanvas", `${source.slice(start, end)}; return workspaceDetailsMarkup;`)(esc, () => '<div class="workflow-diagram">职责图</div>');
   const workspace = { run: { id: "run_test", task: { objective: '<script>bad()</script>', workspacePath: '/tmp/" onclick="bad()', team: { name: "A&B" }, workflowSnapshot: { name: "审批流程" } } } };
   for (const tab of ["collaboration", "artifacts", "directory", "console"]) {
     const markup = details(workspace, { agents: [{ id: "a" }], currentFocusNode: { title: "核验交付" }, view: { tab, disclosures: { brief: true } }, artifactCount: 2 });
@@ -1305,7 +1267,7 @@ test("task properties render safe recorded facts independently of the active tab
     assert.doesNotMatch(markup, /A&amp;B|<dt>团队<\/dt>/);
     assert.match(markup, /核验交付/);
     assert.match(markup, /<dd>2 项<\/dd>/);
-    assert.ok(markup.includes(risk));
+    assert.doesNotMatch(markup, /quality-risk|Defect/);
     assert.match(markup, /任务描述/);
     assert.doesNotMatch(markup, /目录说明|任务说明|data-toggle-task-description/);
     assert.doesNotMatch(markup, /<script>|data-copy="[^"]*" onclick=|role="tabpanel"/);
@@ -1329,65 +1291,6 @@ test("task properties render safe recorded facts independently of the active tab
   assert.match(legacy, /<dd>0 项<\/dd>/);
   assert.doesNotMatch(legacy, /data-workspace-disclosure="brief" open|undefined/);
 });
-test("quality risk ledger exposes trace-bound Defect evidence without unsafe markup", async () => {
-  const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const start = source.indexOf("const DEFECT_STATUS_TEXT"), end = source.indexOf("\n\nfunction renderCollaboration", start);
-  assert.ok(start >= 0 && end > start);
-  const esc = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
-  const qualityRiskMarkup = new Function("esc", `${source.slice(start, end)}; return qualityRiskMarkup;`)(esc);
-  const markup = qualityRiskMarkup({
-    run: { task: { workflowSnapshot: { nodes: [{ id: "testing", title: "质量验证" }] } } },
-    artifacts: [{ id: "artifact_evidence", name: "docs/testing/failure.md", traceId: "trace_evidence", storagePath: "runs/trace_evidence/failure.md", deleted: false }],
-    defects: [
-      { id: "defect_open", status: "open", severity: "high", title: "<script>unsafe</script>", description: "登录失败", reproduction: ["提交空密码"], evidenceArtifactIds: ["artifact_evidence"], affectedNodeIds: ["testing"], traceId: "trace_evidence" },
-      { id: "defect_closed", status: "closed", severity: "low", title: "历史问题", evidenceArtifactIds: ["missing_artifact"], affectedNodeIds: [], traceId: "trace_closed" }
-    ]
-  });
-  assert.match(markup, /质量风险/);
-  assert.match(markup, /1 个待处理 Defect/);
-  assert.match(markup, /已记录文件：docs\/testing\/failure.md/);
-  assert.doesNotMatch(markup, /data-open-defect-evidence/);
-  assert.match(markup, /data-open-collaboration-trace="trace_evidence"/);
-  assert.match(markup, /证据快照暂不可读取/);
-  assert.doesNotMatch(markup, /<script>unsafe<\/script>/);
-  assert.doesNotMatch(source, /workspaceView\(\)\.tab = "artifacts"/);
-  assert.match(source, /来源 Trace 在当前 Run 中不可读取/);
-});
-test("a Provider-reported Defect without Markdown evidence is recorded for coordination", async () => {
-  const root = await directory("agentforge-defect-evidence-");
-  try {
-    const executable = join(root, "provider.mjs");
-    await writeFile(executable, `#!/usr/bin/env node
-const userPrompt = process.argv.at(-1) || "";
-const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
-const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
-const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
-const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
-const open = prompt.split("开放 Defect：")[1]?.match(/"id":"(defect_[^"]+)"/);
-if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: open || !prompt.includes('"workflowNodeId":"requirements","type":"node","status":"completed"') ? "requirements" : null, rationale: "按节点报告继续流程" };
-else if (open) out.verifiedDefectIds = [open[1]];
-else { out.defects = [{ title: "无证据缺陷", description: "没有写入报告", severity: "high", reproduction: ["运行测试"], evidenceArtifactIds: [], affectedNodeIds: ["requirements"] }]; }
-if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
-  const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
-  out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
-}
-console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
-`);
-    await chmod(executable, 0o755);
-    const store = createStore();
-    store.updateAgent("agent_analyst", { runtime: { provider: "claude-code", executable } });
-    const base = fixtureTaskInput(store);
-    const task = store.createTask({ ...base, title: "缺陷证据端到端", workspacePath: root, managerRuntime: { provider: "claude-code", executable } });
-    const run = store.createRun(task.id);
-    await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });
-    const workspace = store.getRunWorkspace(run.id), nodeTrace = workspace.traces.find((trace) => trace.type === "node");
-    assert.equal(nodeTrace.status, "completed");
-    assert.equal(workspace.artifacts.length, 0);
-    assert.equal(workspace.defects.length, 1);
-    assert.equal(workspace.defects[0].status, "closed");
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
 test("a business Provider handoff without a captured Artifact is recorded", async () => {
   const root = await directory("agentforge-artifact-required-");
   try {
@@ -1397,7 +1300,7 @@ const userPrompt = process.argv.at(-1) || "";
 const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
-const out = { kind: "node_result", summary: "没有实际文件的交付声明", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入足够", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "没有实际文件的交付声明", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入足够", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: "requirements", rationale: "先完成需求交付" };
 else out.artifacts = [{ path: "docs/requirements/claimed.md", description: "此文件没有被写入" }];
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
@@ -1430,7 +1333,7 @@ const userPrompt = process.argv.at(-1) || "";
 const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
-const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: "requirements", rationale: "先验证本地输出" };
 else { mkdirSync("docs/requirements", { recursive: true }); writeFileSync("docs/requirements/invalid-result.md", "# retained local file\\n"); out.decisions = [{ summary: "不应成为事实", impact: "unknown", affectedNodeIds: ["requirements"], rationale: "非法枚举" }]; }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
@@ -1498,7 +1401,7 @@ const args = process.argv.slice(2), sessionFlag = args.findIndex((item) => item 
 const reviewCriteria = JSON.parse((prompt.split("任务验收标准：")[1] || "[]").split(String.fromCharCode(10))[0]);
 const reviewEvidence = [...prompt.matchAll(/"id":"(artifact_[^"]+)"/g)].map((match) => match[1]).slice(0, 1);
 if (!prompt.includes('任务级项目经理') && !prompt.includes('任务验收标准：["验收口径必须进入项目经理复核"]')) throw new Error("冻结的验收标准未传入 Provider 提示词");
-const out = { kind: "node_result", summary: "真实交付", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入足够", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "真实交付", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入足够", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdict: "pass", restartFromNodeId: "verify", findings: ["真实 Trace 已验收"] };
 else if (prompt.includes("任务级项目经理")) { out.managerDecision = { nextNodeId: prompt.includes("独立验证完成") ? null : prompt.includes('"type":"node"') ? "testing" : "verify", rationale: "依据 Trace 决定" }; out.decisions = [{ summary: "保留追加验收标准", impact: "amendment", affectedNodeIds: ["verify"], rationale: "人类消息" }]; }
 else { if (!prompt.includes("deliveryReview 必须为 null")) throw new Error("普通职责提示缺少最终复核边界"); if (isTesting) { mkdirSync("docs/testing", { recursive: true }); writeFileSync("docs/testing/review.md", "# Fixture independent testing report"); out.summary = "独立验证完成"; } }
@@ -1562,7 +1465,7 @@ const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFi
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
 const reviewCriteria = JSON.parse((prompt.split("任务验收标准：")[1] || "[]").split(String.fromCharCode(10))[0]);
 const reviewEvidence = [...prompt.matchAll(/"id":"(artifact_[^"]+)"/g)].map((match) => match[1]).slice(0, 1);
-const out = { kind: "node_result", summary: "真实交付", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入足够", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "真实交付", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入足够", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdict: "pass", restartFromNodeId: "architecture", findings: ["咨询答复已纳入复核"] };
 else if (prompt.includes("你正回答角色咨询")) { out.summary = "需求口径确认：token 仅内存，成功后停留当前页。"; }
 else if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "architecture", rationale: "按咨询事实路由" };
@@ -1598,7 +1501,7 @@ const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFi
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
 const reviewCriteria = JSON.parse((prompt.split("任务验收标准：")[1] || "[]").split(String.fromCharCode(10))[0]);
 const reviewEvidence = [...prompt.matchAll(/"id":"(artifact_[^"]+)"/g)].map((match) => match[1]).slice(0, 1);
-const out = { kind: "node_result", summary: "重试后的真实交付", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入足够", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "重试后的真实交付", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "输入足够", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdict: "pass", restartFromNodeId: "verify", findings: ["重试后的 Trace 已验收"] };
 else if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "verify", rationale: "失败事实已保留，现可进入复核" };
 else { mkdirSync("docs/verify", { recursive: true }); mkdirSync("docs/testing", { recursive: true }); writeFileSync("docs/verify/retry.md", "# Retry evidence"); writeFileSync("docs/testing/review.md", "# Fixture testing report"); }
@@ -1646,7 +1549,7 @@ const userPrompt = process.argv.at(-1) || "";
 const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
-const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdict: "pass", restartFromNodeId: "", findings: ["源码和测试已接纳"] };
 else if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "develop", nextAgentId: null, rationale: "按交付事实路由" };
 else if (!existsSync(".agentforge/first-attempt-marker")) {
@@ -2106,7 +2009,7 @@ const userPrompt = process.argv.at(-1) || "";
 const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
-const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes("你是任务级项目经理")) out.managerDecision = { nextNodeId: "requirements", rationale: "安排需求交付" };
 else { mkdirSync("docs/not_requirements", { recursive: true }); writeFileSync("docs/not_requirements/outside.md", "wrong owner path"); }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
@@ -2139,7 +2042,7 @@ const userPrompt = process.argv.at(-1) || "";
 const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
-const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdict: "pass", restartFromNodeId: "requirements", findings: ["real artifacts present"] };
 else if (prompt.includes("你是任务级项目经理")) {
   if (!prompt.includes("docs/testing/cross.md")) { mkdirSync("docs/requirements", { recursive: true }); writeFileSync("docs/requirements/manager.md", "manager work"); }
@@ -2174,7 +2077,7 @@ const userPrompt = process.argv.at(-1) || "";
 const instructionFlag = process.argv.indexOf("--append-system-prompt-file");
 const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFileSync(process.argv[instructionFlag+1],"utf8");
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
-const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes("你是任务级项目经理")) out.managerDecision = { nextNodeId: "requirements", rationale: "安排需求交付" };
 else { mkdirSync("docs/requirements", { recursive: true }); writeFileSync("docs/requirements/delivery.md", "# Delivery\\n"); writeFileSync("docs/requirements/.env", "fixture-secret"); }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
@@ -2236,4 +2139,16 @@ test("coordination JSON embedded in manager prose is delivered without rejecting
   assert.equal(parseEmployeeResponse(unfenced).rawResponse, unfenced);
   assert.equal(parseEmployeeResponse(unfenced + '\n以上仅作示例。').managerDecision, null);
   assert.equal(parseEmployeeResponse(JSON.stringify(envelope) + '\n' + JSON.stringify(envelope)).managerDecision, null);
+});
+
+test("retired issue-ledger inputs reject without creating side effects; issues use role messages",()=>{
+  const store=createStore(),run=store.createRun(fixtureTaskInput(store).id);
+  try {
+    const trace=store.createTrace(run.id,{workflowNodeId:'requirements',agentId:'agent_analyst'});
+    for(const key of ['defects','resolvesDefectIds','verifiedDefectIds']) assert.throws(()=>store.acceptNodeResult(run.id,'requirements',trace.id,result({[key]:[]})),/已移除独立问题清单/);
+    assert.equal(store.getRunWorkspace(run.id).artifacts.length,0);
+    const message=store.addMessage({runId:run.id,traceId:trace.id,sender:{type:'agent',id:'agent_analyst',name:'分析员工'},recipientAgentId:run.manager.id,kind:'handoff',content:'发现输入校验问题，请安排修复；复测结果继续在这里回复。'});
+    assert.equal(store.getRunWorkspace(run.id).messages.at(-1).id,message.id);
+    assert.equal('defects' in store.getRunWorkspace(run.id),false);assert.equal('openDefectCount' in store.listRuns()[0],false);
+  }finally{store.close();}
 });

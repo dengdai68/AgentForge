@@ -178,7 +178,7 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     const result = await client.request(`/api/runs/${run.id}/terminate`, { method: 'POST', body: { reason: '用户通过 CLI 终止任务' } });
     return { taskId: id, run: runReceipt(result.run) };
   }
-  const workspace = run ? await client.request(`/api/runs/${run.id}/workspace?view=summary`) : { run: null, pendingQuestions: [], traces: [], dispatches: [], artifacts: [], messages: [], defects: [] };
+  const workspace = run ? await client.request(`/api/runs/${run.id}/workspace?view=summary`) : { run: null, pendingQuestions: [], traces: [], dispatches: [], artifacts: [], messages: [] };
   const questions = workspace.pendingQuestions.filter(question => question.recipient?.type === 'human');
   if (input) {
     if (operation === 'reply' && !questions.some(question => question.id === input.replyToMessageId)) throw new CliError('QUESTION_NOT_PENDING', '此问题不是所选执行的待答人类澄清', '先运行 tasks questions 任务ID，并按问题ID回复；过期问题不能重复作答。', 4);
@@ -195,7 +195,7 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     participants: (workspace.run?.participants || []).map(({ id, name }) => reference(id, name)),
     activeTraces: workspace.traces.filter(trace => trace.status === 'running').map(({ id, agentId, workflowNodeId, status }) => ({ id, agentId, workflowNodeId, status })),
     pendingDispatches: workspace.dispatches.filter(dispatch => ['queued', 'claimed', 'waiting'].includes(dispatch.status)).map(dispatch => keyFields(dispatch, ['id', 'recipientAgentId', 'workflowNodeId', 'purpose', 'status', 'attempts', 'lastErrorKind', 'lastError', 'nextRetryAt'])),
-    pendingQuestions: questions.map(question => reference(question.id, question.questionType || '人类澄清')), openDefects: workspace.defects.filter(defect => defect.status !== 'closed'), artifactCount: workspace.artifacts.length,
+    pendingQuestions: questions.map(question => reference(question.id, question.questionType || '人类澄清')), artifactCount: workspace.artifacts.length,
     acceptanceRequest: workspace.run?.acceptanceRequest ? { summary: workspace.run.acceptanceRequest.summary } : null,
     deliveryReview: workspace.run?.deliveryReview ? { verdict: workspace.run.deliveryReview.verdict } : null,
     nextAction: task.archivedAt ? '任务已归档，只读查看已有记录。' : !run ? '任务尚未启动；使用 tasks start 任务ID。' : workspace.run.status === 'failed' ? '任务因错误中断；只能在客户端重试原失败员工，不能发送消息或 @ 其他成员。' : questions.length ? '请使用 tasks reply 精确回复待答问题；未答完仍阻塞。' : backoffDispatch && ['planning', 'running', 'review'].includes(workspace.run.status) ? `投递 ${backoffDispatch.id} 上次失败（类别 ${backoffDispatch.lastErrorKind || 'execution'}，已尝试 ${backoffDispatch.attempts} 次），将于 ${backoffDispatch.nextRetryAt} 自动重试；可在 客户端请求立即重试。该队列等待既有恢复调度；新的外部错误会停止任务，修复后由人类重试原员工。` : ({ awaiting_acceptance: '等待人类在 客户端核对产物并确认完成。', completed: '人类已确认完成。', paused: '执行已暂停；请在 客户端选择继续。', failed: '执行失败；查看失败原因、协作记录，在 客户端选择适用恢复操作。', cancelled: '执行已终止，历史记录保留。' })[workspace.run.status] || '查询协作记录和最新进度；状态由服务推进。' };

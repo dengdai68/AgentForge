@@ -106,3 +106,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 插件导入部分成功时返回 warnings（plugin/component/path/message）；默认文本明确打印 ⚠️ 与每项路径/原因，JSON 保留结构化数组。相应插件 get 可再次查看，不输出原始错误组件正文。
 
 任务协作改为仅角色沟通，文本/JSON 新增 startMessageId（应用本轮输入 ID）。tasks message 的 recipient 直接路由至所选员工，failed 任务拒绝发送；tasks progress 优先提示原员工重试。CLI 不新增恢复或最终确认权限。每 10 秒巡检为空闲的进行中任务唤醒经理，错误不自动重试。
+
+tasks progress 不再输出 openDefects；任务与执行摘要不再提供独立问题计数。问题、修复与核验反馈使用 tasks collaboration 查询，tasks message/reply 发送。无新增参数或权限，最终确认仍在客户端；旧清单消费者应改用角色沟通记录，无需重置实例。

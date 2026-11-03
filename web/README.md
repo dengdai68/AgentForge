@@ -127,3 +127,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 协作记录只展示员工、经理、人类之间的沟通 Message；系统提示、启动、投递、重试和结算事件不作为记录行。底层不可变事件、Dispatch 和 Trace 继续保留，关联执行元数据供查询。消息保存本轮 `startMessageId`，对应 Trace 的 `inputMessageId`；“本轮控制台”按该 ID 打开、定位本次提示词，不受日志分页影响。成员原生会话贯穿任务且彼此隔离，每次执行拥有独立输入轮次 ID。
 
 错误任务禁用协作输入与 @，原员工重试入口保持可用。新 Run 初始 running，旧 planning/review 显示同一个“进行中”标签，不改写历史。
+
+任务详情已移除独立问题面板、空清单提示及风险角标，手册图不再展示问题关闭状态机；问题和处理反馈全部查看协作记录。

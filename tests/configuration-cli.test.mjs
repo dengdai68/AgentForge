@@ -81,7 +81,7 @@ test('all task commands progressively disclose their own data and compact relate
   const task = { id: 'task_one', title: '简报任务', objective: '完整用户目标', acceptanceCriteria: ['核对真实产物'], status: 'awaiting_human', priority: 'medium', memberAgentIds: [employee.id, manager.id], team: { id: 'team_one', name: '内容组', members: [employee], secretInternal: marker }, memberSnapshots: [employee], managerAgentId: manager.id, managerSnapshot: manager, managerRuntime: { profileId: 'runtime_one', internal: marker }, workflowTemplateId: 'flow_one', workflowSnapshot: { id: 'flow_one', name: '写作流程', nodes: [{ id: 'write', title: '撰写', deliverable: marker }] }, repositoryBindings: { internal: marker }, futureNestedField: marker };
   const question = { id: 'question_one', content: '报告使用什么标题？', questionType: '标题', recipient: { id: 'human_operator', name: '你', type: 'human' }, sender: manager, consideredMemberIds: [marker], routingReason: marker, createdAt: '2026-10-23T00:00:00Z' };
   const run = { id: 'run_one', taskId: task.id, status: 'awaiting_human', task, manager, participants: [employee, manager], currentFocus: { nodeId: 'write', reason: marker }, deliveryReview: { verdict: 'pass', findings: [marker] }, summary: marker };
-  const workspace = { run, pendingQuestions: [question], traces: [], dispatches: [], messages: [{ ...question, sender: { id: manager.id, name: manager.name, type: 'agent' } }], artifacts: [{ id: 'artifact_one', name: 'docs/report.md', sha256: 'abc' }], defects: [], events: [] };
+  const workspace = { run, pendingQuestions: [question], traces: [], dispatches: [], messages: [{ ...question, sender: { id: manager.id, name: manager.name, type: 'agent' } }], artifacts: [{ id: 'artifact_one', name: 'docs/report.md', sha256: 'abc' }], events: [] };
   const fetcher = async (url, options) => {
     assert.equal(options.headers.Cookie, cookie);
     const path = url.slice(origin.length);
@@ -103,7 +103,7 @@ test('all task commands progressively disclose their own data and compact relate
     if (operation === 'create') assert.deepEqual(Object.keys(result.task), ['id', 'title', 'status']);
     if (operation === 'start') assert.deepEqual(result.run, { id: run.id, taskId: task.id, status: run.status });
     if (operation === 'message') { assert.equal(result.queued, true); assert.equal(result.resumed, false); }
-    if (operation === 'progress') { assert.deepEqual(result.pendingQuestions, [{ id: question.id, name: '标题' }]); assert.deepEqual(result.participants[0], { id: employee.id, name: employee.name }); }
+    if (operation === 'progress') { assert.equal('openDefects' in result, false); assert.deepEqual(result.pendingQuestions, [{ id: question.id, name: '标题' }]); assert.deepEqual(result.participants[0], { id: employee.id, name: employee.name }); }
     if (operation === 'questions') assert.equal(result.items[0].content, question.content);
   }
   const defaultMessage = await invoke('message', { content: '没有指定接收人，交给项目经理' });
@@ -124,7 +124,7 @@ test('task CLI queries scoped progress, filters and collaboration and rejects st
   const f = await fixture(), writes = [];
   const task = { id: 'task_one', title: '中文知识任务', status: 'awaiting_human', teamId: 'team_one', objective: '完整目标' };
   const question = { id: 'question_one', content: '请选择报告标题', recipient: { type: 'human' }, sender: { type: 'agent', name: '经理' }, createdAt: '2026-10-23T00:00:00Z' };
-  const workspace = { run: { id: 'run_one', task, status: 'awaiting_human', participants: [{ id: 'manager_one', name: '经理' }], currentFocus: { nodeId: 'write' } }, pendingQuestions: [question], traces: [], dispatches: [], messages: [question], events: [], defects: [], artifacts: [{ id: 'artifact_one', name: 'docs/report.md', sha256: 'hash' }] };
+  const workspace = { run: { id: 'run_one', task, status: 'awaiting_human', participants: [{ id: 'manager_one', name: '经理' }], currentFocus: { nodeId: 'write' } }, pendingQuestions: [question], traces: [], dispatches: [], messages: [question], events: [], artifacts: [{ id: 'artifact_one', name: 'docs/report.md', sha256: 'hash' }] };
   const fetcher = async (url, options) => {
     assert.equal(options.headers.Cookie, cookie);
     const path = url.slice(origin.length);
@@ -158,7 +158,7 @@ test('task collaboration CLI exposes complete dispatch flow in text and JSON wit
   const f = await fixture();
   const task = { id: 'task_flow', title: '协作流', status: 'running' };
   const workspace = {
-    run: { id: 'run_flow', task, participants: [{ id: 'analyst', name: '需求分析' }] }, pendingQuestions: [], traces: [], artifacts: [], defects: [],
+    run: { id: 'run_flow', task, participants: [{ id: 'analyst', name: '需求分析' }] }, pendingQuestions: [], traces: [], artifacts: [],
     messages: [
       { id: 'assignment', kind: 'manager_decision', createdAt: '2026-10-30T00:00:00Z', sender: { type: 'agent', name: '经理' }, recipient: { type: 'team', name: '全体团队' }, content: '分析验收标准', traceId: 'source-trace' },
       { id: 'handoff', kind: 'handoff', createdAt: '2026-10-30T00:00:01Z', sender: {type:'agent',name:'需求分析'}, content: JSON.stringify({status:'completed', rawResponse:'# HUMAN_REPORT\n\n已交付验收标准。'}) },

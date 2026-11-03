@@ -22,7 +22,7 @@ export function taskPrompt({ task, run, node, trace, agent, directory, cwd, work
   const manager = agent.id === run.manager?.id;
   const systemPrompt = [
     truth, persona(agent), taskRules, consultationRules,
-    '所有成员都可通过 handoff.recipientAgentId @ 任意其他员工或经理（不能是自己）；需要人类回答时用 consultation.audience=human。handoff 与 consultation、managerDecision 不同时使用。',
+    '问题发现、处理进度、修复结果和核验结论均在 summary 或 consultation.question 中向相关成员说明，通过协作消息交接，不维护独立问题清单或关闭状态。所有成员都可通过 handoff.recipientAgentId @ 任意其他员工或经理（不能是自己）；需要人类回答时用 consultation.audience=human。handoff 与 consultation、managerDecision 不同时使用。',
     `可咨询角色：${JSON.stringify(roster)}`,
     mode === "inquiry" ? inquiryMode : mode === "consultation" ? consultationMode : manager ? managerRules : nodeRules,
     manager && `工作流定义（仅经理持有；人员需求是选人依据，不是员工绑定）：${JSON.stringify(task.workflowSnapshot)}`,
@@ -48,8 +48,6 @@ export function taskPrompt({ task, run, node, trace, agent, directory, cwd, work
   if (manager) appendChanged('execution', `当前执行状态：${JSON.stringify(workspace.traces.map(({ workflowNodeId, agentId, type, status, error }) => ({ workflowNodeId, type, status, error, agentId })).slice(-18))}`);
   if (manager && delivery.patrol) appendChanged('patrolMessages', `当前协作记录：${JSON.stringify(workspace.messages.filter(message => ['agent', 'human'].includes(message.sender?.type)).slice(-30).map(({ id, sender, recipient, content }) => ({ id, sender, recipient, content })))}`);
   appendChanged('questions', `待处理协作：${JSON.stringify(workspace.pendingQuestions)}`, !workspace.pendingQuestions.length);
-  const defects = workspace.defects.filter(item => item.status !== 'closed');
-  appendChanged('defects', `开放 Defect：${JSON.stringify(defects)}`, !defects.length);
   // Lists are delta-delivered by identity and version/content, not repeated in full.
   for (const decision of workspace.decisions) appendChanged(`decision:${decision.id}`, `Decision 更新：${JSON.stringify(decision)}`);
   // Handoffs carry relevant paths. The full immutable Artifact index (including

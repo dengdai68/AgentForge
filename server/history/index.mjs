@@ -73,7 +73,7 @@ export function historyCommands(state, { databasePath = ":memory:" } = {}) {
         const trace = traces.get(event.data?.traceId);
         if (trace && event.actor?.id === trace.agentId) add(event.id,"task",run.id,JSON.stringify({type:event.type,message:event.message,data:event.data}),[resolve(trace.agentId)],{...meta,traceId:trace.id,entityType:"trace_event",occurredAt:event.timestamp});
       }
-      for (const [collection,keys] of [["decisions",["summary","rationale","impact","status"]],["defects",["title","description","reproduction","severity","status","evidenceArtifactIds"]],["artifacts",["id","name","path","relativePath","kind","description","sha256","status"]]]) {
+      for (const [collection,keys] of [["decisions",["summary","rationale","impact","status"]],["artifacts",["id","name","path","relativePath","kind","description","sha256","status"]]]) {
         for (const row of state[collection].filter(r => r.runId === run.id)) add(row.id,"task",run.id,JSON.stringify(pick(row,keys)),visible,{...meta,occurredAt:row.createdAt || run.startedAt,entityType:collection,traceId:row.traceId});
       }
     }

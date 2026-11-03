@@ -101,8 +101,13 @@ try {
   await page.locator('#username').fill('flow-qa'); await page.locator('#password').fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.locator('#account-name').waitFor();
+  assert.equal((await page.request.get(origin + '/api/runs/' + run.id + '/defects')).status(), 404);
   await page.goto(origin + '/runs/' + run.id);
   await page.locator('.collaboration-row').first().waitFor();
+  await page.locator('[data-toggle-task-details]').click();
+  assert.equal(await page.locator('.quality-risk-panel').count(), 0);
+  assert.doesNotMatch(await page.locator('#workspace-details').innerText(), /Defect|未关闭/);
+  await page.locator('[data-toggle-task-details]').click();
   assert.equal(await page.locator('.collaboration-toolbar small, .collaboration-reference, .human-guide').count(), 0);
   assert.equal(await page.locator('#instruction-text').getAttribute('placeholder'), '输入消息…');
   while (await page.locator('[data-collaboration-older]').count()) await page.locator('[data-collaboration-older]').click();

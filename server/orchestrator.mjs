@@ -12,7 +12,7 @@ import { taskPrompt } from "./prompts.mjs";
 export function readNodeResult(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) value = { summary: String(value ?? "") };
   const output = { ...value, kind: "node_result", summary: typeof value.summary === "string" ? value.summary : JSON.stringify(value) };
-  for (const field of ["artifacts", "decisions", "defects", "resolvesDefectIds", "verifiedDefectIds"]) output[field] = Array.isArray(value[field]) ? value[field] : [];
+  for (const field of ["artifacts", "decisions"]) output[field] = Array.isArray(value[field]) ? value[field] : [];
   output.consultation = value.consultation && typeof value.consultation === "object" ? value.consultation : null;
   output.managerDecision = value.managerDecision && typeof value.managerDecision === "object" ? value.managerDecision : null;
   output.deliveryReview = value.deliveryReview && typeof value.deliveryReview === "object" ? value.deliveryReview : null;

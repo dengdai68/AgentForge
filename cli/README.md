@@ -64,3 +64,5 @@ tasks message 的 recipientAgentId 可省略，默认发给当前 Run 的项目�
 员工 kind 只接受 business/manager，schema/help 移除 repository 与 developer；仓库说明放 systemPrompt。当前员工 get 不展示废弃仓库字段。普通沟通不属于 CLI 配置/任务命令，私聊/群聊输出协议没有新增 CLI 能力。
 
 tasks collaboration 文本/JSON 仅返回角色沟通，包含 startMessageId；tasks message 指定员工直接送达，错误任务拒绝新消息。tasks progress 对 failed 优先提示在客户端重试原员工。帮助/schema 同步以上含义；本次不增加恢复命令，最终完成仍由客户端人类确认。
+
+tasks progress 移除 openDefects；问题报告与处理反馈统一使用 tasks collaboration 查询、tasks message/reply 交接。帮助/schema 同步此读模型变化，不增加命令或确认权限。

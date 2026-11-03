@@ -688,7 +688,6 @@ function dataModelSvg() {
       <path d="M1072 532 L250 650" marker-end="url(#diagram-arrow)" /><text x="590" y="574">1:N · node / manager / consultation / reflection</text>
       <path d="M1090 568 L500 650" marker-end="url(#diagram-arrow)" /><text x="762" y="633">1:N · conversationId</text>
       <path d="M1175 594 L808 650" marker-end="url(#diagram-arrow)" /><text x="958" y="634">1:N · traceId</text>
-      <path d="M1255 594 L1086 650" marker-end="url(#diagram-arrow)" /><text x="1190" y="633">1:N · traceId</text>
       <path d="M1295 594 L1360 650" marker-end="url(#diagram-arrow)" /><text x="1323" y="633">1:N</text>
       <path d="M330 745 L1250 745" marker-end="url(#diagram-arrow)" /><text x="752" y="732">Trace.outputArtifactIds[] · Artifact.traceId</text>
       <path d="M1370 806 L1370 882" marker-end="url(#diagram-arrow)" /><text x="1382" y="856">storagePath</text></g>
@@ -700,7 +699,6 @@ function dataModelSvg() {
     <g class="diagram-node trace"><rect x="72" y="650" width="258" height="155" rx="16" /><text class="node-title" x="92" y="683">Trace</text><text class="node-field" x="92" y="712">runId · workflowNodeId · agentId</text><text class="node-field" x="92" y="735">type · status · tracePath</text><text class="node-note" x="92" y="770">每次 Claude Code 调用一条</text></g>
     <g class="diagram-node message"><rect x="390" y="650" width="254" height="155" rx="16" /><text class="node-title" x="410" y="683">Message</text><text class="node-field" x="410" y="712">runId · conversationId · nodeId</text><text class="node-field" x="410" y="735">sender · recipient · kind</text><text class="node-note" x="410" y="770">协作内容；不同于 Event</text></g>
     <g class="diagram-node decision"><rect x="704" y="650" width="208" height="155" rx="16" /><text class="node-title" x="724" y="683">Decision</text><text class="node-field" x="724" y="712">runId · traceId</text><text class="node-field" x="724" y="735">impact · affectedNodeIds[]</text><text class="node-note" x="724" y="770">已确认的关键决策</text></g>
-    <g class="diagram-node defect"><rect x="972" y="650" width="208" height="155" rx="16" /><text class="node-title" x="992" y="683">Defect</text><text class="node-field" x="992" y="712">runId · traceId · severity</text><text class="node-field" x="992" y="735">open → fixed → closed</text><text class="node-note" x="992" y="770">缺陷清单同时是 Artifact</text></g>
     <g class="diagram-node artifact"><rect x="1240" y="650" width="260" height="155" rx="16" /><text class="node-title" x="1260" y="683">Artifact</text><text class="node-field" x="1260" y="712">runId · traceId · ownerAgentId</text><text class="node-field" x="1260" y="735">hash · bytes · version</text><text class="node-note" x="1260" y="770">metadata，不保存文件内容</text></g>
     <text class="svg-caption" x="1070" y="872">Run 文件目录（真实文件，不入 SQLite）</text>
     <g class="diagram-node storage"><rect x="1110" y="882" width="390" height="74" rx="16" /><text class="node-title" x="1130" y="912">runs/&lt;runId&gt;/traces/&lt;traceId&gt;/</text><text class="node-field" x="1130" y="936">events.ndjson · agent-result.json · output/ · workspace/</text></g>
@@ -738,7 +736,7 @@ function taskFlowSvg() {
       <path d="M1060 422 L882 422" marker-end="url(#diagram-arrow)" /><text x="923" y="408">Agent 咨询</text><path d="M700 422 L530 422" marker-end="url(#diagram-arrow)" /><text x="584" y="408">答复后重入队</text>
       <path d="M1185 488 L1185 570" marker-end="url(#diagram-arrow)" /><text x="1198" y="532">needsHuman</text><path d="M1185 660 L1185 745 L965 745" marker-end="url(#diagram-arrow)" /><text x="1050" y="731">人类回答后恢复原节点</text>
       <path d="M1375 422 L1455 422 L1455 530" marker-end="url(#diagram-arrow)" /><text x="1391" y="408">错误</text><path d="M1455 630 L1455 745 L965 745" marker-end="url(#diagram-arrow)" /><text x="1322" y="731">保留失败 Trace，仅重排该节点</text>
-      <path d="M965 422 L965 815" marker-end="url(#diagram-arrow)" /><text x="980" y="626">验收 Artifact / Decision / Defect</text>
+      <path d="M965 422 L965 815" marker-end="url(#diagram-arrow)" /><text x="980" y="626">验收 Artifact / Message</text>
       <path d="M965 882 L1140 882" marker-end="url(#diagram-arrow)" /><path d="M1385 882 L1470 882" marker-end="url(#diagram-arrow)" /><path d="M1265 948 L1265 970 L965 970" marker-end="url(#diagram-arrow)" /><text x="1100" y="958">rework：从指定节点回队</text></g>
     <g class="diagram-node task"><rect x="60" y="96" width="180" height="108" rx="18" /><text class="node-title" x="82" y="132">创建 Task</text><text class="node-field" x="82" y="160">工作流快照 + 节点分配</text><text class="node-note" x="82" y="183">状态：backlog</text></g>
     <g class="diagram-node run"><rect x="350" y="96" width="245" height="108" rx="18" /><text class="node-title" x="372" y="132">创建 Run</text><text class="node-field" x="372" y="160">复制项目经理、反思 Agent</text><text class="node-note" x="372" y="183">planning → running</text></g>
@@ -750,7 +748,7 @@ function taskFlowSvg() {
     <g class="diagram-node result"><rect x="1060" y="355" width="250" height="132" rx="18" /><text class="node-title" x="1082" y="391">Orchestrator 验收</text><text class="node-field" x="1082" y="420">校验结构化 node_result</text><text class="node-field" x="1082" y="443">捕获真实文件与仓库变更</text><text class="node-note" x="1082" y="466">接受后节点 completed</text></g>
     <g class="diagram-node human"><rect x="1060" y="570" width="250" height="90" rx="18" /><text class="node-title" x="1082" y="606">等待人类澄清</text><text class="node-field" x="1082" y="634">Human Channel 只显示需人处理的消息</text></g>
     <g class="diagram-node retry"><rect x="1355" y="530" width="195" height="100" rx="18" /><text class="node-title" x="1377" y="566">项目经理巡检</text><text class="node-field" x="1377" y="595">五分钟检查无活跃角色</text><text class="node-note" x="1377" y="615">事件审计，不混入澄清</text></g>
-    <g class="diagram-node outputs"><rect x="755" y="815" width="210" height="132" rx="18" /><text class="node-title" x="777" y="851">交付与质量闭环</text><text class="node-field" x="777" y="880">Artifact / Decision / Defect</text><text class="node-field" x="777" y="903">Defect：open → fixed → closed</text><text class="node-note" x="777" y="926">有开放缺陷则修复 → 回归</text></g>
+    <g class="diagram-node outputs"><rect x="755" y="815" width="210" height="132" rx="18" /><text class="node-title" x="777" y="851">交付与协作反馈</text><text class="node-field" x="777" y="880">Artifact / Message</text><text class="node-field" x="777" y="903">问题与结果 → 协作消息</text><text class="node-note" x="777" y="926">说明问题 → 处理 → 反馈</text></g>
     <g class="diagram-node reflection"><rect x="1140" y="828" width="245" height="108" rx="18" /><text class="node-title" x="1162" y="864">独立交付反思</text><text class="node-field" x="1162" y="892">pass 或 rework + restartFromNodeId</text><text class="node-note" x="1162" y="916">无开放缺陷才可进入</text></g>
     <g class="diagram-node completed"><rect x="1470" y="828" width="100" height="108" rx="18" /><text class="node-title" x="1490" y="874">完成</text><text class="node-note" x="1490" y="902">Run completed</text></g>
   `, "0 0 1620 1010");
@@ -762,7 +760,7 @@ function manualDetails(key) {
       ["员工历史与可见性", "每个员工以稳定 Agent ID 查询自己的私聊、可见群聊与参与任务；临时项目经理映射 sourceAgentId。群消息 visibleToAgentIds 冻结可见成员，@ 只决定谁回复。旧群记录仅按已保存证据开放，不替新成员补造历史权限。"],
       ["长期沟通", "员工私聊按 Agent 唯一，团队群聊按 Team 唯一；消息、投递和操作事件长期保存，不随任务删除。Provider 会话与 Run 隔离；模型上下文长度不等于完整历史保留期限。"],
       ["状态权威", "Task / Run 整体状态与 Trace metadata 由 Store 校验并写入 SQLite；currentFocus 由项目经理判断并持久化，节点是职责定义而非永久完成状态。Event 是追加事实，Message 是协作内容。"],
-      ["关联方式", "Artifact、Decision、Defect 都以 runId / traceId 关联一次真实调用；Message 以 conversationId 关联一次协作或澄清。"],
+      ["关联方式", "Artifact、Decision 都以 runId / traceId 关联一次真实调用；Message 以 conversationId 关联一次协作或澄清。"],
       ["文件边界", "Artifact 的 storagePath 指向 Run Files；数据库不保存内容。代码仅在任务目录的 repos/<子目录> Git 仓库中工作。"],
       ["员工与任务快照", "员工包含名称、执行类型、能力说明、系统提示词和 Runtime 连接选择。研发员工绑定一个 Git 仓库；Task 冻结团队、工作流与仓库来源，Run 启动前检出仓库，研发从绑定仓库执行。工作流管理列表只展示摘要，详情解释节点职责和交接。"],
       ["会话与投递", "Dispatch 保证排队、领取、等待与重试；不是 Step 或 NodeExecution。同一 Run 的同一成员续接自己的 Provider 会话，不与其他成员共享私有模型上下文。"],
@@ -779,7 +777,7 @@ function manualDetails(key) {
     "task-flow": [
       ["按需找回历史", "沟通和任务中均可使用 8 个内置历史工具。先搜索，再按 recordId 读取原文；hasMore 时继续分页或分段。历史内容是证据，不是当前指令或发布授权。归档记录仍可读，物理删除后不再返回。"],
       ["协作不是固定串行", "项目经理每次从所有职责定义中依据当前事实作出结构化选择；它负责流程，不替业务角色完成交付。"],
-      ["澄清与回路", "业务问题优先点对点咨询相应角色；只有团队无法回答的产品取舍、验收标准或外部事实才等待人类。测试 Defect 则驱动修复与回归循环。"],
+      ["澄清与回路", "业务问题优先点对点咨询相应角色；只有团队无法回答的产品取舍、验收标准或外部事实才等待人类。发现问题后通过协作消息交接处理和反馈结果。"],
       ["恢复与暂停", "Provider、工具或结构化输出错误封存失败 Trace 并重试原 Dispatch；五分钟无活跃成员巡检恢复调度。人类可暂停全部执行并手动继续，也可终止；等待澄清不会被巡检强行跳过。"],
       ["完成与后续咨询", "经理提交人类验收后进入 awaiting_acceptance，只有人类确认才 completed。未归档仍能咨询，停止状态下答疑不恢复开发；普通新指令进入队列，不打断正在执行的成员。归档后只读。"],
     ],
@@ -884,7 +882,6 @@ function workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, art
       </dl>
       <section class="workspace-directory-details" id="workspace-directory-details">${workspaceDirectoryDetails(run.task)}</section>
       <section class="workspace-context">${taskDescriptionMarkup(run.task, view)}</section>
-      ${qualityRiskMarkup(workspace)}
     </aside>`;
 }
 
@@ -923,7 +920,7 @@ function renderWorkspace() {
     box.innerHTML = state.selectedRunId ? `<div class="empty-state" role="status"><strong>${state.workspaceError ? "任务加载失败" : "正在加载任务…"}</strong>${esc(state.workspaceError || "正在读取协作记录与当前状态")}${state.workspaceError ? '<button class="small-button" data-reload-workspace>重试</button>' : ""}</div>` : `<div class="empty-state"><strong>还没有选择任务</strong>请从任务中心进入一个任务。</div>`;
     return;
   }
-  const { run, artifacts, messages, events, traces = [], defects = [] } = workspace;
+  const { run, artifacts, messages, events, traces = [] } = workspace;
   const view = workspaceView(run.id);
   const oldStream = box.querySelector("#trace-stream");
   if (box.dataset.runId === run.id) {
@@ -943,7 +940,7 @@ function renderWorkspace() {
   const humanScrollState = humanScroll?.clientHeight ? { top: humanScroll.scrollTop, following: humanScroll.scrollHeight - humanScroll.scrollTop - humanScroll.clientHeight < 48 } : null;
   if (humanScrollState) view.collaborationScroll = humanScrollState;
   if (view.jumpLatest) { view.consoleViews.delete(state.selectedAgentId); view.collaborationScroll = null; }
-  const focus = workflowFocus(run, traces, defects);
+  const focus = workflowFocus(run, traces);
   const agents = workspaceAgents(workspace, state.agents);
   const tab = view.tab;
   const consoleAgents = tab === 'console' ? workspaceAgents(workspace, state.agents, { includeDeleted: true }) : agents;
@@ -982,7 +979,7 @@ function renderWorkspace() {
       <button id="collaboration-mode" class="ws-tab ${tab === "collaboration" ? "active" : ""}" data-ws-tab="collaboration" role="tab" aria-controls="collaboration-panel" aria-selected="${tab === "collaboration"}">协作记录${workspace.pendingQuestions?.some((item) => item.recipient.type === "human") ? `<span class="collaboration-unread">${workspace.pendingQuestions.filter((item) => item.recipient.type === "human").length} 待你回复</span>` : ""}</button>
       <button id="directory-mode" class="ws-tab ${["directory", "diff"].includes(tab) ? "active" : ""}" data-ws-tab="directory" role="tab" aria-controls="working-directory-panel working-diff-panel" aria-selected="${["directory", "diff"].includes(tab)}">工作目录</button>
       <button id="console-mode" class="ws-tab ${tab === "console" ? "active" : ""}" data-ws-tab="console" role="tab" aria-controls="console-panel" aria-selected="${tab === "console"}">控制台</button>
-      <button class="text-action workspace-details-toggle" data-toggle-task-details aria-expanded="${Boolean(view.detailsOpen)}" aria-controls="workspace-details">任务详情${defects.filter(item => item.status !== "closed").length ? ` · ${defects.filter(item => item.status !== "closed").length} 项风险` : ""} ${view.detailsOpen ? "‹" : "›"}</button>
+      <button class="text-action workspace-details-toggle" data-toggle-task-details aria-expanded="${Boolean(view.detailsOpen)}" aria-controls="workspace-details">任务详情 ${view.detailsOpen ? "‹" : "›"}</button>
     </div>
     <div class="workspace-grid" id="console-panel" role="tabpanel" aria-labelledby="console-mode" ${tab !== "console" ? "hidden" : ""}>
       <nav class="role-nav" aria-label="角色与执行">
@@ -1701,45 +1698,6 @@ async function loadWorkingDiff(runId, path) {
   if (request === view.diffRequest) renderWorkingChanges(runId);
 }
 
-const DEFECT_STATUS_TEXT = { open: "待修复", fixing: "修复中", fixed: "待回归验证", verified: "已验证", closed: "已关闭" };
-const DEFECT_SEVERITY_TEXT = { critical: "严重", high: "高", medium: "中", low: "低" };
-
-function defectEvidenceMarkup(defect, artifacts) {
-  const evidenceIds = Array.isArray(defect.evidenceArtifactIds) ? defect.evidenceArtifactIds : [];
-  const evidence = evidenceIds.map((artifactId) => artifacts.find((artifact) => artifact.id === artifactId)).filter((artifact) => artifact && !artifact.deleted && artifact.storagePath);
-  if (!evidence.length) return `<span class="defect-evidence-missing">${evidenceIds.length ? "证据快照暂不可读取" : "历史 Defect 未记录可读取证据"}</span>`;
-  return `<div class="defect-evidence-actions"><span>已记录文件：${evidence.map(artifact => esc(artifact.name)).join("、")}</span>${[...new Set(evidence.map(artifact => artifact.traceId).filter(traceId => traceId && traceId !== defect.traceId))].map(traceId => `<button class="text-action trace-link" data-open-collaboration-trace="${esc(traceId)}">来源控制台 ↗</button>`).join("")}</div>`;
-}
-
-function defectRiskCard(defect, nodes, artifacts) {
-  const affected = (Array.isArray(defect.affectedNodeIds) ? defect.affectedNodeIds : []).map((nodeId) => nodes.find((node) => node.id === nodeId)?.title || nodeId).filter(Boolean);
-  const reproduction = Array.isArray(defect.reproduction) ? defect.reproduction.filter(Boolean) : [];
-  const severity = DEFECT_SEVERITY_TEXT[defect.severity] || defect.severity || "未分级";
-  const status = DEFECT_STATUS_TEXT[defect.status] || defect.status || "待确认";
-  return `<article class="defect-risk-card ${defect.status === "closed" ? "closed" : ""}">
-    <header><span class="defect-severity ${esc(defect.severity || "medium")}">${esc(severity)}优先级</span><span class="defect-status ${esc(defect.status || "open")}">${esc(status)}</span></header>
-    <strong>${esc(defect.title || "未命名 Defect")}</strong>
-    ${defect.description ? `<p>${esc(defect.description)}</p>` : ""}
-    <small>影响职责：${esc(affected.join("、") || "未标注")}</small>
-    ${reproduction.length ? `<details class="defect-reproduction"><summary>复现线索 · ${reproduction.length} 条</summary><ol>${reproduction.map((item) => `<li>${esc(item)}</li>`).join("")}</ol></details>` : ""}
-    <footer>${defectEvidenceMarkup(defect, artifacts)}${defect.traceId ? `<button class="text-action trace-link" data-open-collaboration-trace="${esc(defect.traceId)}">查看来源 Trace</button>` : ""}</footer>
-  </article>`;
-}
-
-function qualityRiskMarkup(workspace) {
-  const defects = Array.isArray(workspace.defects) ? workspace.defects : [];
-  const artifacts = Array.isArray(workspace.artifacts) ? workspace.artifacts : [];
-  const nodes = workspace.run?.task?.workflowSnapshot?.nodes || [];
-  const unresolved = defects.filter((defect) => defect.status !== "closed");
-  const closed = defects.filter((defect) => defect.status === "closed");
-  return `<section class="quality-risk-panel" aria-labelledby="quality-risk-heading">
-    <header><div><span class="panel-kicker">质量风险</span><h4 id="quality-risk-heading">${unresolved.length ? `${unresolved.length} 个待处理 Defect` : "当前没有未关闭 Defect"}</h4></div><span class="quality-risk-count">${defects.length} 项已记录</span></header>
-    <p class="quality-risk-note">${unresolved.length ? "缺陷是员工报告的待处理事项；可通过协作记录追加处理要求。" : "这里显示员工报告的问题，后续安排由项目经理协调。"}</p>
-    ${unresolved.length ? `<div class="defect-risk-list">${unresolved.map((defect) => defectRiskCard(defect, nodes, artifacts)).join("")}</div>` : ""}
-    ${closed.length ? `<details class="closed-defect-list"><summary>已关闭 ${closed.length} 项历史 Defect</summary><div class="defect-risk-list">${closed.map((defect) => defectRiskCard(defect, nodes, artifacts)).join("")}</div></details>` : ""}
-  </section>`;
-}
-
 function collaborationMessageMarkup(content, mentions = []) {
   // Same parse/sanitize/fallback path as the communication view; when the
   // vendored Markdown runtime is not loaded yet the honest escaped text shows
@@ -2005,7 +1963,7 @@ function openDeleteTaskModal(taskId) {
     <h2>删除任务</h2>
     <p class="modal-intro">将永久删除「${esc(task.title)}」及其 ${runs.length} 个 Run${artifactCount ? `、${artifactCount} 项已接纳交付快照` : ""}。这只适用于没有活跃 Run 或未结束答疑的任务。</p>
     <ul class="confirm-list">
-      <li>Task、Run、Trace、Artifact、消息、Decision、Defect 和 Event 都会被移除</li>
+      <li>Task、Run、Trace、Artifact、消息、Decision 和 Event 都会被移除</li>
       <li>同一 Run 的本地文件快照会被删除，无法恢复</li>
       <li>若本机文件系统暂时无法清理，快照会先被服务端隔离，Console 会明确提示后续清理</li>
       <li>不会取消或终止正在执行的本机 Agent；活跃 Run 或答疑进行中时根本不能删除</li>

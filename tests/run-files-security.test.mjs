@@ -215,7 +215,7 @@ const systemPrompt = instructionFlag < 0 ? "" : (await import("node:fs")).readFi
 const prompt = "[应用系统指令]" + String.fromCharCode(10) + systemPrompt + String.fromCharCode(10,10) + "[本轮输入]" + String.fromCharCode(10) + userPrompt;
 const reviewCriteria = JSON.parse((prompt.split("任务验收标准：")[1] || "[]").split(String.fromCharCode(10))[0]);
 const reviewEvidence = [...prompt.matchAll(/"id":"(artifact_[^"]+)"/g)].map((match) => match[1]).slice(0, 1);
-const result = { kind: "node_result", summary: "fixture delivery", artifacts: [], decisions: [], defects: [], resolvesDefectIds: [], verifiedDefectIds: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture input is sufficient", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
+const result = { kind: "node_result", summary: "fixture delivery", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture input is sufficient", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes('"purpose":"delivery_review"')) result.deliveryReview = { verdict: "pass", restartFromNodeId: "verify", findings: ["fixture evidence reviewed"] };
 else if (prompt.includes("任务级项目经理")) result.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "verify", rationale: "fixture routes the remaining responsibility" };
 else { mkdirSync("docs/verify", { recursive: true }); mkdirSync("docs/testing", { recursive: true }); writeFileSync("docs/verify/marker.md", "x".repeat(524289)); writeFileSync("docs/testing/review.md", "# Fixture test report"); }

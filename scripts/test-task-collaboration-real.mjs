@@ -41,7 +41,7 @@ try{
  await page.goto(origin+'/login');await page.locator('#username').fill('retry-qa');await page.locator('#password').fill(password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.locator('#account-name').waitFor();
  let worker,manager,task,run;
  if(!resume){
- ({agent:worker}=await api('/api/agents',{name:'续接验收员工',systemPrompt:workerMarker+'。编写 add.mjs 导出 add(a,b)，编写 add.test.mjs 用 node:test 验证正数和负数求和，并运行 node --test add.test.mjs。成功后普通文字交接。若已完成，则检查原文件并复跑测试后交接。',runtime:{profileId,extensionSelection:{pluginIds:[],mcpIds:[]}}}));
+ ({agent:worker}=await api('/api/agents',{name:'续接验收员工',systemPrompt:workerMarker+'。编写 add.mjs 导出 add(a,b)，编写 add.test.mjs 用 node:test 验证正数和负数求和，并运行 node --test add.test.mjs。成功后在协作交接正文说明工作中发现的问题、处理过程和验证结果；不输出独立问题清单字段。若已完成，则检查原文件并复跑测试后交接。',runtime:{profileId,extensionSelection:{pluginIds:[],mcpIds:[]}}}));
  ({agent:manager}=await api('/api/agents',{name:'续接验收经理',kind:'manager',systemPrompt:managerMarker+'。只将唯一节点 check 派给续接验收员工，不自己做文件。员工交接后提交 request_acceptance，不额外派工、不要求人类澄清。',runtime:{profileId,extensionSelection:{pluginIds:[],mcpIds:[]}}}));
  const {workflowTemplate:workflow}=await api('/api/workflow-templates',{name:'原员工失败恢复验证',nodes:[{id:'check',title:'求和与测试',staffingGuidance:'续接验收员工',deliverable:'add.mjs 和 add.test.mjs，通过 node --test',artifactPaths:['add.mjs','add.test.mjs'],dependsOn:[]}]});
  ({task}=await api('/api/tasks',{title:'原员工失败恢复真实验收',objective:'经理将 check 派给续接验收员工。员工实现 add.mjs 和 add.test.mjs，测试正数和负数求和并实际运行 node --test。收到成功交接后经理提交人类验收。',memberAgentIds:[manager.id,worker.id],workflowTemplateId:workflow.id}));

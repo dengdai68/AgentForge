@@ -138,7 +138,7 @@ test('role prompts join application system instructions for both task and commun
   const task = taskPrompt({
     task: { title: '目标', objective: 'TASK_OBJECTIVE', workspacePath: '/work', repositorySources: [], repositoryBindings: {}, acceptanceCriteria: [], workflowSnapshot: { nodes: [{ id: 'first', title: 'N', deliverable: 'D' }] } },
     run: { id: 'run-one' }, node: { id: 'first', title: 'N', deliverable: 'D' }, trace: { id: 'trace-one' }, agent, directory: '/trace', cwd: '/work',
-    workspace: { traces: [], pendingQuestions: [], defects: [], decisions: [], artifacts: [] }, messages: [], roster: [{ id: 'worker', name: '员工' }], mode: 'node', delivery: { messageIds: [], attempts: 1 }, session: { resume: false }
+    workspace: { traces: [], pendingQuestions: [], decisions: [], artifacts: [] }, messages: [], roster: [{ id: 'worker', name: '员工' }], mode: 'node', delivery: { messageIds: [], attempts: 1 }, session: { resume: false }
   });
   assert.match(task.systemPrompt, /PERSONA_RULE/);
   assert.match(task.systemPrompt, /绑定角色「核查员」的共用系统提示词：SHARED_ROLE_MARK/);

@@ -13,7 +13,7 @@ const taskInput = () => ({
   task: { title: '目标', objective: 'TASK_OBJECTIVE', workspacePath: '/work', repositorySources: [], repositoryBindings: {}, acceptanceCriteria: [], workflowSnapshot: { nodes: [{ id: 'first', title: 'CURRENT_WORK', deliverable: 'CURRENT_DELIVERY' }, { id: 'second', title: 'OTHER_NODE_SECRET' }] } },
   run: { id: 'run-one', manager:{id:'coordinator'} }, node: { id: 'first', title: 'CURRENT_WORK', deliverable: 'CURRENT_DELIVERY', artifactPaths: ['docs/first'] },
   trace: { id: 'trace-one' }, agent: { id: 'worker', name: '员工', kind: 'business', systemPrompt: 'PERSONA_RULE' }, directory: '/trace', cwd: '/work',
-  workspace: { traces: [], pendingQuestions: [], defects: [], decisions: [], artifacts: [] }, messages: [], roster: [{ id: 'worker', name: '员工' }], mode: 'node', delivery: { messageIds: [], attempts: 1 }, session: { resume: false }
+  workspace: { traces: [], pendingQuestions: [], decisions: [], artifacts: [] }, messages: [], roster: [{ id: 'worker', name: '员工' }], mode: 'node', delivery: { messageIds: [], attempts: 1 }, session: { resume: false }
 });
 
 test('workflow is manager-only system context; environment and persona never enter current input', () => {

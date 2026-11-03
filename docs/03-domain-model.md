@@ -42,7 +42,7 @@ MCP 编辑生成不可变新版本；Store.replaceMcpExtension 在一个事务�
 | Trace | 一次员工调用、原生会话和提示词引用 |
 | Message | 带发送者、接收者和 conversationId 的协作消息 |
 | Artifact | 绑定 Trace 的不可变文件快照元数据 |
-| Defect / Decision | 员工报告的问题与决定 |
+| Decision | 员工记录的决定 |
 | Event | 生命周期与执行审计事实 |
 
 ## 当前协作协议
@@ -108,3 +108,7 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 废弃当前配置不自动迁移/清除；已有旧研发员工可由操作者显式编辑为普通员工，并把原仓库说明写入 systemPrompt。保存明确去除其旧仓库绑定。已创建 Task/Run 的 repositoryMode、repositorySources、repositoryBindings、员工和工作流快照、真实仓库与执行历史均保留，继续按各自冻结事实执行；不以移除配置入口为由改写旧任务。
 
 普通沟通回复保存 reply 正文并结束该成员投递，不支持 handoffToAgentId 或转交；私聊只有 reply，群聊可由人类本次 @/广播及员工明确 mentionAgentIds 产生定向投递。已有转交历史保留为已发生事实，当前界面不再提供转交操作或强调转交标签。任务派工、角色咨询不属于普通沟通，保持原协议。
+
+问题发现、修复交接和核验结果全部由角色 Message 表达。移除独立 Defect 集合的创建/更新、状态流转和读模型，废弃 defects、resolvesDefectIds、verifiedDefectIds 输出字段，出现时明确拒绝并提示使用 summary/consultation 与 handoff。工作流焦点不再根据独立问题记录高亮，任务进度不含 openDefects/openDefectCount，原独立列表接口移除。
+
+这是输出与查询协议变更：调用方须移除旧字段并改用协作消息，无需重新初始化当前实例；不重写冻结消息、Trace、文件或存量数据库历史，不将旧清单伪造成角色发言。已有执行会话继续使用，后续调用遵循当前消息协议。
