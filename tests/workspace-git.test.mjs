@@ -14,7 +14,7 @@ async function fixture(){
  const root=await mkdtemp(join(tmpdir(),'af-source-control-'));
  const sources=[{path:'repos/one',url:'https://example.com/one.git'},{path:'repos/two',url:'https://example.com/two.git'}];
  await mkdir(join(root,'docs'),{recursive:true});for(const source of sources)await repo(join(root,source.path));
- const task={workspacePath:root,repositoryMode:'agent',repositorySources:sources};
+ const task={runId:'run-fixture',workspacePath:root,repositoryMode:'agent',repositorySources:sources};
  const files=createRunFiles({root:join(root,'.audit')});
  return {root,sources,task,files};
 }
@@ -55,7 +55,7 @@ test('source control shows actual root/child changes and diffs additions, staged
 
 test('whole workspace listing and CHANGE include root files, custom media and committed work without a manifest',async t=>{
  const root=await mkdtemp(join(tmpdir(),'af-all-workspace-'));t.after(()=>rm(root,{recursive:true,force:true}));
- const files=createRunFiles({root:join(root,'.agentforge/audit')}),task={workspacePath:root,repositoryMode:'agent',repositorySources:[]};
+ const files=createRunFiles({root:join(root,'.agentforge/audit')}),task={runId:'run-fixture',workspacePath:root,repositoryMode:'agent',repositorySources:[]};
  await initializeWorkspaceGit(root);
  await mkdir(join(root,'artifacts/preparation/assets'),{recursive:true});
  const media=await open(join(root,'artifacts/preparation/assets/source.mp4'),'w');await media.truncate(298473832);await media.close();
@@ -73,7 +73,7 @@ test('whole workspace listing and CHANGE include root files, custom media and co
 
 test('directory paging reaches every ordinary file beyond 1000 without reading contents or following links',async t=>{
  const root=await mkdtemp(join(tmpdir(),'af-directory-pages-'));t.after(()=>rm(root,{recursive:true,force:true}));
- const files=createRunFiles({root:join(root,'.agentforge/audit')}),task={workspacePath:root};await mkdir(join(root,'node_modules'));
+ const files=createRunFiles({root:join(root,'.agentforge/audit')}),task={runId:'run-fixture',workspacePath:root};await mkdir(join(root,'node_modules'));
  await Promise.all(Array.from({length:1005},(_,i)=>writeFile(join(root,'node_modules',String(i).padStart(4,'0')+'.txt'),'x')));
  await writeFile(join(root,'node_modules/.env'),'private');await symlink('/etc',join(root,'node_modules/escape'));
  const paths=[];let offset=0;do{const page=await files.listWorkingDirectory(task,{path:'node_modules',offset});assert.ok(page.entries.length<=200);paths.push(...page.entries.map(entry=>entry.path));offset=page.nextOffset;}while(offset!==null);
@@ -123,4 +123,42 @@ test('full-file Diff includes unchanged context outside the default hunks',async
  assert.match(full.patch,/ line 0\n/);assert.match(full.patch,/ line 39\n/);
  assert.match(full.patch,/-line 20\n\+updated 20/);
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('dynamic clone registration retains initial commit across commits, concurrent hooks and restart',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'af-dynamic-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const source=join(root,'source'),work=join(root,'work'),audit=join(root,'audit');await repo(source);await mkdir(work);await initializeWorkspaceGit(work);
+ const task={runId:'run-fixture',workspacePath:work},files=createRunFiles({root:audit});
+ await git(work,['clone',source,'project']);const child=join(work,'project');
+ const initial=(await git(child,['rev-parse','HEAD'])).stdout.trim();
+ // One shell call may already have committed before the first Hook runs.
+ await writeFile(join(child,'readme.md'),'committed\n');await git(child,['add','.']);await git(child,['commit','-m','change']);
+ await Promise.all([files.registerWorkingRepositories(task),files.registerWorkingRepositories(task)]);
+ const status=await files.listWorkingChanges(task);assert.equal(status.repositories[0].changes.length,0);
+ assert.equal(status.repositories[1].baseRef,initial);assert.deepEqual(status.repositories[1].changes.map(c=>c.path),['project/readme.md']);
+ assert.match((await files.readWorkingDiff(task,'project/readme.md')).patch,/-before\n\+committed/);
+ // Forget reflog after registration: the persisted baseline remains authoritative.
+ await git(child,['reflog','expire','--expire=now','--all']);
+ await writeFile(join(child,'readme.md'),'later\n');await writeFile(join(child,'extra.txt'),'new\n');
+ const restarted=createRunFiles({root:audit});assert.equal((await restarted.listWorkingChanges(task)).repositories[1].baseRef,initial);
+ assert.match((await restarted.readWorkingDiff(task,'project/readme.md')).patch,/-before\n\+later/);
+ await rm(join(child,'readme.md'));assert.match((await restarted.readWorkingDiff(task,'project/readme.md')).patch,/-before/);
+ await restarted.removeRun(task.runId);await assert.rejects(readFile(join(audit,'runs',task.runId,'workspace-repositories.json')), {code:'ENOENT'});
+ assert.equal(await readFile(join(child,'extra.txt'),'utf8'),'new\n');
+});
+
+test('unknown baseline is explicit; nested repositories own their files; symlink repositories are skipped',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'af-dynamic-missing-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const work=join(root,'work');await mkdir(work);await initializeWorkspaceGit(work);await repo(join(work,'manual'));
+ const files=createRunFiles({root:join(root,'audit')}),task={runId:'run-fixture',workspacePath:work};
+ await writeFile(join(work,'manual/readme.md'),'changed\n');
+ await symlink(join(work,'manual'),join(work,'linked'));
+ const status=await files.listWorkingChanges(task);const manual=status.repositories.find(r=>r.path==='manual');assert.match(manual.warning,/未记录/);assert.equal(manual.baseRef,'HEAD');assert.ok(!status.repositories.some(r=>r.path==='linked'));
+ await assert.rejects(files.readWorkingDiff(task,'linked/readme.md'),/符号链接/);
+ await git(work,['clone',join(work,'manual'),'manual/nested']);
+ await writeFile(join(work,'manual/nested/readme.md'),'nested change\n');
+ const nested=await files.listWorkingChanges(task);
+ assert.deepEqual(nested.repositories.find(r=>r.path==='manual/nested').changes.map(c=>c.path),['manual/nested/readme.md']);
+ assert.deepEqual(nested.repositories.find(r=>r.path==='manual').changes.map(c=>c.path),['manual/readme.md']);
+ assert.match((await files.readWorkingDiff(task,'manual/nested/readme.md')).patch,/-before\n\+nested change/);
 });

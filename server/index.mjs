@@ -574,7 +574,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   const repositoryTreeMatch = pathname.match(/^\/api\/runs\/([^/]+)\/repository-tree$/);
   const workingChangesMatch = pathname.match(/^\/api\/runs\/([^/]+)\/working-directory\/(changes|diff)$/);
   if (request.method === "GET" && workingChangesMatch) {
-    const task = store.getRunWorkspace(workingChangesMatch[1]).run.task;
+    const task = {...store.getRunWorkspace(workingChangesMatch[1]).run.task, runId: workingChangesMatch[1]};
     sendJson(response, 200, workingChangesMatch[2] === "changes"
       ? await runFiles.listWorkingChanges(task)
       : await runFiles.readWorkingDiff(task, searchParams.get("path") || "", { full: searchParams.get("full") === "1" }));

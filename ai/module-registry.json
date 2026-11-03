@@ -217,7 +217,8 @@
       "communicationContract": "Private chat uses reply-only; independent groups add explicit mentionAgentIds for peer questions. No handoff fields; Task managerDecision/consultation and frozen historical repository context remain separate.",
       "membershipContract": "Only the Run coordinator ID receives manager/workflow rules. Private replies stay reply-only; independent groups carry explicit mentionAgentIds and bounded per-human-round member delivery.",
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
-      "communicationPrompt": "Keep chat entry and discussion/file-change boundary; remove fixed language and enumerated Git/publish/credential, self/manager and attachment reminder sentences."
+      "communicationPrompt": "Keep chat entry and discussion/file-change boundary; remove fixed language and enumerated Git/publish/credential, self/manager and attachment reminder sentences.",
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
     },
     {
       "id": "cli.configuration",
@@ -820,7 +821,8 @@
           "filesystem",
           "security"
         ]
-      }
+      },
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
     },
     {
       "id": "server.workspace-git",
@@ -858,7 +860,8 @@
           "filesystem",
           "source control"
         ]
-      }
+      },
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
     },
     {
       "id": "server.local-agent-runtime",
@@ -946,7 +949,8 @@
       "dshTransport": "dsh.mjs adapts installed DeepSeek Harness 0.2.1-rc.2 SDK over JSON-RPC; dsh-plugin.mjs is materialized as a private native Cordis plugin for literal system-role instructions and the real model catalog. Per-session AgentForge-owned DeepSeek Harness homes retain native history while the native credentials service references the operator DeepSeek Harness credential file. No global plugin/config writes; selected Skills/MCP only; session/wait owns descendant completion. Native rendered system messages contribute only a boolean instruction-delivery audit; no system body is persisted.",
       "installationState": "cli-environment.runtimeInstalled checks executable presence through the invocation PATH without starting a CLI or reading credentials. HTTP injects the fact into Store; installed=false forces effective enabled=false, locks UI switches and rejects enabled writes/new invocations. No stored preference/frozen snapshot rewrite; DeepSeek Harness is the display name, dsh remains the protocol ID.",
       "componentImportIsolation": "Import skips only typed component-definition errors (Markdown schema/YAML, Hook JSON/events/groups/handlers); returns private-source-free warnings. Raw source retained, executable tree excludes invalid Markdown and materializes valid per-dialect manifests/hooks. Runtime plans/integrity stay strict; path/link/manifest/MCP failures abort batch.",
-      "nativeRecovery": "An explicit native successful completion plus zero process exit supersedes earlier errors for the current outcome only; preserve immutable diagnostics, latest failure and nonzero/incomplete failure. Codex presentation labels only the error event, never later content."
+      "nativeRecovery": "An explicit native successful completion plus zero process exit supersedes earlier errors for the current outcome only; preserve immutable diagnostics, latest failure and nonzero/incomplete failure. Codex presentation labels only the error event, never later content.",
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
     },
     {
       "id": "server.orchestrator",
@@ -993,7 +997,8 @@
           "output validation"
         ]
       },
-      "missingManagerDecision": "A manager reply without a decision/nextNodeId uses the existing routing correction dispatch, preserving the report and requesting an explicit decision rather than silently draining the run or inferring acceptance from prose. Worker text handoffs and inquiry replies remain valid."
+      "missingManagerDecision": "A manager reply without a decision/nextNodeId uses the existing routing correction dispatch, preserving the report and requesting an explicit decision rather than silently draining the run or inferring acceptance from prose. Worker text handoffs and inquiry replies remain valid.",
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
     },
     {
       "id": "client.console-projections",
@@ -1116,7 +1121,8 @@
       "configurationPresentation": "MCP cards hide internal installation IDs; plugin cards show actual versions only. Employee system prompts and shared role prompts use eight visible rows for create/edit. HTTP/CLI references and payloads unchanged.",
       "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action.",
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
-      "communicationRecovery": "Failed replies expose console/retry actions; selected console icons use accent blue. Description/path typography matches and directory loading uses accessible visual indicators."
+      "communicationRecovery": "Failed replies expose console/retry actions; selected console icons use accent blue. Description/path typography matches and directory loading uses accessible visual indicators.",
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
     },
     {
       "id": "web.manual-graphs",
@@ -1364,6 +1370,75 @@
         "reviewIf": [
           "scheduling",
           "lifecycle"
+        ]
+      }
+    },
+    {
+      "id": "server.workspace-hooks",
+      "path": "server/workspace-hooks.mjs",
+      "kind": "orchestration",
+      "owner": "artifact-runtime",
+      "purpose": "Invocation-scoped private socket for built-in post-tool repository registration; delegates filesystem observations to Run Files without collaboration messages or domain decisions.",
+      "sourceOfTruth": [
+        "docs/13-local-artifact-rendering.md"
+      ],
+      "tests": [
+        "tests/workspace-hooks.test.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "Run Files"
+      ],
+      "forbiddenDependencies": [
+        "direct domain mutation",
+        "global Provider configuration"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "server/README.md",
+          "docs/13-local-artifact-rendering.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "filesystem",
+          "runtime",
+          "privacy"
+        ]
+      }
+    },
+    {
+      "id": "server.workspace-hook-client",
+      "path": "server/workspace-hook-client.mjs",
+      "kind": "orchestration",
+      "owner": "artifact-runtime",
+      "purpose": "Built-in native command Hook sends a payload-free trigger to the invocation-owned registration socket; no filesystem or domain writes.",
+      "sourceOfTruth": [
+        "docs/13-local-artifact-rendering.md"
+      ],
+      "tests": [
+        "tests/workspace-hooks.test.mjs"
+      ],
+      "allowedDependencies": [
+        "node:http"
+      ],
+      "forbiddenDependencies": [
+        "direct domain mutation",
+        "global Provider configuration"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "server/README.md",
+          "docs/13-local-artifact-rendering.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "filesystem",
+          "runtime",
+          "privacy"
         ]
       }
     }

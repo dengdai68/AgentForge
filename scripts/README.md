@@ -125,3 +125,5 @@ test-roles-ui 覆盖角色/插件/MCP 框内多选添加/移除、无排序操�
 协作 UI 验收额外检查任务详情无独立问题面板；真实任务验收要求员工在交接正文报告问题、处理过程和验证结果。Provider 夹具不再输出已移除的问题清单字段。
 
 AGENTFORGE_CODEX_LOGIN_REAL=1 node scripts/test-codex-login-recovery-real.mjs 在隔离 Electron 中注入一次未登录、会话建立前持续报错；恢复时调用当前真实 Codex 账号，验证同一员工/私聊手动重试、真实会话 ID，以及任务派工、失败重试、产物测试和界面人类确认。不会登出或改写操作者凭据。沟通与任务 UI 脚本覆盖蓝色选中态、字号一致和目录加载无可见中文提示。
+
+`AGENTFORGE_WORKSPACE_CLONE_REAL=1 node scripts/test-workspace-clone-real.mjs` 在隔离 Electron 用真实模型执行 clone、修改、测试、commit、CHANGE 查看和人类确认；默认三种 Runtime，可用 `AGENTFORGE_WORKSPACE_CLONE_PROVIDERS=claude-code,codex,dsh` 选择。使用现有账号但不更改凭据，证据保留 .data。

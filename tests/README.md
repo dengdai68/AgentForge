@@ -81,3 +81,5 @@ roles.test 覆盖有序多角色校验/原子失败/冻结/历史读取；market
 人工失败恢复：dispatch-routing/smoke 验证原员工、投递引用、咨询父链、累计次数、原生会话、再次失败、重复请求拒绝、历史错误排除、优先领取和重启持久化；CLI 帮助同步但不新增恢复命令。test-task-retry-real.mjs 另用真实 Claude 任务、明确的进程失败注入、实际 UI 点击与人类验收验证完整续接，不以单测夹具代替。
 
 task-patrol.test.mjs 覆盖 10 秒巡检、准备阶段单飞、空闲经理恢复、人类等待/失败/终态排除、直接交接和动态继续输入。真实模型端到端验证见 scripts/test-task-collaboration-real.mjs，不以单元夹具代替。
+
+workspace-git / workspace-hooks 覆盖动态克隆后提交、并发登记、重启与 reflog 清理后固定基准、嵌套归属、缺失基准提示、链接拒绝和调用级 socket 生命周期/失败隔离。真实完整任务与宽窄 CHANGE 验收入口 scripts/test-workspace-clone-real.mjs。

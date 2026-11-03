@@ -1,5 +1,6 @@
 // Materialized into a private invocation directory for the external DeepSeek Harness Node
 // process; never imported into the HTTP service or renderer.
+import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { mountExtensions } from './dsh-extensions.mjs';
@@ -14,6 +15,13 @@ export async function apply(ctx, config) {
   // subprocess's environment or stdout.
   console.debug = console.error.bind(console);
   const instructions = JSON.parse(await readFile(config.instructionsPath, 'utf8'));
+  if (instructions.workspaceHook) ctx.on('tools/post-execute', async (_exec, _result, next) => {
+    await new Promise(resolve => {
+      const request=http.request({socketPath:instructions.workspaceHook.socket,path:'/register',method:'POST'},response=>{response.resume();response.on('end',resolve);});
+      request.setTimeout(30000,()=>request.destroy());request.on('error',resolve);request.end();
+    });
+    return next();
+  });
   if (instructions.systemPrompt) ctx.systemPrompt.section({ name: 'agentforge:application', order: 20000, text: instructions.systemPrompt, interpolate: false });
   if (instructions.outputSchema) ctx.systemPrompt.section({ name: 'agentforge:response', order: 20010, text: `仅输出符合以下 JSON Schema 的一个 JSON 对象，不添加 Markdown 围栏或额外说明：\n${JSON.stringify(instructions.outputSchema)}`, interpolate: false });
   // Do not make Loader readiness depend on its own readiness barrier.

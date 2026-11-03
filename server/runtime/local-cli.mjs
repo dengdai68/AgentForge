@@ -402,7 +402,7 @@ async function invokeClaudeCodeCli(input) {
     args.push("--append-system-prompt-file", instructionsPath, "--system-prompt-snapshot", "off");
   }
   if (outputSchema) args.push("--json-schema", JSON.stringify(outputSchema));
-  args.push('--strict-mcp-config', '--setting-sources', '', '--settings', '{"disableBundledSkills":true}');
+  args.push('--strict-mcp-config', '--setting-sources', '', '--settings', JSON.stringify({disableBundledSkills:true,...(input.workspaceHook ? {hooks:{PostToolUse:[{hooks:[{type:'command',command:input.workspaceHook.command,timeout:35}]}]}} : {})}));
   if (input.session) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.session.sessionId)) throw new Error("Claude Code 会话 ID 必须为 UUID");
     args.push(input.session.resume ? "--resume" : "--session-id", input.session.sessionId);
@@ -493,7 +493,7 @@ async function invokeCodexCli(input) {
   const nativeRuntime=await nativePluginRuntime(runtime,traceDirectory);
   const args = runtime.profile ? ["--profile", runtime.profile, "exec"] : ["exec"];
   if (input.systemPrompt) args.push("-c", `developer_instructions=${JSON.stringify(input.systemPrompt)}`);
-  args.push(...await codexMarketArgs(runtime, extensions, workspacePath, traceDirectory));
+  args.push(...await codexMarketArgs(runtime, extensions, workspacePath, traceDirectory, input.workspaceHook));
   if (input.historyMcp) {
     const {command,args:commandArgs,env} = input.historyMcp;
     // The bridge owns this small environment. In packaged builds its command

@@ -110,3 +110,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 tasks progress 不再输出 openDefects；任务与执行摘要不再提供独立问题计数。问题、修复与核验反馈使用 tasks collaboration 查询，tasks message/reply 发送。无新增参数或权限，最终确认仍在客户端；旧清单消费者应改用角色沟通记录，无需重置实例。
 
 本次为沟通恢复、Runtime 启动鉴权和展示调整。CLI 配置与任务命令/参数/输出保持；tasks progress 继续提示失败后在客户端重试。长期沟通尚无 CLI 命令，不新增权限。
+
+任务仓库基准由内置工具 Hook 自动登记；当前文件 CHANGE/diff 属于现有客户端读取能力，不新增 CLI 命令、字段、身份或写操作权限。员工/插件/MCP 配置协议不变，用户无需绑定额外插件。

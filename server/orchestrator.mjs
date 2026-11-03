@@ -1,3 +1,4 @@
+import { withWorkspaceHooks } from './workspace-hooks.mjs';
 import { join, resolve } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
 import { desktopServiceDataRoot } from "./data-home.mjs";
@@ -74,7 +75,7 @@ export function failureSignature(kind, message) {
 async function invokeRuntime(store, agent, input, files) {
   try {
     store.assertRuntimeEnabled(agent.runtime);
-    return await withDiagnosticContext({ traceId: input.traceId }, () => withHistoryTools(store, agent, input, provider, files));
+    return await withDiagnosticContext({ traceId: input.traceId }, () => withWorkspaceHooks(files, {...store.getRunTask(input.runId),runId:input.runId}, input, prepared => withHistoryTools(store, agent, prepared, provider, files)));
   } catch (error) {
     if (error instanceof RuntimeCancelledError || error instanceof RuntimeSessionMissingError) throw error;
     diagnostic("task.runtime_error", { error });

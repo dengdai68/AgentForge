@@ -1,7 +1,7 @@
 // Local source-control observations. These never decide whether work is accepted.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { lstat, readFile, writeFile } from 'node:fs/promises';
+import { lstat, readFile, writeFile, readdir } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 const exec = promisify(execFile);
 const MAX_BYTES = 512 * 1024;
@@ -14,6 +14,32 @@ async function exists(path) { try { await lstat(path); return true; } catch (e) 
 async function repository(root) {
   const info = await lstat(join(root,'.git')).catch(e => { if (e.code !== 'ENOENT') throw e; });
   return Boolean(info?.isDirectory() && !info.isSymbolicLink());
+}
+// Discover ordinary nested repositories without following filesystem links.
+export async function discoverWorkspaceRepositories(root) {
+  const found = [], excluded = new Set(['.git','.agentforge','node_modules','.data','.cache','.venv','__pycache__','coverage']);
+  let visited = 0;
+  async function walk(directory, prefix = '') {
+    if (++visited > 10000) throw new Error('仓库发现目录过多，无法完整读取');
+    for (const entry of await readdir(directory, {withFileTypes:true})) {
+      if (!entry.isDirectory() || excluded.has(entry.name) || entry.name.startsWith('.env')) continue;
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+      await sourceControlPath(root,path);
+      if (await repository(join(root,path))) found.push({path});
+      await walk(join(root,path),path);
+    }
+  }
+  await walk(root);
+  return found;
+}
+export async function cloneComparisonBase(root, path) {
+  // A post-tool callback can arrive after clone AND commit in one shell call.
+  // Only the explicit original clone reflog entry proves that earlier boundary.
+  const result = await git(join(root,path), ['reflog','show','--format=%H%x00%gs','HEAD']).catch(()=>null);
+  const first = result?.stdout.trimEnd().split('\n').at(-1)?.split('\0');
+  if (!first || !/^[a-f0-9]{40,64}$/.test(first[0]) || !first[1]?.startsWith('clone: from ')) return null;
+  await git(join(root,path),['cat-file','-e',`${first[0]}^{commit}`]);
+  return first[0];
 }
 export async function initializeWorkspaceGit(root, sources = []) {
   // Never stage employee files or rewrite an existing repository's index/HEAD.
@@ -42,7 +68,11 @@ export async function initializeWorkspaceGit(root, sources = []) {
 }
 // Read the original gitlink, not the child HEAD (which advances when employees commit).
 // An absent baseline is explicitly labelled as HEAD-only; never guess from remote main.
-async function comparisonBase(root, repositoryPath) {
+async function comparisonBase(root, repositoryPath, registered) {
+  if (registered?.baseRef) {
+    await git(join(root,repositoryPath),['cat-file','-e',`${registered.baseRef}^{commit}`]);
+    return {ref:registered.baseRef,label:'仓库克隆初始版本'};
+  }
   if (repositoryPath && await repository(root)) {
     const history = await git(root, ['rev-list', '--first-parent', 'HEAD']).catch(() => null);
     const initial = history?.stdout.trim().split('\n').at(-1);
@@ -67,16 +97,16 @@ async function comparisonBase(root, repositoryPath) {
 }
 export async function workspaceGitStatus(root, sources = [], visible = () => true) {
   const groups = [];
-  for (const item of [{path:'',label:'工作目录'},...sources.map(s=>({path:s.path,label:s.path.split('/').at(-1)}))]) {
+  for (const item of [{path:'',label:'工作目录'},...sources.map(s=>({...s,label:s.path.split('/').at(-1)}))]) {
     const cwd = join(root,item.path);
     if (!await repository(cwd)) { groups.push({...item, initialized:false,changes:[]}); continue; }
     try {
-      const base = await comparisonBase(root, item.path);
+      const base = await comparisonBase(root, item.path, item);
       const changes = new Map();
       const add = (path, status) => {
         const full = item.path ? `${item.path}/${path}` : path;
         const submodule = !item.path && sources.some(source => source.path === full);
-        if (!visible(full) || (!item.path && sources.some(source=>full.startsWith(source.path+'/')))) return;
+        if (!visible(full) || sources.some(source=>source.path!==item.path && (!item.path || source.path.startsWith(item.path+'/')) && (full===source.path && source.dynamic || full.startsWith(source.path+'/')))) return;
         changes.set(full, {path:full, repositoryPath:item.path, ...(submodule ? {submodule:true} : {}), status});
       };
       const hasBase = await git(cwd, ['rev-parse', '--verify', base.ref]).then(() => true, () => false);
@@ -90,7 +120,7 @@ export async function workspaceGitStatus(root, sources = [], visible = () => tru
       }
       const untracked = await git(cwd, ['ls-files', '--others', '--exclude-standard', '-z']);
       for (const path of untracked.stdout.split('\0').filter(Boolean)) add(path, 'A');
-      groups.push({...item,initialized:true,baseRef:base.ref,baseLabel:base.label,changes:[...changes.values()].sort((a,b)=>a.path.localeCompare(b.path))});
+      groups.push({...item,initialized:true,baseRef:base.ref,baseLabel:base.label,...(item.dynamic && !item.baseRef ? {warning:'未记录仓库初始版本，仅显示未提交更改'} : {}),changes:[...changes.values()].sort((a,b)=>a.path.localeCompare(b.path))});
     } catch { groups.push({...item,initialized:true,changes:[],error:'无法读取 Git 差异或任务初始版本，请检查本机仓库后刷新。'}); }
   }
   return {repositories:groups,readAt:new Date().toISOString()};
@@ -107,7 +137,7 @@ export async function sourceControlPath(root, path) {
   }
   return current;
 }
-export async function workspaceGitDiff(root, repositoryPath, path, { submodule = false, full = false } = {}) {
+export async function workspaceGitDiff(root, repositoryPath, path, { submodule = false, full = false, registered = null } = {}) {
   const context = full ? '--unified=1000000' : '--unified=3';
   const cwd=join(root,repositoryPath), file=await sourceControlPath(root,path), local=relative(cwd,file).replaceAll('\\','/');
   if(local.startsWith('../')||isAbsolute(local))throw new Error('文件不属于当前仓库');
@@ -118,7 +148,7 @@ export async function workspaceGitDiff(root, repositoryPath, path, { submodule =
     const result = await git(cwd,['diff',context,'--no-ext-diff','--no-textconv','--no-color','--submodule=short','--ignore-submodules=dirty','HEAD','--',local]);
     return {path,submodule:true,binary:false,tooLarge:false,patch:result.stdout};
   }
-  const comparison = await comparisonBase(root, repositoryPath);
+  const comparison = await comparisonBase(root, repositoryPath, registered);
   let base=null;
   const hasHead=await git(cwd,['rev-parse','--verify',comparison.ref]).then(()=>true,()=>false);
   if(hasHead){

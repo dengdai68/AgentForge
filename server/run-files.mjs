@@ -1,4 +1,4 @@
-import { initializeWorkspaceGit, workspaceGitStatus, workspaceGitDiff, sourceControlPath } from "./workspace-git.mjs";
+import { initializeWorkspaceGit, workspaceGitStatus, workspaceGitDiff, sourceControlPath, discoverWorkspaceRepositories, cloneComparisonBase } from "./workspace-git.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { diagnostic, diagnosticRedactor } from "./diagnostics.mjs";
@@ -13,6 +13,7 @@ const DEFAULT_PREVIEW_BYTES = 512 * 1024;
 const DIRECTORY_PAGE_SIZE = 200;
 const DEFAULT_MAX_TREE_ENTRIES = 1000;
 const execFileAsync = promisify(execFile);
+const repositoryScans = new Map();
 const ignoredDirectories = new Set([".git", "node_modules", ".data", ".agentforge"]);
 const sensitiveWorkspaceEntry = (name) => [".npmrc", ".pypirc", "credentials.json"].includes(name) || /^\.env(?:\.|$)/i.test(name) || /\.(pem|key|p12|pfx)$/i.test(name) || /^id_(rsa|ed25519)(?:\.|$)/.test(name);
 const hiddenWorkspaceEntry = (name) => ignoredDirectories.has(name) || [".DS_Store", "__pycache__", ".cache", ".venv", "coverage", ".agentforge-workspace.json"].includes(name) || sensitiveWorkspaceEntry(name);
@@ -363,6 +364,42 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     if (typeof runId !== "string" || !runId || runId === "." || runId === ".." || runId.includes("/") || runId.includes("\\") || runId.includes("\0")) throw new Error("Run ID 不合法");
     return runId;
   };
+  async function registeredRepositories(task) {
+    const key = resolve(task.workspacePath), storage = pathForRun(task.runId);
+    const scanKey = storage;
+    if (repositoryScans.has(scanKey)) return repositoryScans.get(scanKey);
+    const pending = (async () => {
+      await workspaceRoot(key);
+      const name = 'workspace-repositories.json';
+      await mkdir(runRoot,{recursive:true,mode:0o700});
+      if ((await lstat(runRoot)).isSymbolicLink()) throw new Error('执行文件根不允许符号链接');
+      for (const part of ['runs',`runs/${task.runId}`]) {
+        await mkdir(join(runRoot,part),{mode:0o700}).catch(error=>{if(error.code!=='EEXIST')throw error;});
+        await artifactFile(runRoot,part);
+      }
+      let saved = [];
+      try { saved = JSON.parse((await readArtifactFile(runRoot,`runs/${task.runId}/${name}`,1024*1024)).content.toString('utf8')); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (!Array.isArray(saved) || saved.some(item=>!item || typeof item.path!=='string' || !/^[a-f0-9]{40,64}$/.test(item.baseRef || ''))) throw new Error('仓库初始版本记录无效');
+      for (const item of saved) workspaceRelative(item.path);
+      const frozen = workspaceRepositories(task), discovered = await discoverWorkspaceRepositories(key);
+      let changed = false;
+      for (const item of discovered) {
+        if (frozen.some(old=>old.path===item.path) || saved.some(old=>old.path===item.path)) continue;
+        const baseRef = await cloneComparisonBase(key,item.path);
+        if (baseRef) { saved.push({path:item.path,baseRef,registeredAt:new Date().toISOString()}); changed=true; }
+      }
+      if (changed) {
+        const temporary = join(storage,`${name}.${randomUUID()}.tmp`);
+        try { await writeFile(temporary,JSON.stringify(saved),{mode:0o600,flag:'wx'}); await rename(temporary,join(storage,name)); }
+        finally { await rm(temporary,{force:true}); }
+      }
+      const dynamic = [...new Set([...discovered,...saved].map(item=>item.path))].filter(path=>!frozen.some(item=>item.path===path)).map(path=>({path,dynamic:true,...saved.find(item=>item.path===path)}));
+      return [...frozen,...dynamic].sort((a,b)=>a.path.localeCompare(b.path));
+    })();
+    repositoryScans.set(scanKey,pending);
+    try { return await pending; } finally { repositoryScans.delete(scanKey); }
+  }
   const pathForRun = (runId) => assertInside(runRoot, join(runRoot, "runs", runIdSegment(runId)));
   const pathForTrace = (runId, traceId) => assertInside(runRoot, join(pathForRun(runId), "traces", traceId));
   const communicationPath = (key) => {
@@ -547,9 +584,10 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       }
       return {workspacePath:task.workspacePath,path,entries,nextOffset:offset+DIRECTORY_PAGE_SIZE<children.length?offset+DIRECTORY_PAGE_SIZE:null,readAt:new Date().toISOString()};
     },
+    registerWorkingRepositories: registeredRepositories,
     async listWorkingChanges(task) {
       await workspaceRoot(task.workspacePath);
-      const repositories=workspaceRepositories(task);
+      const repositories=await registeredRepositories(task);
       for (const entry of repositories) {
         try { await workspaceFile(task.workspacePath, entry.path); }
         catch (error) { if (error.code !== "ENOENT") throw error; }
@@ -561,10 +599,10 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       workspaceRelative(path);
       if (path.split("/").some(privateWorkspaceEntry)) throw new Error("不能读取内部或敏感文件");
       await workspaceRoot(task.workspacePath);
-      const repository = workspaceRepositories(task).find(entry => path.startsWith(`${entry.path}/`) || path === entry.path);
+      const repository = (await registeredRepositories(task)).sort((a,b)=>b.path.length-a.path.length).find(entry => path.startsWith(`${entry.path}/`) || path === entry.path);
       await sourceControlPath(task.workspacePath, path);
-      const submodule = Boolean(repository && path === repository.path);
-      return workspaceGitDiff(task.workspacePath, repository && !submodule ? repository.path : "", path, { submodule, full });
+      const submodule = Boolean(repository && !repository.dynamic && path === repository.path);
+      return workspaceGitDiff(task.workspacePath, repository && !submodule ? repository.path : "", path, { submodule, full, registered: repository });
     },
     async readWorkingFile(task, path, { raw = false, download = false } = {}) {
       if (raw && download) throw new Error("下载与图片预览不能同时请求");

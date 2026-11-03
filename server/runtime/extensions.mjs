@@ -100,7 +100,7 @@ export async function selectedExtensions(runtime) {
   return servers;
 }
 
-export async function codexMarketArgs(runtime, servers, workspacePath, traceDirectory) {
+export async function codexMarketArgs(runtime, servers, workspacePath, traceDirectory, workspaceHook = null) {
   const isolation = ['-c', 'features.apps=false', '-c', 'features.skip_host_skill_discovery=true', '-c', 'features.plugins=false', '-c', 'features.skill_mcp_dependency_install=false'];
   // Refuse old CLIs instead of silently accepting an unknown config key.
   const env = cliEnvironment(runtime.executable || 'codex');
@@ -174,6 +174,7 @@ export async function codexMarketArgs(runtime, servers, workspacePath, traceDire
     for(const event of ['SubagentStart','PreToolUse'])hooks[event].unshift({hooks:[{type:'command',command}]});
     hookCount++;
   }
+  if (workspaceHook) { hooks.PostToolUse.unshift({hooks:[{type:'command',command:workspaceHook.command,timeout:35}]}); hookCount++; }
   // Replace each event array rather than merging ambient user command hooks.
   for(const [event,groups] of Object.entries(hooks)) pluginArgs.push('-c',`hooks.${event}=${tomlValue(groups)}`);
   if(hookCount) pluginArgs.push('--dangerously-bypass-hook-trust');
