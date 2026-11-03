@@ -357,7 +357,7 @@ test("bootstrap Task lists use workspace labels instead of host paths", async ()
   assert.match(source, /const workspaceSummary = \(task = \{\}\)/);
   assert.match(listViews, /workspaceSummary\(task\)/);
   assert.doesNotMatch(listViews, /task\.workspacePath/);
-  assert.doesNotMatch(source.slice(source.indexOf("function renderTasks()"), source.indexOf("/* ---------- 团队 ---------- */")), /col-path|col-workflow/);
+  assert.doesNotMatch(source.slice(source.indexOf("function renderTasks()"), source.indexOf("/* ---------- 团队 ---------- */")), /col-path/);
 });
 
 test("Task freezes explicit acceptance criteria, rejects malformed input, and migrates legacy scalars", async () => {
@@ -768,9 +768,9 @@ test("custom workflow deletion preserves Task template references", async () => 
 test("task center exposes deletion only when the Store says it is safe", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const start = source.indexOf("function taskMatchesSearch("), end = source.indexOf("\n\n/* ---------- 团队", start);
-  const hosts = { "#tasks-heading": {}, "#task-filter-bar": {}, "#tasks-table": {}, "#task-search-form .task-directory-actions": { innerHTML: "" } };
+  const hosts = { "#tasks-heading": {}, "#task-filter-bar": {}, "#tasks-table": {}, "#task-search-form .task-directory-actions": { innerHTML: "" }, "#task-search-form select[name=workflow]": { innerHTML: "", value: "all" } };
   const state = {
-    taskArchiveView: false, listPages: { tasks: 1, archive: 1 },
+    taskArchiveView: false, taskSearch: { name: "", status: "all", workflow: "all" }, listPages: { tasks: 1, archive: 1 },
     taskFilter: "all",
     tasks: [
       { id: "backlog", title: "未启动", objective: "尚未创建 Run", status: "backlog", deletionBlockedBy: null, updatedAt: "2026-09-29T00:00:00.000Z", team: { name: "团队" }, workflowSnapshot: { name: "流程" } },

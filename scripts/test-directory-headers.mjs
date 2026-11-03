@@ -24,6 +24,9 @@ for (let i = 0; i < 22; i++) {
   store.createWorkflowTemplate({ name: '目录搜索流程 ' + i, description: 'Search boundary ' + i, nodes: seedFlow.nodes });
 }
 store.createTask({ title: '目录工具栏验收', objective: '仅检查列表展示，不启动执行。', memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: 'software_delivery' });
+const taskFlow = store.createWorkflowTemplate({ name: '任务筛选流程旧名', nodes: seedFlow.nodes });
+for (let i = 0; i < 23; i++) store.createTask({ title: '工作流筛选任务 ' + i, objective: '仅检查列表，不运行模型。', memberAgentIds: seedTeam.memberAgentIds, workflowTemplateId: taskFlow.id });
+store.updateWorkflowTemplate(taskFlow.id, { name: '任务筛选流程新名', nodes: seedFlow.nodes });
 store.close();
 const app = await electron.launch({ ...(packaged ? { executablePath: resolve('release/mac-arm64/AgentForge.app/Contents/MacOS/AgentForge') } : {}), args: packaged ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 60000 });
 const errors = [], evidence = { baseline, packaged, root, views: [] };
@@ -74,6 +77,21 @@ try {
           const heading = await p.locator('#tasks-heading').evaluate(node => ({ width: node.offsetWidth, height: node.offsetHeight, position: getComputedStyle(node).position, clip: getComputedStyle(node).clip }));
           assert.deepEqual(heading, { width: 1, height: 1, position: 'absolute', clip: 'rect(0px, 0px, 0px, 0px)' }, 'duplicate title is accessible but occupies no layout space');
           assert.equal(await p.locator('#tasks-heading h2').textContent(), '任务中心');
+          const workflow = p.locator('#task-search-form [name=workflow]');
+          await workflow.selectOption(taskFlow.id);
+          await p.locator('#task-search-form [type=submit]').click();
+          assert.equal(await p.locator('#tasks-table tbody tr').count(), 20);
+          assert.deepEqual(await p.locator('#tasks-table .task-workflow').allTextContents(), Array(20).fill('任务筛选流程旧名'));
+          await p.locator('[data-pagination="tasks"] [data-page="2"]').click();
+          assert.equal(await p.locator('#tasks-table tbody tr').count(), 3);
+          await p.locator('#task-search-form [name=name]').fill('工作流筛选任务 22');
+          await p.locator('#task-search-form [type=submit]').click();
+          assert.equal(await p.locator('#tasks-table tbody tr').count(), 1, 'combined filter searches before pagination');
+          await p.locator('#task-search-form [name=status]').selectOption('running');
+          await p.locator('#task-search-form [type=submit]').click();
+          assert.match(await p.locator('#tasks-table').innerText(), /没有匹配/);
+          await p.locator('#task-search-form [type=reset]').click();
+          assert.equal(await workflow.inputValue(), 'all');
           const name = p.locator('#task-search-form [name=name]'); await name.fill('目录工具栏验收');
           await p.locator('#task-search-form [type=submit]').click();
           await p.locator('[data-task-center-page=archive]').click();
@@ -88,7 +106,11 @@ try {
       evidence.views.push({ mode, view, ...geometry }); await p.screenshot({ path: join(root, `${mode}-${view}.png`) });
     }
   };
+  await page.goto(origin + '/settings/appearance');
+  await page.locator('[name=theme][value=minimal]').check();
   await inspect(page, 'desktop-wide');
+  await page.goto(origin + '/settings/appearance');
+  await page.locator('[name=theme][value=warm]').check();
   await app.evaluate(({ BrowserWindow }, origin) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().startsWith(origin)).setContentSize(760, 600), origin); await page.waitForFunction(() => innerWidth === 760);
   await inspect(page, 'desktop-narrow');
   assert.deepEqual(errors, []); evidence.result = 'PASS'; await writeFile(join(root, 'evidence.json'), JSON.stringify(evidence, null, 2));

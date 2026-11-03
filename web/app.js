@@ -27,7 +27,7 @@ const initialRoute = routeFromLocation();
 const state = {
   agents: [], teams: [], tasks: [], runs: [], events: [], workflowTemplates: [], roles: [],
   workspace: null, selectedRunId: initialRoute.runId, selectedAgentId: null,
-  taskSearch: { name: "", status: "all" }, taskArchiveView: Boolean(initialRoute.taskArchiveView),
+  taskSearch: { name: "", status: "all", workflow: "all" }, taskArchiveView: Boolean(initialRoute.taskArchiveView),
   currentView: initialRoute.view, manualPage: initialRoute.manualPage || "data-model",
   settingsPage: initialRoute.settingsPage || "general",
   selectedChatId: initialRoute.chatId || null,
@@ -401,9 +401,10 @@ function renderOverview() {
 }
 
 /* ---------- 任务中心 ---------- */
-function taskMatchesSearch(task, { name = "", status = "all" } = {}) {
+function taskMatchesSearch(task, { name = "", status = "all", workflow = "all" } = {}) {
   return String(task.title || "").toLocaleLowerCase().includes(name.trim().toLocaleLowerCase())
-    && (status === "all" || task.status === status);
+    && (status === "all" || task.status === status)
+    && (workflow === "all" || task.workflowTemplateId === workflow);
 }
 
 function renderTasks() {
@@ -419,9 +420,21 @@ function renderTasks() {
     $("#task-filter-bar").innerHTML = `<form id="task-search-form" class="task-search-form" role="search" aria-label="搜索任务">
       <label class="task-search-name"><span class="sr-only">任务名称</span><input type="search" name="name" placeholder="任务名称" value="${esc(search.name || "")}" /></label>
       <label><span class="sr-only">任务状态</span><select name="status"><option value="all">全部状态</option>${["backlog", "planning", "running", "awaiting_human", "review", "awaiting_acceptance", "paused", "blocked", "failed", "done", "cancelled"].map((id) => `<option value="${id}" ${search.status === id ? "selected" : ""}>${statusText[id]}</option>`).join("")}</select></label>
+      <label class="task-search-workflow"><span class="sr-only">工作流</span><select name="workflow"><option value="all">全部工作流</option></select></label>
       <button type="submit" class="primary-button">搜索</button><button type="reset" class="ghost-button">重置</button>
       <span class="task-directory-actions"></span>
     </form>`;
+  }
+  const workflowSelect = $("#task-search-form select[name=workflow]");
+  const workflowNames = new Map(state.workflowTemplates.map(item => [item.id, item.name]));
+  for (const task of state.tasks) if (task.workflowTemplateId && !workflowNames.has(task.workflowTemplateId)) {
+    workflowNames.set(task.workflowTemplateId, task.workflowSnapshot?.name || task.workflowTemplateId);
+  }
+  const workflowOptions = `<option value="all">全部工作流</option>${[...workflowNames].map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("")}`;
+  if (workflowSelect.innerHTML !== workflowOptions) {
+    const selection = mountSearch ? state.taskSearch.workflow : workflowSelect.value;
+    workflowSelect.innerHTML = workflowOptions;
+    workflowSelect.value = workflowNames.has(selection) ? selection : "all";
   }
   const actionMarkup = archiveView
     ? `<button type="button" class="ghost-button" data-task-center-page="current">返回任务中心</button>`
@@ -436,8 +449,8 @@ function renderTasks() {
   const pageKey = archiveView ? "archive" : "tasks";
   const page = paginate(rows, state.listPages[pageKey]);
   state.listPages[pageKey] = page.page;
- $("#tasks-table").innerHTML = `<table class="table task-inventory"><colgroup><col class="col-task" /><col class="col-status" /><col class="col-updated" /><col class="col-actions" /></colgroup><thead><tr>
-      <th>任务名称</th><th>状态</th><th>${archiveView ? "归档时间" : "更新"}</th><th style="text-align:right">操作</th>
+ $("#tasks-table").innerHTML = `<table class="table task-inventory"><colgroup><col class="col-task" /><col class="col-workflow" /><col class="col-status" /><col class="col-updated" /><col class="col-actions" /></colgroup><thead><tr>
+      <th>任务名称</th><th>工作流</th><th>状态</th><th>${archiveView ? "归档时间" : "更新"}</th><th style="text-align:right">操作</th>
     </tr></thead><tbody>
     ${page.items.map((task) => {
       const run = runOfTask(task.id);
@@ -452,6 +465,7 @@ function renderTasks() {
       const action = `${openAction}${deletionNotice}${secondary}`;
       return `<tr>
         <td>${run ? `<button class="table-title task-title-link" data-open-task="${task.id}" title="${esc(task.title)}">${esc(task.title)}</button>` : `<span class="table-title">${esc(task.title)}</span>`}</td>
+        <td class="task-workflow">${esc(task.workflowSnapshot?.name || task.workflowTemplateId || "—")}</td>
         <td>${pill(task.status)}</td>
         <td style="white-space:nowrap" title="${esc(archiveView ? exactTime(task.archivedAt) : exactTime(task.updatedAt))}">${archiveView ? exactTime(task.archivedAt) : timeAgo(task.updatedAt)}</td>
         <td><div class="table-actions">${action}</div></td>
@@ -2349,17 +2363,18 @@ document.addEventListener("submit", (event) => {
   if (event.target.id !== "task-search-form") return;
   event.preventDefault();
   const fields = new FormData(event.target);
-  state.taskSearch = { name: String(fields.get("name") || ""), status: String(fields.get("status") || "all") };
+  state.taskSearch = { name: String(fields.get("name") || ""), status: String(fields.get("status") || "all"), workflow: String(fields.get("workflow") || "all") };
   state.listPages[state.taskArchiveView ? "archive" : "tasks"] = 1;
   renderTasks();
 });
 document.addEventListener("reset", (event) => {
   if (event.target.id !== "task-search-form") return;
   event.preventDefault();
-  state.taskSearch = { name: "", status: "all" };
+  state.taskSearch = { name: "", status: "all", workflow: "all" };
   state.listPages[state.taskArchiveView ? "archive" : "tasks"] = 1;
   event.target.elements.name.value = "";
   event.target.elements.status.value = "all";
+  event.target.elements.workflow.value = "all";
   renderTasks();
 });
 

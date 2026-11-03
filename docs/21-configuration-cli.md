@@ -1,5 +1,7 @@
 # CLI 指南
 
+`agentforge tasks list --workflow ID_OR_NAME` 按工作流精确 ID 或唯一名称（当前或任务冻结名称）筛选；同名歧义明确拒绝，改用 ID。与 `--search`、`--status`、`--archived` 组合后分页；文本/JSON 摘要包含 `workflow: {id, name}`，name 为任务冻结名称。
+
 客户端人工恢复会继续原失败员工的 Dispatch 与会话，保留累计 attempts、消息引用和失败 Trace；CLI progress/协作查询继续展示真实历史，本轮不新增恢复命令或输入字段。
 
 任务通过独立成员集合创建，Store 校验恰好一位可用项目经理，团队仅用来批量选人。删除员工与团队的冻结历史语义见 [领域模型](03-domain-model.md)。

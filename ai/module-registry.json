@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "project": "agentforge",
   "distribution": "AgentForge-App is the self-contained desktop extraction from AgentForge c1277e5. Client-only: npm start/dev launch Electron; the loopback child requires IPC ownership, no standalone Web/server launch. server/web/client/cli are bundled dependencies. No sibling repository imports. See docs/23-desktop-extraction.md.",
+  "taskWorkflowListing": "Task lists display frozen workflow names and filter by stable workflow IDs before pagination. CLI tasks list --workflow ID_OR_NAME resolves unique current/frozen names, exposes workflow ID/name references, and rejects missing or ambiguous names. Covered by configuration-cli tests and isolated directory-headers UI acceptance.",
   "purpose": "Module ownership, current contracts and change-impact requirements for the local AgentForge control plane and clients.",
   "instructions": [
     "AGENTS.md",

@@ -10,7 +10,7 @@ import { collaborationRecords } from '../client/console-projections.mjs';
 function parse(argv) {
   const args = [], flags = {};
   const switches = new Set(['help', 'yes', 'all', 'password-stdin', 'json', 'archived']);
-  const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'run']);
+  const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'run', 'workflow']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { args.push(arg); continue; }
@@ -46,7 +46,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (['delete', 'terminate', 'test'].includes(operation)) allowed.push('yes');
     if (group === 'tasks') {
       if (['message', 'reply'].includes(operation)) allowed.push('file');
-      if (operation === 'list') allowed.push('status', 'archived');
+      if (operation === 'list') allowed.push('status', 'archived', 'workflow');
       if (['progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'terminate'].includes(operation)) allowed.push('run');
       if (['collaboration', 'questions', 'artifacts'].includes(operation)) allowed.push('page', 'all');
     }
@@ -120,10 +120,10 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
 
 const reference = (id, name) => id ? { id, name: name || null } : null;
 function taskView(task, { summary = false } = {}) {
-  const base = { id: task.id, title: task.title, status: task.status, memberCount: task.memberAgentIds?.length || (task.memberSnapshots?.length || 0) + (task.managerSnapshot ? 1 : 0), updatedAt: task.updatedAt, archivedAt: task.archivedAt };
+  const base = { id: task.id, title: task.title, status: task.status, workflow: reference(task.workflowTemplateId, task.workflowSnapshot?.name), memberCount: task.memberAgentIds?.length || (task.memberSnapshots?.length || 0) + (task.managerSnapshot ? 1 : 0), updatedAt: task.updatedAt, archivedAt: task.archivedAt };
   if (summary) return base;
   return { ...base, priority: task.priority, objective: task.objective, acceptanceCriteria: task.acceptanceCriteria,
-    workspacePath: task.workspacePath, workflow: reference(task.workflowTemplateId, task.workflowSnapshot?.name),
+    workspacePath: task.workspacePath,
     members: [...(task.memberSnapshots || []), task.managerSnapshot].filter(Boolean).map(({id,name}) => reference(id,name)),
     manager: reference(task.managerAgentId, task.managerSnapshot?.name), createdAt: task.createdAt };
 }
@@ -151,11 +151,20 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     for (const key of ['recipientAgentId', 'replyToMessageId']) if (input[key] !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input[key])) throw usage(`${key} 需要精确ID`);
   }
   if (operation === 'list') {
-    const { tasks } = await client.request('/api/bootstrap');
+    const { tasks, workflowTemplates = [] } = await client.request('/api/bootstrap');
     if (!Array.isArray(tasks)) throw new CliError('RESPONSE_UNCERTAIN', '任务列表响应无法确认', '检查服务版本后重新查询。', 5);
+    let workflowId;
+    if (flags.workflow) {
+      const candidates = [...workflowTemplates, ...tasks.map(task => ({ id: task.workflowTemplateId, name: task.workflowSnapshot?.name }))].filter(item => item.id);
+      const exact = candidates.find(item => item.id === flags.workflow);
+      const matches = [...new Set(candidates.filter(item => item.name === flags.workflow).map(item => item.id))];
+      if (!exact && matches.length !== 1) throw new CliError(matches.length ? 'AMBIGUOUS_REFERENCE' : 'NOT_FOUND', matches.length ? '工作流名称不唯一，请使用 ID' : '工作流不存在', '用 workflows list 或 tasks list 查询工作流 ID。', 4);
+      workflowId = exact?.id || matches[0];
+    }
     return paginate(tasks.filter(task => (flags.archived ? Boolean(task.archivedAt) : !task.archivedAt)
       && (!flags.search || task.title.toLocaleLowerCase().includes(flags.search.toLocaleLowerCase()))
-      && (!flags.status || task.status === flags.status)).map(task => taskView(task, { summary: true })));
+      && (!flags.status || task.status === flags.status)
+      && (!workflowId || task.workflowTemplateId === workflowId)).map(task => taskView(task, { summary: true })));
   }
   if (operation === 'get') {
     const { tasks } = await client.request('/api/tasks');

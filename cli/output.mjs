@@ -52,7 +52,7 @@ function details(value, columns, indent = '', key = '') {
   }).join('\n');
 }
 export function commandUsage(group, operation) {
-  if (group === 'tasks') return `agentforge tasks ${operation}${['list', 'create'].includes(operation) ? '' : ' TASK_ID'}${['create', 'message', 'reply'].includes(operation) ? ' --file FILE.json' : ''}${operation === 'list' ? ' [--search TEXT] [--status STATUS] [--archived] [--page N | --all]' : ['collaboration', 'questions', 'artifacts'].includes(operation) ? ' [--run RUN_ID] [--page N | --all]' : ['progress', 'message', 'reply', 'terminate'].includes(operation) ? ' [--run RUN_ID]' : ''}${['terminate', 'delete'].includes(operation) ? ' --yes' : ''}`;
+  if (group === 'tasks') return `agentforge tasks ${operation}${['list', 'create'].includes(operation) ? '' : ' TASK_ID'}${['create', 'message', 'reply'].includes(operation) ? ' --file FILE.json' : ''}${operation === 'list' ? ' [--search TEXT] [--status STATUS] [--workflow ID_OR_NAME] [--archived] [--page N | --all]' : ['collaboration', 'questions', 'artifacts'].includes(operation) ? ' [--run RUN_ID] [--page N | --all]' : ['progress', 'message', 'reply', 'terminate'].includes(operation) ? ' [--run RUN_ID]' : ''}${['terminate', 'delete'].includes(operation) ? ' --yes' : ''}`;
   if (group === 'auth') return `agentforge auth ${operation}${operation === 'login' ? ' --username NAME [--password-stdin]' : ''}`;
   const id = ['get', 'update', 'delete', 'test'].includes(operation) ? ' ID' : operation === 'models' ? ' PROVIDER' : '';
   const file = ['create', 'update', 'import', 'auto-update'].includes(operation) ? ' --file FILE.json' : '';
@@ -78,7 +78,7 @@ function applicableFlags(group, ops) {
     ...(ops.some(op => ['terminate', 'delete'].includes(op)) ? ['--yes：显式确认终止执行或永久删除任务及本地交付记录；活跃任务须先 terminate。'] : []),
     ...guide.flags.filter(([flag]) => ['--help', '--json', '--session-file PATH', '--endpoint-file PATH'].includes(flag)).map(([flag, description]) => `${flag}：${description}`),
     ...(ops.some(op => ['create', 'message', 'reply'].includes(op)) ? ['--file PATH | -：JSON 对象文件；- 从 stdin 读取，最多1MiB；字段与示例见下方。'] : []),
-    ...(ops.includes('list') ? ['--search TEXT：任务名称不区分大小写包含匹配。', '--status STATUS：精确任务状态：backlog/planning/running/awaiting_human/review/awaiting_acceptance/paused/blocked/done/cancelled。', '--archived：仅查询已归档任务，默认只显示未归档。'] : []),
+    ...(ops.includes('list') ? ['--search TEXT：任务名称不区分大小写包含匹配。', '--status STATUS：精确任务状态：backlog/planning/running/awaiting_human/review/awaiting_acceptance/paused/blocked/done/cancelled。', '--workflow ID_OR_NAME：按工作流精确 ID 或唯一名称筛选（含任务冻结名称），与名称、状态组合后分页。', '--archived：仅查询已归档任务，默认只显示未归档。'] : []),
     ...(ops.some(op => ['list', 'collaboration', 'questions', 'artifacts'].includes(op)) ? ['--page N | --all：默认每页20项；--all 显式读取全部，不可与 --page 混用。协作记录最新在前。'] : []),
     ...(ops.some(op => ['progress', 'collaboration', 'questions', 'artifacts', 'message', 'reply', 'terminate'].includes(op)) ? ['--run RUN_ID：可选，选择同一任务的指定执行；默认最新执行，输出回显所选 runId。'] : [])
   ];
@@ -148,7 +148,7 @@ function help(data, columns, { schema = false } = {}) {
 function list(group, data, columns) {
   const count = value => Array.isArray(value) ? value.length : '—';
   const extra = {
-    tasks: [['状态', item => item.status], ['成员数', item => item.memberCount]],
+    tasks: [['工作流', item => item.workflow ? `${item.workflow.name || '未命名'} (${item.workflow.id})` : '—'], ['状态', item => item.status], ['成员数', item => item.memberCount]],
     agents: [['类型', item => item.kind], ['状态', item => item.status], ['角色', item => item.roleIds?.length ? item.roleIds.join('、') : '不绑定']],
     roles: [['提示词', item => (item.prompt || '').length > 60 ? item.prompt.slice(0, 60) + '…' : item.prompt || '—']],
     teams: [['状态', item => item.status]],

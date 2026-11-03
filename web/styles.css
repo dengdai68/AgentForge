@@ -168,8 +168,10 @@ button { cursor:pointer; }
 .task-search-form input,.task-search-form select { width:100%; min-height:38px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--paper); color:var(--ink); font:inherit; font-size:13px; }
 .task-search-form button { min-height:38px; }
 #tasks-table .task-inventory { min-width:640px; }
-#tasks-table .col-task { width:40%; }
-#tasks-table .col-team { width:18%; }
+#tasks-table .col-task { width:32%; }
+#tasks-table .col-workflow { width:18%; }
+#tasks-table .task-workflow { overflow-wrap:anywhere; }
+.task-search-form .task-search-workflow { max-width:220px; }
 #tasks-table .col-status { width:14%; }
 #tasks-table .col-updated { width:14%; }
 #tasks-table .col-actions { width:160px; }

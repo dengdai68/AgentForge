@@ -1,5 +1,7 @@
 # 工程脚本
 
+test-directory-headers.mjs 同时验证任务工作流列、冻结名称、工作流筛选后分页、名称/状态组合与重置，覆盖 minimal 宽屏和 warm 窄屏；不执行 Provider。
+
 `AGENTFORGE_TASK_RETRY_REAL=1 node scripts/test-task-retry-real.mjs` 使用隔离 Electron/HOME/数据，通过真实 Claude 经理派工、员工编写与运行求和测试；只在员工第一次真实成功进程结束后注入一次非零退出/Token 失效错误。实际点击宽窄 UI 恢复按钮，验证原 Dispatch、同一原生会话且下一次执行直接为员工，再到经理交接和可见人类确认。调用真实模型需已有 Claude 登录；只读复用已有登录，不复制凭据或触碰当前实例。失败注入明确标记，不声称外部服务实际故障。 UI 检查中断后可用 AGENTFORGE_TASK_RETRY_RESUME 指向本脚本已有的 .data/task-retry-real-* 目录，继续同一失败 Run；原 evidence.json 保留，续验另写 evidence-resumed.json。
 
 候选浮层与表单验收：test-task-creation 在两主题用真实鼠标拖动角色/团队 textarea，核对顶部稳定、背景/Escape 保留草稿，以及团队列表脱离正文裁剪、随窗口向上/向下定位和鼠标跨越间隔；test-runtime-settings 覆盖模型列表与原生思考 select；test-communication-workbench 覆盖底部关闭、不自动展开、稳定身份色与两字头像。各脚本均支持隔离安装包路径，不改造操作者实例。

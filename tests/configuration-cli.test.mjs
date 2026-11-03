@@ -689,3 +689,24 @@ test('task progress help describes original employee recovery without granting a
   assert.match(JSON.stringify(help), /原失败员工的投递与会话/);
   await assert.rejects(execute(['tasks','retry']), /未知|不支持|命令/);
 });
+
+
+test('task lists expose frozen workflow references and combine workflow filtering before pagination', async () => {
+  const f = await fixture();
+  const tasks = Array.from({ length: 45 }, (_, i) => ({ id: `task_${i}`, title: `任务 ${i}`, status: 'backlog', workflowTemplateId: i < 22 ? 'flow_a' : 'flow_b', workflowSnapshot: { name: i < 22 ? '旧名称' : '另一流程' }, archivedAt: i === 44 ? '2026-01-01' : null }));
+  const workflowTemplates = [{ id: 'flow_a', name: '新名称' }, { id: 'flow_b', name: '另一流程' }];
+  const invoke = args => execute(['tasks', 'list', ...args, '--session-file', f.sessionFile], { fetcher: async () => new Response(JSON.stringify({ tasks, workflowTemplates })) });
+  const selected = await invoke(['--workflow', '新名称', '--page', '2']);
+  assert.equal(selected.total, 22); assert.equal(selected.items.length, 2);
+  assert.deepEqual(selected.items[0].workflow, { id: 'flow_a', name: '旧名称' });
+  assert.match(formatOutput(['tasks', 'list'], selected), /旧名称/);
+  assert.equal((await invoke(['--workflow', '旧名称', '--all'])).total, 22);
+  assert.equal((await invoke(['--workflow', 'flow_b', '--archived'])).total, 1);
+  assert.equal((await invoke(['--workflow', 'flow_b', '--search', '23', '--status', 'backlog'])).total, 1);
+  assert.equal((await invoke(['--workflow', 'flow_b', '--status', 'running'])).total, 0);
+  await assert.rejects(invoke(['--workflow', '不存在']), error => error.code === 'NOT_FOUND');
+  workflowTemplates.push({ id: 'flow_c', name: '新名称' });
+  await assert.rejects(invoke(['--workflow', '新名称']), error => error.code === 'AMBIGUOUS_REFERENCE');
+  assert.equal((await invoke(['--workflow', 'flow_a'])).total, 22);
+  assert.match((await captured(['tasks', 'list', '--help'])).stdout, /--workflow ID_OR_NAME/);
+});

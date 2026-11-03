@@ -1,5 +1,7 @@
 # CLI
 
+`tasks list --workflow ID_OR_NAME` 支持精确 ID 或唯一的当前/任务冻结名称；歧义须用 ID，不存在明确报错。与 search/status/archived 组合后分页，摘要包含 workflow 的 ID 与任务冻结名称，不返回完整工作流配置。
+
 任务失败人工恢复在客户端继续原失败员工的投递与会话；CLI 无恢复命令，不扩展操作权限。progress 保留累计 attempts/脱敏错误，协作查询保留失败及恢复事件。
 
 任务从团队与员工 ID 合并成独立成员集合，必须恰好有一位可用项目经理；团队不拥有任务或群聊。领域规则见 [领域模型](../docs/03-domain-model.md)，CLI 输入输出见 [CLI 指南](../docs/21-configuration-cli.md)。
