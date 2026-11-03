@@ -1,12 +1,14 @@
 # CLI 指南
 
+核心 App/CLI 对齐：tasks create --file input.json [--start] 支持 teamIds、memberAgentIds 混合选人，服务端展开去重；可只传其中之一，最终恰好一位可用经理。acceptanceCriteria 可省略或 []，最多20条/每条500字符；priority 为 low/medium/high。--start 显式创建后启动，可能消耗模型额度；失败返回 TASK_CREATED_START_FAILED、taskId 与查询建议，不自动重试、不回滚已创建任务。先 progress 核实，再按状态决定是否 start，不能重复 create。员工搜索包含 capabilities；工作流交付定义可省略，依赖/交接来源独立；团队启停与 App 同步。tasks list 校验状态并按更新时间（归档按归档时间）降序分页。
+
 `agentforge tasks list --workflow ID_OR_NAME` 按工作流精确 ID 或唯一名称（当前或任务冻结名称）筛选；同名歧义明确拒绝，改用 ID。与 `--search`、`--status`、`--archived` 组合后分页；文本/JSON 摘要包含 `workflow: {id, name}`，name 为任务冻结名称。
 
 客户端人工恢复会继续原失败员工的 Dispatch 与会话，保留累计 attempts、消息引用和失败 Trace；CLI progress/协作查询继续展示真实历史，本轮不新增恢复命令或输入字段。
 
 任务通过独立成员集合创建，Store 校验恰好一位可用项目经理，团队仅用来批量选人。删除员工与团队的冻结历史语义见 [领域模型](03-domain-model.md)。
 
-CLI tasks create schema 使用 memberAgentIds（至少一项、不重复），从 teams get 返回的 memberAgentIds 合并；移除 teamId 和 tasks list --team。tasks get 返回成员 ID/名称引用，不倾倒员工提示词/Runtime；tasks list 显示成员数。teams create/update 不接受 managerAgentId，memberAgentIds 可以为空。agents delete --yes 逻辑删除并返回 historyRetained，teams delete --yes 不再因任务/群聊历史拒绝。help/schema/example/text/JSON 共用当前协议。长期沟通属于客户端能力，本轮不新增 CLI 群聊权限。
+CLI tasks create schema 使用 teamIds 与 memberAgentIds，由 Store 合并为独立成员；移除 teamId 和 tasks list --team。tasks get 返回成员 ID/名称引用，不倾倒员工提示词/Runtime；tasks list 显示成员数。teams create/update 不接受 managerAgentId，memberAgentIds 可以为空。agents delete --yes 逻辑删除并返回 historyRetained，teams delete --yes 不再因任务/群聊历史拒绝。help/schema/example/text/JSON 共用当前协议。长期沟通属于客户端能力，本轮不新增 CLI 群聊权限。
 
 协作记录只展示员工、经理、人类之间的沟通 Message；系统提示、启动、投递、重试和结算事件不作为记录行。底层不可变事件、Dispatch 和 Trace 继续保留，关联执行元数据供查询。消息保存本轮 `startMessageId`，对应 Trace 的 `inputMessageId`；“本轮控制台”按该 ID 打开、定位本次提示词，不受日志分页影响。成员原生会话贯穿任务且彼此隔离，每次执行拥有独立输入轮次 ID。
 

@@ -38,7 +38,9 @@ export function testEnvironment(inherited = process.env) {
   return env;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
-  const result = spawnSync(process.execPath, ["--test", ...testFiles], { stdio: "inherit", env: testEnvironment(), cwd: repoRoot });
+  const concurrency = process.env.AGENTFORGE_TEST_CONCURRENCY;
+  if (concurrency !== undefined && !/^[1-9][0-9]*$/.test(concurrency)) throw new Error("AGENTFORGE_TEST_CONCURRENCY must be a positive integer");
+  const result = spawnSync(process.execPath, ["--test", ...(concurrency ? [`--test-concurrency=${concurrency}`] : []), ...testFiles], { stdio: "inherit", env: testEnvironment(), cwd: repoRoot });
   if (result.error) throw result.error;
   process.exit(result.status ?? 1);
 }

@@ -110,10 +110,10 @@ test('owned service restart lease atomically blocks writes, rejects busy writes 
   const root=await mkdtemp(join(tmpdir(),'af-update-lease-')),password=randomBytes(16).toString('hex');
   const auth=createAuth({databasePath:join(root,'auth.sqlite')});await auth.setAdministrator('updates-qa',password);auth.close();
   const child=fork(new URL('../server/index.mjs',import.meta.url),[],{stdio:['ignore','ignore','ignore','ipc'],env:{...process.env,HOME:root,AGENTFORGE_DESKTOP_PORT:'0',AGENTFORGE_BOOTSTRAP_TOKEN:randomBytes(32).toString('hex'),AGENTFORGE_DB_PATH:join(root,'state.sqlite'),AGENTFORGE_AUTH_DB_PATH:join(root,'auth.sqlite'),AGENTFORGE_RUN_FILES_ROOT:join(root,'runs'),AGENTFORGE_RUNTIME_CONFIG_ROOT:join(root,'runtime'),AGENTFORGE_WORKSPACE_ROOT:join(root,'work'),AGENTFORGE_LOG_DIR:join(root,'logs')}});
-  const receive=predicate=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.off('message',listener);reject(Error('IPC timeout'));},20000);const listener=value=>{if(predicate(value)){clearTimeout(timer);child.off('message',listener);resolve(value);}};child.on('message',listener);});
+  const receive=(predicate,timeout=20000)=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.off('message',listener);reject(Error('IPC timeout'));},timeout);const listener=value=>{if(predicate(value)){clearTimeout(timer);child.off('message',listener);resolve(value);}};child.on('message',listener);});
   let held;
   try{
-    const ready=await receive(m=>m.type==='agentforge-ready'),origin='http://127.0.0.1:'+ready.port;
+    const ready=await receive(m=>m.type==='agentforge-ready',Number(process.env.AGENTFORGE_TEST_STARTUP_TIMEOUT_MS||20000)),origin='http://127.0.0.1:'+ready.port;
     const login=await fetch(origin+'/api/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'updates-qa',password})});assert.equal(login.status,200);
     const cookie=login.headers.get('set-cookie').split(';')[0],headers={Origin:origin,Cookie:cookie,'Content-Type':'application/json'};
     const prepare=async()=>{const id=randomUUID(),pending=receive(m=>m.type==='agentforge-update-readiness' && m.id===id);child.send({type:'agentforge-update-prepare',id});return {...await pending,id};};

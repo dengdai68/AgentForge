@@ -1,12 +1,14 @@
 # CLI
 
+核心管理能力与 App 对齐：员工搜索包含能力标签；团队支持启停；工作流依赖 dependsOn 与交接 handoffFrom 独立保存，交付定义为空时由 Store 补默认值。tasks create 接受 teamIds 与 memberAgentIds 并集，由 Store 展开可用团队中的 active 成员、去重并校验恰好一位经理；不保存团队绑定。验收标准省略或 [] 均为空，最多20条/每条500字符；priority 为 low/medium/high。create --start 显式创建并启动，失败输出 TASK_CREATED_START_FAILED 与 taskId，先查询状态勿重复创建。任务列表按更新/归档时间降序，未知状态拒绝。
+
 `tasks list --workflow ID_OR_NAME` 支持精确 ID 或唯一的当前/任务冻结名称；歧义须用 ID，不存在明确报错。与 search/status/archived 组合后分页，摘要包含 workflow 的 ID 与任务冻结名称，不返回完整工作流配置。
 
 任务失败人工恢复在客户端继续原失败员工的投递与会话；CLI 无恢复命令，不扩展操作权限。progress 保留累计 attempts/脱敏错误，协作查询保留失败及恢复事件。
 
 任务从团队与员工 ID 合并成独立成员集合，必须恰好有一位可用项目经理；团队不拥有任务或群聊。领域规则见 [领域模型](../docs/03-domain-model.md)，CLI 输入输出见 [CLI 指南](../docs/21-configuration-cli.md)。
 
-任务写入使用 memberAgentIds；移除 --team。团队 managerAgentId 废弃，成员可空；员工删除保留持久标记及历史。详情只输出成员 ID/名称引用，不包含员工提示词/扩展配置。长期群聊仍不属于 CLI 命令覆盖范围。
+任务创建可传 teamIds 进行批量选人，持久化使用 memberAgentIds；移除 --team。团队 managerAgentId 废弃，成员可空；员工删除保留持久标记及历史。详情只输出成员 ID/名称引用，不包含员工提示词/扩展配置。长期群聊仍不属于 CLI 命令覆盖范围。
 
 协作读模型仅返回员工、经理、人类之间的沟通消息；关联投递与执行元数据保留，系统事件不再单独生成记录行。sourceMessageId 关联同 Run 消息，不按正文或时间猜测历史。startMessageId 对应 Trace.inputMessageId，用于定位本轮提示词；完整执行事实和文件仍由控制台与 artifacts 查询。
 

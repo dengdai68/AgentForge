@@ -9,7 +9,7 @@ import { collaborationRecords } from '../client/console-projections.mjs';
 
 function parse(argv) {
   const args = [], flags = {};
-  const switches = new Set(['help', 'yes', 'all', 'password-stdin', 'json', 'archived']);
+  const switches = new Set(['help', 'yes', 'all', 'password-stdin', 'json', 'archived', 'start']);
   const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'run', 'workflow']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -45,6 +45,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (operation === 'list') allowed.push('page', 'all', 'search');
     if (['delete', 'terminate', 'test'].includes(operation)) allowed.push('yes');
     if (group === 'tasks') {
+      if (operation === 'create') allowed.push('start');
       if (['message', 'reply'].includes(operation)) allowed.push('file');
       if (operation === 'list') allowed.push('status', 'archived', 'workflow');
       if (['progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'terminate'].includes(operation)) allowed.push('run');
@@ -91,7 +92,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
   };
   if (operation === 'list') {
     const result = await readList();
-    const items = result[resource.key].filter(item => !flags.search || `${item.name || item.provider || ''} ${item.description || ''} ${item.mission || ''} ${item.prompt || ''}`.toLocaleLowerCase().includes(flags.search.toLocaleLowerCase()));
+    const items = result[resource.key].filter(item => !flags.search || `${item.name || item.provider || ''} ${item.description || ''} ${item.mission || ''} ${item.prompt || ''} ${(item.capabilities || []).join(' ')}`.toLocaleLowerCase().includes(flags.search.trim().toLocaleLowerCase()));
     const selected = flags.all ? items : items.slice((page - 1) * 20, page * 20);
     return { items: selected, total: items.length, page: flags.all ? null : page, pageSize: flags.all ? null : 20, hasMore: !flags.all && page * 20 < items.length };
   }
@@ -140,8 +141,15 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
   if (operation === 'create') {
     const input = await readInput(flags.file, stdin);
     validateInput(input, resources.tasks.schema);
+    if (!(input.memberAgentIds?.length || input.teamIds?.length)) throw usage('至少选择一位员工或一个团队');
     const { task } = await client.request('/api/tasks', { method: 'POST', body: input });
-    return { task: keyFields(task, ['id', 'title', 'status']) };
+    if (!flags.start) return { task: keyFields(task, ['id', 'title', 'status']) };
+    try {
+      const { run } = await client.request(`/api/tasks/${task.id}/run`, { method: 'POST', body: {} });
+      return { task: { ...keyFields(task, ['id', 'title']), status: run.status }, run: runReceipt(run) };
+    } catch (error) {
+      throw Object.assign(new CliError('TASK_CREATED_START_FAILED', `任务已创建（${task.id}），启动未能确认`, `任务 ID：${task.id}。先用 tasks progress ${task.id} 核实状态；若尚未启动，再用 tasks start ${task.id}。不要重复创建。${error instanceof CliError ? ' ' + error.message : ''}`, error.exitCode || 5), { taskId: task.id });
+    }
   }
   let input;
   if (['message', 'reply'].includes(operation)) {
@@ -151,6 +159,7 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     for (const key of ['recipientAgentId', 'replyToMessageId']) if (input[key] !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input[key])) throw usage(`${key} 需要精确ID`);
   }
   if (operation === 'list') {
+    if (flags.status && !['backlog','planning','running','awaiting_human','review','awaiting_acceptance','paused','blocked','failed','done','cancelled'].includes(flags.status)) throw usage('任务状态无效，请查看 tasks list --help');
     const { tasks, workflowTemplates = [] } = await client.request('/api/bootstrap');
     if (!Array.isArray(tasks)) throw new CliError('RESPONSE_UNCERTAIN', '任务列表响应无法确认', '检查服务版本后重新查询。', 5);
     let workflowId;
@@ -162,9 +171,9 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
       workflowId = exact?.id || matches[0];
     }
     return paginate(tasks.filter(task => (flags.archived ? Boolean(task.archivedAt) : !task.archivedAt)
-      && (!flags.search || task.title.toLocaleLowerCase().includes(flags.search.toLocaleLowerCase()))
+      && (!flags.search || task.title.toLocaleLowerCase().includes(flags.search.trim().toLocaleLowerCase()))
       && (!flags.status || task.status === flags.status)
-      && (!workflowId || task.workflowTemplateId === workflowId)).map(task => taskView(task, { summary: true })));
+      && (!workflowId || task.workflowTemplateId === workflowId)).sort((left, right) => Date.parse((flags.archived ? right.archivedAt : right.updatedAt) || 0) - Date.parse((flags.archived ? left.archivedAt : left.updatedAt) || 0)).map(task => taskView(task, { summary: true })));
   }
   if (operation === 'get') {
     const { tasks } = await client.request('/api/tasks');
@@ -222,7 +231,7 @@ export async function run(argv, options = {}) {
   }
   catch (error) {
     const known = error instanceof CliError, exitCode = known ? error.exitCode : 5;
-    const safe = known ? { code: error.code, message: error.message, hint: error.hint, ...(error.status ? { status: error.status } : {}) } : { code: 'CLI_FAILURE', message: 'CLI未能完成命令', hint: guide.exitCodes[5] };
+    const safe = known ? { code: error.code, message: error.message, hint: error.hint, ...(error.status ? { status: error.status } : {}), ...(error.code === 'TASK_CREATED_START_FAILED' ? { taskId: error.taskId } : {}) } : { code: 'CLI_FAILURE', message: 'CLI未能完成命令', hint: guide.exitCodes[5] };
     if (json) write(JSON.stringify({ ok: false, error: safe }, null, 2));
     else writeError(formatError(safe, exitCode, presentation));
     return exitCode;

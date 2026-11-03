@@ -710,3 +710,32 @@ test('task lists expose frozen workflow references and combine workflow filterin
   assert.equal((await invoke(['--workflow', 'flow_a'])).total, 22);
   assert.match((await captured(['tasks', 'list', '--help'])).stdout, /--workflow ID_OR_NAME/);
 });
+
+
+test('CLI task creation supports teams, empty criteria and explicit create/start with recoverable failure', async () => {
+  const f = await fixture(), writes = [];
+  const value = {title:'任务',objective:'目标',teamIds:['team_one'],memberAgentIds:[],workflowTemplateId:'flow_one',acceptanceCriteria:[]};
+  let rejectStart = false;
+  const fetcher = async (url, options) => {
+    writes.push({url,body:JSON.parse(options.body)});
+    return url.endsWith('/run') ? new Response(JSON.stringify(rejectStart ? {error:'Runtime 不可用'} : {run:{id:'run_one',taskId:'task_one',status:'running'}}),{status:rejectStart?409:202}) : new Response(JSON.stringify({task:{id:'task_one',title:'任务',status:'backlog'}}));
+  };
+  const invoke = (args, body=value) => execute(['tasks','create','--file','-',...args,'--session-file',f.sessionFile],{fetcher,stdin:input(body)});
+  const created = await invoke([]); assert.equal(created.run,undefined); assert.equal(writes.length,1); assert.deepEqual(writes[0].body,value);
+  writes.length=0; const started = await invoke(['--start']); assert.equal(writes.length,2); assert.equal(started.run.id,'run_one'); assert.match(formatOutput(['tasks','create'],started),/已创建并启动/);
+  rejectStart=true; writes.length=0;
+  await assert.rejects(invoke(['--start']),error=>error.code==='TASK_CREATED_START_FAILED' && error.taskId==='task_one' && /不要重复创建/.test(error.hint));
+  assert.equal(writes.length,2,'no automatic create or start retry');
+  const before=writes.length;
+  for (const patch of [{teamIds:[],memberAgentIds:[]},{acceptanceCriteria:Array(21).fill('标准')},{acceptanceCriteria:['x'.repeat(501)]}]) await assert.rejects(invoke([],{...value,...patch}),error=>error.code==='USAGE');
+  assert.equal(writes.length,before);
+  const failure=await captured(['tasks','create','--start','--file','-','--session-file',f.sessionFile,'--json'],{fetcher,stdin:input(value)});
+  assert.equal(JSON.parse(failure.stdout).error.taskId,'task_one');
+  assert.match((await captured(['tasks','create','--help'])).stdout,/--start/);
+});
+
+test('CLI search includes employee capabilities and rejects unknown task statuses', async () => {
+  const f = await fixture(); f.state.agents[0].capabilities=['独立审片'];
+  assert.equal((await f.invoke(['agents','list','--search',' 独立审片 '])).total,1);
+  await assert.rejects(execute(['tasks','list','--status','not_a_status','--session-file',f.sessionFile],{fetcher:()=>assert.fail('invalid status must not query tasks')}),error=>error.code==='USAGE');
+});

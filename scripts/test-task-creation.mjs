@@ -38,7 +38,7 @@ try{
   await page.getByRole('button',{name:'＋ 新建任务',exact:true}).click();
   const form=page.locator('#task-form'),criteria=form.locator('[name="acceptanceCriteria"]'),details=form.locator('.task-acceptance');await form.waitFor();
   await page.evaluate(()=>document.getAnimations().filter(animation=>Number.isFinite(animation.effect.getComputedTiming().endTime)).forEach(animation=>animation.finish()));
-  assert.ok(await criteria.isHidden());assert.equal(await form.locator('input,textarea,select').count(),5);
+  assert.ok(await criteria.isHidden());assert.equal(await form.locator('input,textarea,select').count(),6);
   assert.equal(await form.locator('#node-assignment-panel,[data-task-execution-boundary]').count(),0);
   const geometry=await form.evaluate(form=>{const box=node=>{const r=node.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom};};const textarea=form.elements.objective,style=getComputedStyle(textarea);return{modal:box(form.closest('.modal')),textarea:box(textarea),line:parseFloat(style.lineHeight),padding:parseFloat(style.paddingTop)+parseFloat(style.paddingBottom),members:box(form.querySelector('#task-members-picker .extension-picker-control')),flow:box(form.elements.workflowTemplateId),submit:box(form.querySelector('[type="submit"]')),overflow:document.documentElement.scrollWidth>innerWidth};});
   evidence.geometry.push({theme,width,height,...geometry});
@@ -61,12 +61,12 @@ try{
   assert.equal(await form.locator('[name="objective"]').inputValue(),description);
   await details.locator('summary').click();await criteria.fill(Array.from({length:21},(_,i)=>'标准 '+i).join('\n'));await details.locator('summary').click();
   await form.getByRole('button',{name:'创建并开始',exact:true}).click();await form.getByText('验收标准最多 20 条。',{exact:true}).waitFor();assert.ok(await criteria.isVisible(),'invalid hidden criteria reopen');
-  await criteria.fill(height===1000?'第一项验收\n第二项验收':'');await details.locator('summary').click();await details.locator('summary').click();assert.equal(await criteria.inputValue(),height===1000?'第一项验收\n第二项验收':'');await details.locator('summary').click();
+  await form.locator('[name=priority]').selectOption('high');await criteria.fill(height===1000?'第一项验收\n第二项验收':'');await details.locator('summary').click();await details.locator('summary').click();assert.equal(await criteria.inputValue(),height===1000?'第一项验收\n第二项验收':'');await details.locator('summary').click();
   await form.locator('.modal-scroll').evaluate(body=>{body.scrollTop=0;});
   await page.screenshot({path:join(root,`${theme}-${width}x${height}.png`)});
   const response=page.waitForResponse(r=>r.url().endsWith('/api/tasks')&&r.request().method()==='POST');await form.getByRole('button',{name:'创建并开始',exact:true}).click();const createdResponse=await response;assert.ok(createdResponse.ok());const {task}=await createdResponse.json();await form.waitFor({state:'detached'});
   await page.locator(`[data-run-task="${task.id}"]`).waitFor();
-  const saved=(await api('/api/tasks')).tasks.find(t=>t.id===task.id);assert.equal(saved.objective,description);assert.equal(Object.hasOwn(saved,'teamId'),false);assert.deepEqual(saved.memberAgentIds,[manager.id,worker.id,extra.id]);assert.equal(saved.workflowTemplateId,flows[1].id);assert.deepEqual(saved.acceptanceCriteria,height===1000?['第一项验收','第二项验收']:[]);assert.equal(saved.status,'backlog');assert.ok(launchIds.includes(task.id));
+  const saved=(await api('/api/tasks')).tasks.find(t=>t.id===task.id);assert.equal(saved.objective,description);assert.equal(Object.hasOwn(saved,'teamId'),false);assert.deepEqual(saved.memberAgentIds,[manager.id,worker.id,extra.id]);assert.equal(saved.workflowTemplateId,flows[1].id);assert.deepEqual(saved.acceptanceCriteria,height===1000?['第一项验收','第二项验收']:[]);assert.equal(saved.priority,'high');assert.equal(saved.status,'backlog');assert.ok(launchIds.includes(task.id));
  }
  evidence.cases.push('two themes at 1320x1000, 760x760 and 800x560; six to twelve visible description lines, fixed same-row selectors and submit; optional criteria retain drafts and reopen on validation errors; real HTTP creation persists combined independent employees/workflow and rejects another manager and empty or supplied criteria; rejected launch retains backlog task');
  for(const theme of ['minimal','warm']){
@@ -125,6 +125,42 @@ try{
  await cli(['teams','delete',createdTeam.id,'--yes']);
  const independent=await cli(['tasks','get',cliTask.id]);assert.equal(independent.team,undefined);assert.equal(independent.memberCount,2);
  assert.deepEqual(independent.members.map(member=>member.id).sort(),[manager.id,extra.id].sort());
+ const mixed=(await cli(['tasks','create','--file','-'],{...cliInput,memberAgentIds:[extra.id],teamIds:[teams[0].id,teams[1].id],acceptanceCriteria:[]})).task;
+ const mixedTask=await cli(['tasks','get',mixed.id]);assert.deepEqual(mixedTask.members.map(m=>m.id).sort(),[manager.id,worker.id,extra.id].sort());assert.deepEqual(mixedTask.acceptanceCriteria,[]);
+ await cli(['tasks','create','--file','-'],{...cliInput,memberAgentIds:[],teamIds:[teams[0].id,teams[2].id]},4);
+ // CLI-created values survive App edits; verify both themes and wide/narrow windows.
+ const parityFlow=(await cli(['workflows','create','--file','-'],{name:'双端交接来源',nodes:[{id:'a',title:'输入甲',staffingGuidance:'员工'},{id:'b',title:'输入乙',staffingGuidance:'员工'},{id:'c',title:'输出',staffingGuidance:'员工',dependsOn:['a'],handoffFrom:['b']}]})).workflowTemplate;
+ const role=(await cli(['roles','create','--file','-'],{name:'双端角色',prompt:'保留共用提示词'})).role;
+ await cli(['agents','update',worker.id,'--file','-'],{description:'独立简介',capabilities:['独立审片'],roleIds:[role.id]});
+ for(const [theme,width] of [['minimal',1320],['warm',760]]){
+  await app.evaluate(({BrowserWindow},{origin,width})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,760),{origin,width});
+  await page.goto(origin+'/settings/appearance');await page.locator(`[name=theme][value=${theme}]`).check();
+  await page.goto(origin+'/workflows');await page.locator('#workflows-search').fill(parityFlow.name);await page.locator(`[data-edit-workflow="${parityFlow.id}"]`).click();
+  const row=page.locator('[data-workflow-node]').nth(2);await row.locator('summary').click();
+  assert.deepEqual(await row.locator('[name=nodeDependencies]').evaluate(el=>[...el.selectedOptions].map(o=>o.value)),['a']);
+  assert.deepEqual(await row.locator('[name=nodeHandoffFrom]').evaluate(el=>[...el.selectedOptions].map(o=>o.value)),['b']);
+  await row.locator('[name=nodeDeliverable]').fill('');await page.screenshot({path:join(root,`parity-workflow-${theme}.png`)});
+  await page.locator('#workflow-form [type=submit]').click();await page.locator('#workflow-form').waitFor({state:'detached'});
+  const reread=await cli(['workflows','get',parityFlow.id]);assert.deepEqual(reread.nodes[2].dependsOn,['a']);assert.deepEqual(reread.nodes[2].handoffFrom,['b']);assert.ok(reread.nodes[2].deliverable);
+  await page.goto(origin+'/agents');await page.locator('#agents-search').fill('独立审片');await page.locator(`[data-edit-agent="${worker.id}"]`).click();
+  assert.equal(await page.locator('#agent-form [name=description]').inputValue(),'独立简介');assert.equal(await page.locator('#agent-form [name=capabilities]').inputValue(),'独立审片');
+  await page.screenshot({path:join(root,`parity-agent-${theme}.png`)});await page.locator('#agent-form [type=submit]').click();await page.locator('#agent-form').waitFor({state:'detached'});
+  const agent=await cli(['agents','get',worker.id]);assert.deepEqual(agent.capabilities,['独立审片']);assert.deepEqual(agent.roleIds,[role.id]);assert.equal((await cli(['agents','list','--search','独立审片'])).total,1);
+  await page.goto(origin+'/teams');await page.locator(`[data-edit-team="${uiTeam.id}"]`).click();await page.locator('#team-form [name=status]').selectOption('inactive');await page.screenshot({path:join(root,`parity-team-${theme}.png`)});await page.locator('#team-form [type=submit]').click();await page.locator('#team-form').waitFor({state:'detached'});
+  assert.equal((await cli(['teams','get',uiTeam.id])).status,'inactive');await cli(['tasks','create','--file','-'],{...cliInput,teamIds:[uiTeam.id]},4);
+  await cli(['teams','update',uiTeam.id,'--file','-'],{status:'active'});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ }
+ await cli(['roles','update',role.id,'--file','-'],{prompt:'已更新共用提示词'});assert.equal((await cli(['roles','get',role.id])).prompt,'已更新共用提示词');
+ await cli(['roles','delete',role.id,'--yes'],undefined,4);await cli(['agents','update',worker.id,'--file','-'],{roleIds:[]});await cli(['roles','delete',role.id,'--yes']);await cli(['workflows','delete',parityFlow.id,'--yes']);
+ const source=join(root,'parity-plugin');await mkdir(join(source,'.claude-plugin'),{recursive:true});await mkdir(join(source,'skills/proof'),{recursive:true});
+ await writeFile(join(source,'.claude-plugin/plugin.json'),JSON.stringify({name:'parity-proof'}));await writeFile(join(source,'skills/proof/SKILL.md'),'---\nname: proof\ndescription: isolated parity check\n---\nOnly a test fixture.');
+ const imported=await cli(['plugins','import','--file','-'],{path:source});const pluginId=imported.plugins[0].id;assert.equal((await cli(['plugins','get',pluginId])).id,pluginId);
+ await page.goto(origin+'/marketplace');await page.getByText('parity-proof',{exact:true}).first().waitFor();await cli(['plugins','delete',pluginId,'--yes']);
+ await cli(['mcps','create','--file','-'],{name:'双端 MCP',content:JSON.stringify({mcpServers:{proof:{command:'node',args:['--version']}}})});
+ const mcp=(await cli(['mcps','list','--search','双端 MCP'])).items[0];await cli(['mcps','update',mcp.id,'--file','-'],{description:'双端编辑'});
+ const currentMcp=(await cli(['mcps','list','--search','双端 MCP'])).items[0];assert.equal((await cli(['mcps','get',currentMcp.id])).description,'双端编辑');await page.goto(origin+'/mcp-marketplace');await page.getByText('双端 MCP',{exact:true}).first().waitFor();await cli(['mcps','delete',currentMcp.id,'--yes']);
+ evidence.cases.push('CLI/App parity: team union task creation and validation; independent workflow dependencies/handoffs and optional deliverable; employee capability/role preservation and search; team enabled state; role CRUD and bound deletion rejection; plugin import/get/delete and MCP create/update/get/delete visible in App; two themes and wide/narrow editing');
  await cli(['agents','delete',extra.id,'--yes']);
  assert.ok(!(await cli(['agents','list','--all'])).items.some(employee=>employee.id===extra.id));
  assert.deepEqual((await cli(['tasks','get',cliTask.id])).members,independent.members,'deleted source employee retains historical task references');

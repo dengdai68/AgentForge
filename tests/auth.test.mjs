@@ -19,7 +19,7 @@ test("owned service binds only its random loopback origin and exits with the own
   const root=await mkdtemp(join(tmpdir(),'af-owned-service-'));
   const child=fork(new URL('../server/index.mjs',import.meta.url),[],{stdio:['ignore','ignore','pipe','ipc'],env:{...process.env,HOME:root,HOST:'0.0.0.0',PORT:'4310',AGENTFORGE_PUBLIC_ORIGIN:'https://unused.invalid',AGENTFORGE_DESKTOP_PORT:'0',AGENTFORGE_BOOTSTRAP_TOKEN:randomBytes(32).toString('hex'),AGENTFORGE_DB_PATH:join(root,'state.sqlite'),AGENTFORGE_AUTH_DB_PATH:join(root,'auth.sqlite'),AGENTFORGE_RUN_FILES_ROOT:join(root,'runs'),AGENTFORGE_RUNTIME_CONFIG_ROOT:join(root,'runtime'),AGENTFORGE_WORKSPACE_ROOT:join(root,'work') }});
   t.after(()=>{child.kill();return rm(root,{recursive:true,force:true});});
-  const ready=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('owned startup timeout')),30000);child.once('message',value=>{clearTimeout(timer);resolve(value)});child.once('exit',code=>{clearTimeout(timer);reject(Error('unexpected exit '+code))});});
+  const ready=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('owned startup timeout')),Number(process.env.AGENTFORGE_TEST_STARTUP_TIMEOUT_MS||30000));child.once('message',value=>{clearTimeout(timer);resolve(value)});child.once('exit',code=>{clearTimeout(timer);reject(Error('unexpected exit '+code))});});
   const origin='http://127.0.0.1:'+ready.port;
   assert.equal(ready.type,'agentforge-ready');assert.ok(ready.port>0);
   assert.equal((await fetch(origin+'/api/health')).status,200);

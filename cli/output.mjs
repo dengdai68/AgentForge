@@ -52,7 +52,7 @@ function details(value, columns, indent = '', key = '') {
   }).join('\n');
 }
 export function commandUsage(group, operation) {
-  if (group === 'tasks') return `agentforge tasks ${operation}${['list', 'create'].includes(operation) ? '' : ' TASK_ID'}${['create', 'message', 'reply'].includes(operation) ? ' --file FILE.json' : ''}${operation === 'list' ? ' [--search TEXT] [--status STATUS] [--workflow ID_OR_NAME] [--archived] [--page N | --all]' : ['collaboration', 'questions', 'artifacts'].includes(operation) ? ' [--run RUN_ID] [--page N | --all]' : ['progress', 'message', 'reply', 'terminate'].includes(operation) ? ' [--run RUN_ID]' : ''}${['terminate', 'delete'].includes(operation) ? ' --yes' : ''}`;
+  if (group === 'tasks') return `agentforge tasks ${operation}${['list', 'create'].includes(operation) ? '' : ' TASK_ID'}${['create', 'message', 'reply'].includes(operation) ? ' --file FILE.json' : ''}${operation === 'create' ? ' [--start]' : ''}${operation === 'list' ? ' [--search TEXT] [--status STATUS] [--workflow ID_OR_NAME] [--archived] [--page N | --all]' : ['collaboration', 'questions', 'artifacts'].includes(operation) ? ' [--run RUN_ID] [--page N | --all]' : ['progress', 'message', 'reply', 'terminate'].includes(operation) ? ' [--run RUN_ID]' : ''}${['terminate', 'delete'].includes(operation) ? ' --yes' : ''}`;
   if (group === 'auth') return `agentforge auth ${operation}${operation === 'login' ? ' --username NAME [--password-stdin]' : ''}`;
   const id = ['get', 'update', 'delete', 'test'].includes(operation) ? ' ID' : operation === 'models' ? ' PROVIDER' : '';
   const file = ['create', 'update', 'import', 'auto-update'].includes(operation) ? ' --file FILE.json' : '';
@@ -75,10 +75,11 @@ const section = (heading, content) => `${heading}\n${content}`;
 const bullets = (values, columns) => values.map(value => paragraph('• ' + value, columns, '  ')).join('\n');
 function applicableFlags(group, ops) {
   if (group === 'tasks') return [
+    ...(ops.includes('create') ? ['--start：创建成功后立即启动，与 App 创建并开始等价；失败保留任务 ID，请查询状态，勿重复创建。'] : []),
     ...(ops.some(op => ['terminate', 'delete'].includes(op)) ? ['--yes：显式确认终止执行或永久删除任务及本地交付记录；活跃任务须先 terminate。'] : []),
     ...guide.flags.filter(([flag]) => ['--help', '--json', '--session-file PATH', '--endpoint-file PATH'].includes(flag)).map(([flag, description]) => `${flag}：${description}`),
     ...(ops.some(op => ['create', 'message', 'reply'].includes(op)) ? ['--file PATH | -：JSON 对象文件；- 从 stdin 读取，最多1MiB；字段与示例见下方。'] : []),
-    ...(ops.includes('list') ? ['--search TEXT：任务名称不区分大小写包含匹配。', '--status STATUS：精确任务状态：backlog/planning/running/awaiting_human/review/awaiting_acceptance/paused/blocked/done/cancelled。', '--workflow ID_OR_NAME：按工作流精确 ID 或唯一名称筛选（含任务冻结名称），与名称、状态组合后分页。', '--archived：仅查询已归档任务，默认只显示未归档。'] : []),
+    ...(ops.includes('list') ? ['--search TEXT：任务名称不区分大小写包含匹配。', '--status STATUS：精确任务状态：backlog/planning/running/awaiting_human/review/awaiting_acceptance/paused/blocked/failed/done/cancelled。', '--workflow ID_OR_NAME：按工作流精确 ID 或唯一名称筛选（含任务冻结名称），与名称、状态组合后分页。', '--archived：仅查询已归档任务，默认只显示未归档。'] : []),
     ...(ops.some(op => ['list', 'collaboration', 'questions', 'artifacts'].includes(op)) ? ['--page N | --all：默认每页20项；--all 显式读取全部，不可与 --page 混用。协作记录最新在前。'] : []),
     ...(ops.some(op => ['progress', 'collaboration', 'questions', 'artifacts', 'message', 'reply', 'terminate'].includes(op)) ? ['--run RUN_ID：可选，选择同一任务的指定执行；默认最新执行，输出回显所选 runId。'] : [])
   ];
@@ -178,11 +179,11 @@ export function formatOutput(args, data, { columns = 100, help: isHelp = false }
   const [group, operation] = args;
   if (operation === 'list') return list(group, data, columns);
   if (group === 'tasks') {
-    const title = { get: '任务详情', create: '任务已创建（尚未启动）', start: '任务执行已启动', terminate: '任务执行已终止（记录保留）', delete: '任务已删除', progress: '任务进度', collaboration: '协作记录（最新在前）', questions: '待答人类澄清', message: '协作指令已提交', reply: '澄清回答已提交', artifacts: '已接纳交付信息' }[operation];
+    const title = { get: '任务详情', create: data.run ? '任务已创建并启动' : '任务已创建（尚未启动）', start: '任务执行已启动', terminate: '任务执行已终止（记录保留）', delete: '任务已删除', progress: '任务进度', collaboration: '协作记录（最新在前）', questions: '待答人类澄清', message: '协作指令已提交', reply: '澄清回答已提交', artifacts: '已接纳交付信息' }[operation];
     const task = operation === 'get' ? data : data.task;
     const taskId = task?.id || data.taskId || data.run?.taskId || args[2];
     const commands = operation === 'delete' ? ['任务列表：agentforge tasks list'] : [
-      ...(operation === 'create' ? [`任务详情：agentforge tasks get ${taskId}`, `启动任务：agentforge tasks start ${taskId}`] : []),
+      ...(operation === 'create' ? [`任务详情：agentforge tasks get ${taskId}`, data.run ? `任务进度：agentforge tasks progress ${taskId}` : `启动任务：agentforge tasks start ${taskId}`] : []),
       ...(operation === 'get' ? [['workflow', 'workflows'], ['manager', 'agents']].filter(([key]) => task[key]?.id).map(([key, group]) => `${labels[key]}配置：agentforge ${group} get ${task[key].id}`) : []),
       `执行进度：agentforge tasks progress ${taskId}`,
       `协作记录：agentforge tasks collaboration ${taskId}`,

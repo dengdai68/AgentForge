@@ -915,7 +915,12 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     createTask(input = {}) {
       if (Object.hasOwn(input, "teamId")) throw new Error("任务不再绑定团队，请将团队员工加入 memberAgentIds");
       if (input.repositorySources !== undefined) throw new Error("不再接受仓库绑定，请将仓库说明写入提示词或任务内容");
-      const selectedIds = memberIds(input.memberAgentIds, { active: true }), members = selectedIds.map(getAgent);
+      const teamIds = input.teamIds === undefined ? [] : input.teamIds;
+      if (!Array.isArray(teamIds) || teamIds.some(value => typeof value !== "string") || new Set(teamIds).size !== teamIds.length) throw new Error("teamIds 必须是不重复的团队 ID 数组");
+      if (input.priority !== undefined && !["low", "medium", "high"].includes(input.priority)) throw new Error("任务优先级无效");
+      const selectedTeams = teamIds.map(teamId => { const team = getTeam(teamId); if (!team || team.status !== "active") throw new Error("请选择存在且可用的团队"); return team; });
+      const explicitMembers = memberIds(input.memberAgentIds === undefined ? [] : input.memberAgentIds, { active: true, empty: true });
+      const selectedIds = memberIds([...new Set([...explicitMembers, ...selectedTeams.flatMap(team => teamMembers(team).filter(agentId => currentEmployee(agentId)?.status === "active"))])], { active: true }), members = selectedIds.map(getAgent);
       const managers = members.filter(member => member.kind === "manager");
       if (managers.length !== 1) throw new Error("任务成员必须且只能包含一位可用项目经理");
       const managerAgentId = managers[0].id;

@@ -141,3 +141,28 @@ test('current workflow writes reject obsolete staffing/repository parameters wit
   assert.equal(store.listWorkflowTemplates().find(item=>item.id===created.id).description,'Updated current definition');
   store.close();
 });
+
+
+test('task team selection merges active employees once and freezes independent members', t => {
+  const options = fixture(); t.after(() => rmSync(options.workspaceRoot, { recursive: true, force: true }));
+  const store = createStore(options); t.after(() => store.close());
+  const manager = store.createAgent({name:'经理',kind:'manager'}), otherManager = store.createAgent({name:'另一经理',kind:'manager'});
+  const worker = store.createAgent({name:'员工'}), inactive = store.createAgent({name:'停用员工',status:'inactive'});
+  const team = store.createTeam({name:'团队',memberAgentIds:[manager.id,worker.id,inactive.id]});
+  const overlap = store.createTeam({name:'重叠团队',memberAgentIds:[worker.id]});
+  const flow = store.createWorkflowTemplate({name:'流程',nodes:[{id:'work',title:'工作',staffingGuidance:'可用员工'}]});
+  const input = {title:'任务',objective:'验证独立成员',teamIds:[team.id,overlap.id],memberAgentIds:[worker.id],workflowTemplateId:flow.id,acceptanceCriteria:[],priority:'high'};
+  const task = store.createTask(input);
+  assert.deepEqual(task.memberAgentIds,[worker.id,manager.id]); assert.deepEqual(task.acceptanceCriteria,[]); assert.equal(task.priority,'high');
+  assert.equal(task.teamIds,undefined); assert.equal(task.teamId,undefined);
+  assert.throws(()=>store.createTask({...input,teamIds:[team.id,team.id]}),/teamIds/);
+  assert.throws(()=>store.createTask({...input,teamIds:null}),/teamIds/);
+  assert.throws(()=>store.createTask({...input,memberAgentIds:[inactive.id]}),/停用/);
+  assert.throws(()=>store.createTask({...input,memberAgentIds:[otherManager.id]}),/一位/);
+  assert.throws(()=>store.createTask({...input,teamIds:['missing']}),/团队/);
+  assert.throws(()=>store.createTask({...input,priority:'invalid'}),/优先级/);
+  store.updateTeam(team.id,{status:'inactive'});
+  assert.throws(()=>store.createTask(input),/可用的团队/);
+  store.deleteTeam(team.id);
+  assert.deepEqual(store.listTasks().find(item=>item.id===task.id).memberAgentIds,[worker.id,manager.id]);
+});

@@ -1,5 +1,7 @@
 # 工程脚本
 
+test-task-creation.mjs 同时验收核心 App/CLI 对齐：真实 CLI 子进程与认证 HTTP 操作角色、团队、工作流、员工、MCP、插件和任务；验证团队合并选人、无额外验收标准、优先级、工作流独立交接来源、员工能力/角色往返、团队启停，以及两主题宽窄编辑。该展示/协议验收不启动 Provider；--start 成功/失败和不重试语义由 configuration-cli 测试覆盖。
+
 test-directory-headers.mjs 同时验证任务工作流列、冻结名称、工作流筛选后分页、名称/状态组合与重置，覆盖 minimal 宽屏和 warm 窄屏；不执行 Provider。
 
 `AGENTFORGE_TASK_RETRY_REAL=1 node scripts/test-task-retry-real.mjs` 使用隔离 Electron/HOME/数据，通过真实 Claude 经理派工、员工编写与运行求和测试；只在员工第一次真实成功进程结束后注入一次非零退出/Token 失效错误。实际点击宽窄 UI 恢复按钮，验证原 Dispatch、同一原生会话且下一次执行直接为员工，再到经理交接和可见人类确认。调用真实模型需已有 Claude 登录；只读复用已有登录，不复制凭据或触碰当前实例。失败注入明确标记，不声称外部服务实际故障。 UI 检查中断后可用 AGENTFORGE_TASK_RETRY_RESUME 指向本脚本已有的 .data/task-retry-real-* 目录，继续同一失败 Run；原 evidence.json 保留，续验另写 evidence-resumed.json。
@@ -129,3 +131,7 @@ test-roles-ui 覆盖角色/插件/MCP 框内多选添加/移除、无排序操�
 AGENTFORGE_CODEX_LOGIN_REAL=1 node scripts/test-codex-login-recovery-real.mjs 在隔离 Electron 中注入一次未登录、会话建立前持续报错；恢复时调用当前真实 Codex 账号，验证同一员工/私聊手动重试、真实会话 ID，以及任务派工、失败重试、产物测试和界面人类确认。不会登出或改写操作者凭据。沟通与任务 UI 脚本覆盖蓝色选中态、字号一致和目录加载无可见中文提示。
 
 `AGENTFORGE_WORKSPACE_CLONE_REAL=1 node scripts/test-workspace-clone-real.mjs` 在隔离 Electron 用真实模型执行 clone、修改、测试、commit、CHANGE 查看和人类确认；默认三种 Runtime，可用 `AGENTFORGE_WORKSPACE_CLONE_PROVIDERS=claude-code,codex,dsh` 选择。使用现有账号但不更改凭据，证据保留 .data。
+
+完整测试仍通过 npm test 的隔离入口运行；磁盘较慢或同机任务较多时，可显式设置 `AGENTFORGE_TEST_CONCURRENCY=2 npm test` 降低 Node 测试文件并发，不过滤测试、不调整断言或超时；默认并发保持 Node 默认值。
+
+NAS 冷启动可用 `AGENTFORGE_TEST_STARTUP_TIMEOUT_MS=180000` 为两项隔离服务启动验收设置更长等待；仅影响 application-updates/auth 的首次 ready 等待，不改变后续 IPC 期限、运行时超时或安全断言。默认仍为原来的20/30秒。

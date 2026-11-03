@@ -1,5 +1,7 @@
 # 控制面
 
+createTask 的 teamIds 只是创建时选人输入：Store 校验团队 active，展开其中 active 成员，与显式 memberAgentIds 合并去重；显式停用成员仍拒绝，最终恰好一位经理。任务仅持久化独立成员及冻结快照，团队后续变化不联动任务。priority 只接受 low/medium/high；CLI --start 顺序调用既有创建/启动 HTTP，不新增调度规则。
+
 失败 Run 的人工恢复继续原 Dispatch/成员会话，保留消息和咨询依赖、累计 attempts 与失败 Trace，不取消其他排队工作。下次领取优先处理人类恢复的投递；已完成投递的旧错误不再成为恢复入口。没有执行投递的准备失败保留原队列，空队列才启动经理。
 
 `store.mjs` 管理任务独立成员、唯一经理及员工逻辑删除，`communication-store.mjs` 管理独立群聊、编辑成员与公开定向投递；`index.mjs` 提供同一认证 HTTP 入口，包含 `PUT /api/communications/:id`。删除只改变当前目录/成员关系，运行中的冻结任务和历史证据保留。契约见 [领域模型](../docs/03-domain-model.md) 与 [长期沟通](../docs/17-communication.md)。

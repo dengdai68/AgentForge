@@ -493,7 +493,7 @@ function renderTeams() {
       <p>${esc(team.mission || "（未填写使命）")}</p>
       <div class="team-member-stack">${team.members.map((agent) => `<span class="stack-avatar ${roleColor(agent)}" title="${esc(agent.name)}">${esc(initialsOf(agent))}</span>`).join("")}</div>
       <div class="team-roles">${team.members.map((agent) => `<span class="capability">${esc(agent.name)}</span>`).join("")}</div>
-      <div class="team-footer"><span>${team.members.length} 名数字员工</span></div>
+      <div class="team-footer"><span>${team.members.length} 名数字员工</span>${pill(team.status)}</div>
     </div>`).join("") || (query ? `<div class="directory-empty" role="status"><strong>没有匹配的团队</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有团队</strong>点击右上角「创建团队」添加。</div>`);
   renderListPager("teams", page);
 }
@@ -2063,7 +2063,8 @@ function newTaskModal() {
         <input id="task-title" name="title" placeholder="例如：订单结算页重构" /><div class="field-error"></div></div>
       <div class="form-field task-description-field"><label for="task-objective">内容描述 <b>*</b></label>
         <textarea id="task-objective" name="objective" rows="6" placeholder="描述要完成的事、背景和要求…"></textarea><div class="field-error"></div></div>
-      <details class="task-acceptance"><summary>验收标准（选填）</summary>
+      <details class="task-acceptance"><summary>验收标准与优先级（选填）</summary>
+        <div class="form-field"><label for="task-priority">优先级</label><select id="task-priority" name="priority"><option value="low">低</option><option value="medium" selected>中</option><option value="high">高</option></select></div>
         <div class="form-field"><label for="task-acceptance">验收标准（每行一条）</label>
           <textarea id="task-acceptance" name="acceptanceCriteria" rows="3" placeholder="每行填写一条，可留空"></textarea><div class="field-error"></div></div>
       </details>
@@ -2116,10 +2117,11 @@ function workflowNodeRow(node, index, allNodes) {
     <input type="hidden" name="nodeId" value="${esc(node.id)}" />
     <div class="form-grid compact-grid"><div class="form-field"><label>节点标题 <b>*</b></label><input name="nodeTitle" value="${esc(node.title || "")}" placeholder="例如：功能实现" /></div>
     <div class="form-field"><label>人员需求提示 <b>*</b></label><textarea name="nodeStaffingGuidance" placeholder="例如：熟悉测试方案设计、能复现问题并提供证据；由项目经理判断具体人选。">${esc(node.staffingGuidance || "")}</textarea></div></div>
-    <div class="form-field"><label>交付定义 <b>*</b></label><textarea name="nodeDeliverable" placeholder="用自然语言说明此节点要交付什么、如何被下游使用。">${esc(node.deliverable || "")}</textarea><div class="field-hint">供负责该节点的员工理解目标和交接要求。</div></div>
+    <div class="form-field"><label>交付定义（选填）</label><textarea name="nodeDeliverable" placeholder="用自然语言说明此节点要交付什么、如何被下游使用。">${esc(node.deliverable || "")}</textarea><div class="field-hint">留空使用基于节点标题的默认交付定义。</div></div>
     <div class="form-grid compact-grid"><div class="form-field"><label>建议交付位置（每行一条）</label><textarea name="nodeArtifactPaths" placeholder="artifacts/media/\nreports/">${esc((node.artifactPaths || []).join("\n"))}</textarea><div class="field-hint">工作目录内的相对路径，目录由工作流约定；可留空，不限定 docs，也不是文件操作或 Artifact 接纳白名单。</div></div>
     <div class="form-field"><label>代码仓库</label><p class="field-hint">由员工根据任务与提示词准备，不绑定工作流。</p></div></div>
     <div class="form-field"><label>依赖节点（可多选）</label><select name="nodeDependencies" multiple size="${Math.min(Math.max(candidates.length, 1), 3)}">${candidates.map((candidate) => `<option value="${esc(candidate.id)}" ${(node.dependsOn || []).includes(candidate.id) ? "selected" : ""}>${esc(candidate.id)} · ${esc(candidate.title || `节点 ${candidate.id}`)}</option>`).join("")}</select><div class="field-hint">供项目经理安排交接顺序时参考。</div></div>
+    <div class="form-field"><label>交接来源（可多选）</label><select name="nodeHandoffFrom" multiple size="${Math.min(Math.max(candidates.length, 1), 3)}">${candidates.map((candidate) => `<option value="${esc(candidate.id)}" ${(node.handoffFrom || []).includes(candidate.id) ? "selected" : ""}>${esc(candidate.id)} · ${esc(candidate.title || candidate.id)}</option>`).join("")}</select></div>
   </details>`;
 }
 
@@ -2131,7 +2133,7 @@ function workflowFormNodes(form) {
     deliverable: row.querySelector("[name=nodeDeliverable]").value.trim(),
     artifactPaths: pathList(row.querySelector("[name=nodeArtifactPaths]").value),
     dependsOn: [...row.querySelector("[name=nodeDependencies]").selectedOptions].map((option) => option.value),
-    handoffFrom: [...row.querySelector("[name=nodeDependencies]").selectedOptions].map((option) => option.value),
+    handoffFrom: [...row.querySelector("[name=nodeHandoffFrom]").selectedOptions].map((option) => option.value),
     index
   }));
 }
@@ -2170,7 +2172,7 @@ function workflowModal(template = null) {
     event.preventDefault(); clearInvalid(form);
     const nodes = workflowFormNodes(form);
     if (!form.name.value.trim()) { setInvalid(form.name, "请填写工作流名称。"); return; }
-    if (nodes.some((node) => !node.title || !node.staffingGuidance || !node.deliverable)) { toast("请为每个工作流节点填写标题、人员需求提示和交付定义。", true); return; }
+    if (nodes.some((node) => !node.title || !node.staffingGuidance)) { toast("请为每个工作流节点填写标题和人员需求提示。", true); return; }
     const payload = { name: form.name.value.trim(), description: form.description.value.trim(), nodes: nodes.map(({ index, ...node }) => node) };
     try {
       if (template) await api(`/api/workflow-templates/${template.id}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -2196,7 +2198,8 @@ async function agentModal(existing = null) {
       <p class="field-hint">Runtime 在设置中管理和测试；停用不改写冻结任务与沟通。插件和 MCP 按员工独立选择。</p>
       <div class="form-field full" id="employee-role-selection"></div>
       <div class="form-field full"><label>系统提示词（职责与协作边界）</label><textarea name="systemPrompt" rows="8">${esc(existing?.systemPrompt || "")}</textarea></div>
-      <div class="form-field full"><label>能力与简介</label><textarea name="description" placeholder="擅长什么、能解决哪些问题、何时应咨询这位员工">${esc([existing?.description, ...(existing?.capabilities || []).filter((item) => !existing?.description?.includes(item))].filter(Boolean).join("\n"))}</textarea><p class="field-hint">统一描述业务能力；系统提示词保留具体工作规则和协作边界。</p></div>
+      <div class="form-field full"><label>简介</label><textarea name="description" placeholder="擅长什么、能解决哪些问题、何时应咨询这位员工">${esc(existing?.description || "")}</textarea></div>
+      <div class="form-field full"><label>能力标签（每行一条）</label><textarea name="capabilities" rows="3">${esc((existing?.capabilities || []).join("\n"))}</textarea></div>
       <div class="form-field full" id="employee-market-selection"></div>
       <div class="form-actions">
         <button type="button" class="ghost-button" data-close-modal>取消</button>
@@ -2228,7 +2231,7 @@ async function agentModal(existing = null) {
     if (!valid) return;
     const data = new FormData(form);
     const input = Object.fromEntries(data);
-    input.capabilities = [];
+    input.capabilities = String(data.get("capabilities") || "").split(/\r?\n/).map(value => value.trim()).filter(Boolean);
     input.roleIds = roleSelection.value();
     input.runtime = {
       profileId: data.get("runtimeProfileId"),
@@ -2312,6 +2315,7 @@ function teamModal(existing = null) {
     <h2>${existing ? "编辑团队" : "创建团队"}</h2>
     <form id="team-form" novalidate>
       <div class="form-field"><label>团队名称 <b>*</b></label><input name="name" value="${esc(existing?.name || "")}" placeholder="例如：产品交付组" /><div class="field-error"></div></div>
+      ${existing ? `<div class="form-field"><label>状态</label><select name="status"><option value="active" ${existing.status === "active" ? "selected" : ""}>可用</option><option value="inactive" ${existing.status === "inactive" ? "selected" : ""}>停用</option></select></div>` : ""}
       <div class="form-field"><label>团队使命</label><textarea name="mission">${esc(existing?.mission || "")}</textarea></div>
       <div class="form-field"><div id="team-members-picker"></div><div class="field-error"></div></div>
       <div class="form-actions"><button type="button" class="ghost-button" data-close-modal>取消</button><button type="submit" class="primary-button">${existing ? "保存修改" : "创建团队"}</button></div>
@@ -2322,7 +2326,7 @@ function teamModal(existing = null) {
     event.preventDefault(); clearInvalid(form);
     if (!form.name.value.trim()) { setInvalid(form.name, '请填写团队名称。'); return; }
     try {
-      await api(existing ? `/api/teams/${existing.id}` : '/api/teams', { method:existing ? 'PUT' : 'POST', body:JSON.stringify({name:form.name.value,mission:form.mission.value,memberAgentIds:selection.value()}) });
+      await api(existing ? `/api/teams/${existing.id}` : '/api/teams', { method:existing ? 'PUT' : 'POST', body:JSON.stringify({name:form.name.value,mission:form.mission.value,memberAgentIds:selection.value(),...(existing ? {status:form.elements.status.value} : {})}) });
       closeModal(); toast('团队已保存。'); await refresh();
     } catch(error) { toast(error.message,true); }
   });

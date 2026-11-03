@@ -1,5 +1,7 @@
 # 代码导航
 
+核心管理双端对齐：Store.createTask 展开 teamIds/个人成员，cli/main.mjs 支持 create --start 与部分成功回执；web/app.js 独立保存员工 capabilities、工作流 handoffFrom，编辑团队状态与任务优先级。configuration-cli/catalog 测试及 test-task-creation 隔离 App/CLI 交叉验收覆盖协议与回读。
+
 任务列表工作流：web/app.js 按稳定工作流 ID 组合筛选、展示冻结名称；cli/main.mjs 的 tasks list 同步 --workflow ID_OR_NAME 与引用摘要。scripts/test-directory-headers.mjs 覆盖跨页、组合条件、重置、两主题宽窄布局。
 
 失败人工恢复：Store.retryFailedNode/retryFailedOrchestration 重新排队原失败 Dispatch，pendingRetryDispatchId 优先领取，保留会话、指令引用、咨询父链及累计次数；排除已完成投递的历史错误。app.js 恢复入口与提示同步，CLI 不新增恢复命令。真实会话续接验收见 scripts/test-task-retry-real.mjs。
