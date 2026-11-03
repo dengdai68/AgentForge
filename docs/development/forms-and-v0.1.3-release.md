@@ -33,7 +33,7 @@
 
 ## 最终安装包验证
 
-最终输出：`/private/tmp/af-stable-v0.1.3-final-20261103`。首轮构建后又补全浮层的外部点击/焦点关闭及关闭回调，因此重新完整构建；只发布最终目录中的附件。Electron Builder 会从包内 package.json 移除 build/devDependencies，版本与生产依赖已另外核对一致。
+本机验收候选输出：`/private/tmp/af-stable-v0.1.3-final-20261103`。首轮构建后又补全浮层的外部点击/焦点关闭及关闭回调，因此重新完整构建。Electron Builder 会从包内 package.json 移除 build/devDependencies，版本与生产依赖已另外核对一致。
 
 | 命令（APP 为最终目录中的 mac-arm64/AgentForge.app） | 结果与证据 |
 | --- | --- |
@@ -47,3 +47,9 @@
 `node --check` 已覆盖规定的 index/store/orchestrator/app 及本轮新增/修改的 renderer 模块，`git diff --check` 通过。首次完整测试 615/616 通过：旧样式断言将表单的视口高度限制也误作普通弹窗规则，已缩小到普通弹窗的基础样式；表单边界由实际 UI 验收负责。原失败日志为 `/private/tmp/af-v0.1.3-commit.log`。提交钩子强制复跑 `npm test`、`check:ai` 和 `check:impact -- --staged`，通过后才生成发行源码提交，最终日志为 `/private/tmp/af-v0.1.3-commit-final.log`。提交格式另经 `check:commit` 验证。
 
 正式发布地址：[v0.1.3](https://github.com/dengdai68/AgentForge-App/releases/tag/v0.1.3)。发布流程为主分支提交、同名标签、草稿上传完整六个附件并核对远程大小/摘要，再公开为非预发布 latest；发布后的应用更新检测及下载校验使用隔离缓存验证，不操作当前安装实例。
+
+## 上传网络回退
+
+冻结源码为 `0d3d1b6`，本机完整门禁最终 616/616 通过。主分支及 v0.1.3 标签已推送，但本机上传两个大安装包持续连接重置，只有四个小附件成功，草稿没有公开。多次传输均保留具体日志，不将 starter 文件当作已完成附件。
+
+为完成远程交付，现有 ad-hoc 工作流增加仅上传已有草稿模式；CI 按相同的 v0.1.3 冻结源码重新构建并执行既有单元/契约/安装包验收，再用同次构建的完整附件替换草稿中的候选。最终远程摘要以 CI 安装包及其清单为准，本机候选不与之混用。该工具改动不移动标签、不修改任何运行代码，不改变正式 Developer ID/公证门禁，公开前仍需核对远程附件和更新检测。

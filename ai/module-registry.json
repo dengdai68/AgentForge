@@ -511,7 +511,8 @@
       "dataLayout": "Chromium userData/sessionData/browser cache, host logs and crash dumps are set before ready under the per-instance ~/.agentforge root; task workspace setting never changes application/auth paths.",
       "workspaceDefault": "Task root uses server/data-home.mjs pure path helper for ~/agentforge, independently of isolated application state. CLI installation remains host-only.",
       "workspaceOpening": "Zero-argument main-frame current-Run IPC resolves the authenticated workspace summary through its own Session, validates Run identity, unchanged URL and an absolute directory, then opens with shell.openPath. No arbitrary renderer path or general filesystem bridge.",
-      "applicationUpdates": "Stable-only GitHub latest discovery, explicit download, SHA-256 DMG fallback for ad-hoc installs and native MacUpdater for Developer ID builds. Auto-download and install-on-quit disabled. Native restart acquires an atomic idle lease from the owned child, blocking writes/schedulers until quit or release."
+      "applicationUpdates": "Stable-only GitHub latest discovery, explicit download, SHA-256 DMG fallback for ad-hoc installs and native MacUpdater for Developer ID builds. Auto-download and install-on-quit disabled. Native restart acquires an atomic idle lease from the owned child, blocking writes/schedulers until quit or release.",
+      "draftAssetsUpload": "The manual ad-hoc workflow may build an immutable existing tag and replace all six verified assets only on an existing draft. This mode never publishes; signed stable certificate gates remain separate."
     },
     {
       "id": "server.communication-store",

@@ -16,6 +16,11 @@ on:
         description: Type UNSIGNED_BETA to acknowledge ad-hoc signing without Developer ID or notarization
         required: true
         type: string
+      draft_assets_only:
+        description: Upload all verified assets to an existing draft without publishing it
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -78,7 +83,7 @@ jobs:
           }
           dmg="$(find release -maxdepth 1 -type f -name 'AgentForge-*-arm64.dmg')"
           zip="$(find release -maxdepth 1 -type f -name 'AgentForge-*-arm64.zip')"
-          (cd release && shasum -a 256 "$(basename "$dmg")" "$(basename "$zip")" > SHA256SUMS.txt)
+          (cd release && shasum -a 256 "$(basename "$dmg")" "$(basename "$zip")" *.blockmap latest-mac.yml > SHA256SUMS.txt)
       - name: Retain verified release assets for publishing
         id: release-artifact
         uses: actions/upload-artifact@v4
@@ -87,6 +92,8 @@ jobs:
           path: |
             release/AgentForge-*-arm64.dmg
             release/AgentForge-*-arm64.zip
+            release/*.blockmap
+            release/latest-mac.yml
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 1
@@ -108,6 +115,7 @@ jobs:
         working-directory: release
         run: sha256sum --check SHA256SUMS.txt
       - name: Publish GitHub pre-release assets
+        if: ${{ !inputs.draft_assets_only }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -118,7 +126,7 @@ jobs:
           zip="$(find release -maxdepth 1 -type f -name 'AgentForge-*-arm64.zip')"
           release_flags=()
           if [ "$PRERELEASE" = "true" ]; then release_flags+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" "$dmg" "$zip" release/SHA256SUMS.txt \
+          gh release create "$RELEASE_TAG" "$dmg" "$zip" release/*.blockmap release/latest-mac.yml release/SHA256SUMS.txt \
             --title "AgentForge $RELEASE_TAG · macOS Apple Silicon Beta" --verify-tag \
             --notes "macOS 13+ / Apple Silicon (M-series) only. Download the DMG and drag AgentForge into Applications, or extract the ZIP. Download SHA256SUMS.txt into the same folder and run: shasum -a 256 -c SHA256SUMS.txt
 
@@ -128,6 +136,18 @@ jobs:
 
           Source and release assets are maintained in the public AgentForge-App repository." \
             --generate-notes "${release_flags[@]}"
+      - name: Upload verified assets to an existing draft
+        if: ${{ inputs.draft_assets_only }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = "true" || {
+            echo "Asset replacement is allowed only on an existing draft." >&2
+            exit 1
+          }
+          gh release upload "$RELEASE_TAG" release/AgentForge-*-arm64.dmg release/AgentForge-*-arm64.zip release/*.blockmap release/latest-mac.yml release/SHA256SUMS.txt --clobber
       - name: Remove transferred artifact after successful publication
         env:
           GH_TOKEN: ${{ github.token }}

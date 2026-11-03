@@ -612,6 +612,18 @@ test("macOS GitHub Release workflow is manual, verified, and explicit about Beta
   assert.match(workflow, /retention-days: 1/);
 });
 
+test('draft-only asset uploads reject public or unknown Release states', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/release-macos-beta.yml', import.meta.url), 'utf8');
+  const step = workflow.split('      - name: Upload verified assets to an existing draft\n')[1].split('      - name: Remove transferred artifact')[0];
+  const script = step.split('        run: |\n')[1].replace(/^ {10}/gm, '');
+  const command = 'gh() { if [ "$1 $2" = "release view" ]; then printf "%s" "$DRAFT_TEST_VALUE"; else printf "UPLOAD\\n"; fi; };\n' + script;
+  const run = promisify(execFile), env = {...process.env, RELEASE_TAG:'v0.1.3'};
+  assert.equal((await run('bash',['-e','-c',command],{env:{...env,DRAFT_TEST_VALUE:'true'}})).stdout,'UPLOAD\n');
+  for(const value of ['false','','unknown'])await assert.rejects(run('bash',['-e','-c',command],{env:{...env,DRAFT_TEST_VALUE:value}}),error=>{
+    assert.equal(error.code,1);assert.equal(error.stdout,'');assert.match(error.stderr,/only on an existing draft/);return true;
+  });
+});
+
 test("release artifact cleanup accepts only its exact numeric build output", async () => {
   const workflow = await readFile(new URL("../.github/workflows/release-macos-beta.yml", import.meta.url), "utf8");
   const script = workflow.slice(workflow.indexOf('      - name: Remove transferred artifact')).split('        run: |\n')[1].replace(/^ {10}/gm, '');

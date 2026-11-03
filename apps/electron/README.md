@@ -1,5 +1,7 @@
 # Electron
 
+发布网络回退：现有 ad-hoc 构建工作流的 `draft_assets_only` 可在 CI 按冻结标签完成验收并上传完整六个附件，仅接受现有草稿，不自动公开；正式签名工作流和证书门禁不变。操作与授权见 CONTRIBUTING。
+
 沟通会话头像在 compact.css 保持 38px、两字与员工身份颜色；共享 renderer 的 floating-list.mjs 使用原生 Popover 顶层候选，按窗口空间定位，不受桌面弹框正文滚动裁剪。含表单的创建/编辑弹框仅显式退出，textarea 拖动时顶部锚定；宿主只复用这些 DOM 规则，不增加 IPC 或系统权限。
 
 客户端是唯一产品入口。子服务要求父进程 IPC、bootstrap 信息和随机 loopback 端口；父进程断开即退出，页面始终使用客户端样式。
