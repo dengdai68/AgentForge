@@ -2039,3 +2039,37 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 .directory-loading { display:inline-block; width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:directory-loading-spin .8s linear infinite; }
 @keyframes directory-loading-spin { to { transform:rotate(360deg); } }
 @media(prefers-reduced-motion:reduce) { .directory-loading { animation:none; } }
+
+/* Automations reuse directory, modal and workspace controls. */
+#automations-root { min-width: 0; }
+.automation-heading, .automation-actions, .automation-schedule { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.automation-heading { justify-content: space-between; margin-bottom: 12px; }
+.automation-heading h3 { margin: 0; overflow-wrap: anywhere; }
+.automation-heading .workspace-title { min-width: 0; flex: 1; }
+.automation-schedule { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+.automation-table-scroll { overflow-x: auto; }
+.automation-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.automation-table th, .automation-table td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.automation-table th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+.automation-table small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.automation-name { text-align: left; overflow-wrap: anywhere; max-width: 260px; }
+.automation-reason { max-width: 260px; overflow-wrap: anywhere; }
+.automation-config { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 16px; font-size: 13px; }
+.automation-config dt { color: var(--muted); }
+.automation-config dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.automation-schedule-fields { padding-top: 12px; border-top: 1px solid var(--line); }
+.automation-preview { font-size: 12px; color: var(--muted); line-height: 1.7; margin-bottom: 8px; }
+#automation-search { flex-wrap: wrap; }
+#automation-search input { flex: 1; min-width: 140px; }
+#automation-search select { width: auto; }
+@media (max-width: 800px) { .automation-heading { align-items: flex-start; } .automation-heading .workspace-title { flex-basis: 100%; } .automation-config { grid-template-columns: 80px minmax(0,1fr); } }
+
+.automation-create-modal #task-objective { height: clamp(130px, 20vh, 210px); min-height: 110px; }
+.automation-create-modal .task-workspace-hint { overflow-wrap: anywhere; }
+.automation-schedule-fields { flex: none; }
+
+#automation-record-filter { justify-content: flex-start; gap: 8px; margin-top: 12px; }
+#automation-record-filter select { width: auto; }
+#automation-record-filter [data-auto-refresh] { margin-left: auto; }
+#automation-search { justify-content: flex-start; gap: 8px; }
+#automation-search [data-auto-new] { margin-left: auto; }

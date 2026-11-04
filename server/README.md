@@ -1,6 +1,6 @@
 # 控制面
 
-createTask 的 teamIds 只是创建时选人输入：Store 校验团队 active，展开其中 active 成员，与显式 memberAgentIds 合并去重；显式停用成员仍拒绝，最终恰好一位经理。任务仅持久化独立成员及冻结快照，团队后续变化不联动任务。priority 只接受 low/medium/high；CLI --start 顺序调用既有创建/启动 HTTP，不新增调度规则。
+createTask 的 teamIds 只是创建时选人输入：Store 校验团队 active，展开其中 active 成员，与显式 memberAgentIds 合并去重；显式停用成员仍拒绝，最终恰好一位经理。任务仅持久化独立成员及冻结快照，团队后续变化不联动任务。不再使用任务优先级；CLI --start 顺序调用既有创建/启动 HTTP，不新增调度规则。
 
 失败 Run 的人工恢复继续原 Dispatch/成员会话，保留消息和咨询依赖、累计 attempts 与失败 Trace，不取消其他排队工作。下次领取优先处理人类恢复的投递；已完成投递的旧错误不再成为恢复入口。没有执行投递的准备失败保留原队列，空队列才启动经理。
 
@@ -104,3 +104,5 @@ Codex 在 Provider 确认 thread.started 之前出现明确鉴权/未登录错�
 沟通失败保留原消息、投递和调用历史，nextAttemptAt 为 null，不由轮询自动重试。失败消息下提供“查看控制台”和“重试”；重试使用当前员工配置，未确认原生会话时创建真实新会话，已确认时续接。同员工 FIFO、其他群成员并行及服务重启恢复在途调用保持原规则。
 
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
+
+自动化配置和分页触发历史由 automations.mjs 提供 Store commands；automation-schedule.mjs 计算下一时间，automation-scheduler.mjs 10秒检测并异步执行。Task 来源冻结、人类路由门禁、前轮事务确认见 docs/27。普通任务优先级已移除。

@@ -92,3 +92,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 员工发现问题、修复和验证结果通过协作 Message 记录和交接；平台没有独立问题清单或关闭状态，不根据问题数量控制任务推进。Store 拒绝已废弃的清单输出字段；HTTP 移除独立清单接口，历史索引不再投影该集合。
 
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
+
+自动化调度与普通任务执行共用 Store → Orchestrator → Runtime。单独10秒调度器只检测/领取并异步执行，不等待模型；Store 事务原子创建 Task/Run、确认前轮并记录触发去重键，重启恢复现有 Run。引入 cron-parser 5.4.0 计算时区/DST，无新服务；依赖决策和离线策略见 [自动化](27-automations.md)。

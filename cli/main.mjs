@@ -38,12 +38,13 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (operation === 'login') allowed.push('username', 'password-stdin');
   } else {
     if (!Object.hasOwn(resources, group) || !resources[group].operations.includes(operation)) throw usage('不存在此配置命令');
-    if (['get', 'update', 'delete', 'test', 'start', 'terminate', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts'].includes(operation)) { if (args.length !== 3 || !(group === 'runtimes' && ['Claude Code', 'Codex', 'DeepSeek Harness'].includes(id)) && !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw usage('需要精确资源ID，不能使用名称或路径'); }
+    if (['get', 'update', 'delete', 'test', 'start', 'terminate', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers'].includes(operation)) { if (args.length !== 3 || !(group === 'runtimes' && ['Claude Code', 'Codex', 'DeepSeek Harness'].includes(id)) && !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw usage('需要精确资源ID，不能使用名称或路径'); }
     else if (operation === 'models') { if (args.length !== 3 || !['claude-code', 'codex', 'dsh'].includes(id)) throw usage('models 需要 Provider 参数：claude-code、codex 或 dsh'); }
     else if (args.length !== 2) throw usage('此命令不接受额外参数');
     if (['create', 'update', 'import', 'auto-update'].includes(operation)) allowed.push('file');
     if (operation === 'list') allowed.push('page', 'all', 'search');
     if (['delete', 'terminate', 'test'].includes(operation)) allowed.push('yes');
+    if (group === 'automations' && ['list','triggers'].includes(operation)) allowed.push('status', 'page', 'all');
     if (group === 'tasks') {
       if (operation === 'create') allowed.push('start');
       if (['message', 'reply'].includes(operation)) allowed.push('file');
@@ -68,6 +69,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (password.length < 10 || password.length > 128 || /[\r\n]/.test(password)) throw usage('密码输入应为一行10–128字符');
     return client.login(flags.username, password);
   }
+  if (group === 'automations') return executeAutomationCommand(client, operation, id, flags, page, stdin);
   if (group === 'tasks') return executeTaskCommand(client, operation, id, flags, page, stdin);
   const resource = resources[group], path = resource.path;
   if(group==='plugins' && ['updates','check-updates','auto-update'].includes(operation)) {
@@ -123,7 +125,7 @@ const reference = (id, name) => id ? { id, name: name || null } : null;
 function taskView(task, { summary = false } = {}) {
   const base = { id: task.id, title: task.title, status: task.status, workflow: reference(task.workflowTemplateId, task.workflowSnapshot?.name), memberCount: task.memberAgentIds?.length || (task.memberSnapshots?.length || 0) + (task.managerSnapshot ? 1 : 0), updatedAt: task.updatedAt, archivedAt: task.archivedAt };
   if (summary) return base;
-  return { ...base, priority: task.priority, objective: task.objective, acceptanceCriteria: task.acceptanceCriteria,
+  return { ...base, objective: task.objective, acceptanceCriteria: task.acceptanceCriteria,
     workspacePath: task.workspacePath,
     members: [...(task.memberSnapshots || []), task.managerSnapshot].filter(Boolean).map(({id,name}) => reference(id,name)),
     manager: reference(task.managerAgentId, task.managerSnapshot?.name), createdAt: task.createdAt };
@@ -239,3 +241,26 @@ export async function run(argv, options = {}) {
 }
 const entry = process.argv[1] && await realpath(process.argv[1]).catch(() => null);
 if (entry && import.meta.url === pathToFileURL(entry).href) process.exitCode = await run(process.argv.slice(2));
+
+async function executeAutomationCommand(client, operation, id, flags, page, stdin) {
+  const path='/api/automations', detail=`${path}/${id}`;
+  const projectTrigger = ({configuration,...record}) => record;
+  const project = item => ({...item, ...(item.latestTrigger ? {latestTrigger:projectTrigger(item.latestTrigger)} : {})});
+  if (['list','triggers'].includes(operation)) {
+    const query=new URLSearchParams({page:String(page),...(flags.status?{status:flags.status}:{}),...(flags.search?{search:flags.search}:{})});
+    const url=operation==='list'?path:`${detail}/triggers`;
+    const result=await client.request(url+'?'+query);
+    if(flags.all)for(let current=result.page+1;current<=result.totalPages;current++){query.set('page',current);const next=await client.request(url+'?'+query);result.items.push(...next.items);}
+    result.items=result.items.map(operation==='list'?project:projectTrigger);
+    if(flags.all){result.page=null;result.hasMore=false;}
+    else result.hasMore=result.page<result.totalPages;
+    return result;
+  }
+  if(operation==='get'){const result=await client.request(detail);return {automation:project(result.automation)};}
+  if(operation==='trigger'){const result=await client.request(detail+'/trigger',{method:'POST',body:{}});return {trigger:projectTrigger(result.trigger)};}
+  if(operation==='delete'){if(!flags.yes)throw usage('删除需要 --yes；有触发历史请使用 update 停用');return client.request(detail,{method:'DELETE'});}
+  const input=await readInput(flags.file,stdin);
+  validateInput(input,operation==='update'?{...resources.automations.schema,required:[],minProperties:1}:resources.automations.schema);
+  const result=await client.request(operation==='create'?path:detail,{method:operation==='create'?'POST':'PUT',body:input});
+  return {automation:project(result.automation)};
+}

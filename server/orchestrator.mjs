@@ -154,6 +154,10 @@ export function scheduleManagerFollowup(store, runId, delivery, decision, source
 function acceptDelivery(store, delivery, trace, output, artifacts) {
   const runId = delivery.runId, run = store.getRun(runId);
   if (!store.canExecuteDispatch(delivery.id)) throw new RuntimeCancelledError("当前投递已停止");
+  if (store.getRunTask(runId).kind === "automation") {
+    if (output.automationFailure) throw new Error(String(output.automationFailure));
+    if (output.consultation?.audience === "human" || output.handoff?.recipientAgentId === "human_operator") throw new Error("自动化不能向人类交接或澄清；请调整配置后重试原员工");
+  }
   const agent = store.getRunAgent(runId, delivery.recipientAgentId);
   const sender = { type: "agent", id: agent.id, name: agent.name };
   store.acceptNodeResult(runId, delivery.workflowNodeId, trace.id, output, artifacts);

@@ -1,6 +1,6 @@
 # CLI
 
-核心管理能力与 App 对齐：员工搜索包含能力标签；团队支持启停；工作流依赖 dependsOn 与交接 handoffFrom 独立保存，交付定义为空时由 Store 补默认值。tasks create 接受 teamIds 与 memberAgentIds 并集，由 Store 展开可用团队中的 active 成员、去重并校验恰好一位经理；不保存团队绑定。验收标准省略或 [] 均为空，最多20条/每条500字符；priority 为 low/medium/high。create --start 显式创建并启动，失败输出 TASK_CREATED_START_FAILED 与 taskId，先查询状态勿重复创建。任务列表按更新/归档时间降序，未知状态拒绝。
+核心管理能力与 App 对齐：员工搜索包含能力标签；团队支持启停；工作流依赖 dependsOn 与交接 handoffFrom 独立保存，交付定义为空时由 Store 补默认值。tasks create 接受 teamIds 与 memberAgentIds 并集，由 Store 展开可用团队中的 active 成员、去重并校验恰好一位经理；不保存团队绑定。验收标准省略或 [] 均为空，最多20条/每条500字符；不再使用任务优先级。create --start 显式创建并启动，失败输出 TASK_CREATED_START_FAILED 与 taskId，先查询状态勿重复创建。任务列表按更新/归档时间降序，未知状态拒绝。
 
 `tasks list --workflow ID_OR_NAME` 支持精确 ID 或唯一的当前/任务冻结名称；歧义须用 ID，不存在明确报错。与 search/status/archived 组合后分页，摘要包含 workflow 的 ID 与任务冻结名称，不返回完整工作流配置。
 
@@ -70,3 +70,5 @@ tasks message 的 recipientAgentId 可省略，默认发给当前 Run 的项目�
 tasks collaboration 文本/JSON 仅返回角色沟通，包含 startMessageId；tasks message 指定员工直接送达，错误任务拒绝新消息。tasks progress 对 failed 优先提示在客户端重试原员工。帮助/schema 同步以上含义；本次不增加恢复命令，最终完成仍由客户端人类确认。
 
 tasks progress 移除 openDefects；问题报告与处理反馈统一使用 tasks collaboration 查询、tasks message/reply 交接。帮助/schema 同步此读模型变化，不增加命令或确认权限。
+
+automations 新增 list/get/create/update/delete/trigger/triggers；列表与触发历史按页查询，--all 显式逐页读取，配置字段与 App 弹窗一致。update 支持 enabled 开关，历史只可停用；trigger 的失败/跳过回执不代表任务已启动。tasks list 仅普通任务；priority 已废弃，输入/schema/输出同步移除。

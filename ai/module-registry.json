@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "project": "agentforge",
   "distribution": "AgentForge-App is the self-contained desktop extraction from AgentForge c1277e5. Client-only: npm start/dev launch Electron; the loopback child requires IPC ownership, no standalone Web/server launch. server/web/client/cli are bundled dependencies. No sibling repository imports. See docs/23-desktop-extraction.md.",
-  "coreAppCliParity": "AGENTS requires equivalent core management and task-creation capabilities. Store expands teamIds into independent members; CLI create --start preserves taskId on launch failure. App preserves capability tags and independent handoffFrom, exposes team status and task priority. Covered by configuration-catalog/configuration-cli and isolated test-task-creation round trips.",
+  "coreAppCliParity": "AGENTS requires equivalent core management and task-creation capabilities. Store expands teamIds into independent members; CLI create --start preserves taskId on launch failure. App preserves capability tags and independent handoffFrom, exposes team status; task priority is retired. Covered by configuration-catalog/configuration-cli and isolated test-task-creation round trips.",
   "taskWorkflowListing": "Task lists display frozen workflow names and filter by stable workflow IDs before pagination. CLI tasks list --workflow ID_OR_NAME resolves unique current/frozen names, exposes workflow ID/name references, and rejects missing or ambiguous names. Covered by configuration-cli tests and isolated directory-headers UI acceptance.",
   "purpose": "Module ownership, current contracts and change-impact requirements for the local AgentForge control plane and clients.",
   "instructions": [
@@ -1447,6 +1447,153 @@
           "filesystem",
           "runtime",
           "privacy"
+        ]
+      }
+    },
+    {
+      "id": "server.automations",
+      "path": "server/automations.mjs",
+      "kind": "domain-store",
+      "owner": "server",
+      "purpose": "Store-owned automation configuration, filtered pagination, persistent trigger identity and atomic task creation/prior-run confirmation.",
+      "sourceOfTruth": [
+        "docs/27-automations.md"
+      ],
+      "tests": [
+        "tests/automations.test.mjs",
+        "scripts/test-automations.mjs",
+        "scripts/test-automations-real.mjs"
+      ],
+      "allowedDependencies": [
+        "automation-schedule",
+        "Store commands",
+        "node:crypto"
+      ],
+      "forbiddenDependencies": [
+        "Provider invocation",
+        "filesystem task contents",
+        "direct HTTP"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/27-automations.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "scheduling",
+          "task lifecycle"
+        ]
+      }
+    },
+    {
+      "id": "server.automation-scheduler",
+      "path": "server/automation-scheduler.mjs",
+      "kind": "orchestration",
+      "owner": "server",
+      "purpose": "Non-blocking ten-second scheduler: claim due triggers through Store, launch existing Orchestrator, respect reset/restart leases.",
+      "sourceOfTruth": [
+        "docs/27-automations.md"
+      ],
+      "tests": [
+        "tests/automations.test.mjs",
+        "scripts/test-automations.mjs",
+        "scripts/test-automations-real.mjs"
+      ],
+      "allowedDependencies": [
+        "Store commands",
+        "injected executeRun"
+      ],
+      "forbiddenDependencies": [
+        "direct domain mutation",
+        "Provider invocation",
+        "frontend timers"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/27-automations.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "scheduling",
+          "task lifecycle"
+        ]
+      }
+    },
+    {
+      "id": "server.automation-schedule",
+      "path": "server/automation-schedule.mjs",
+      "kind": "pure-composition",
+      "owner": "server",
+      "purpose": "Validate numeric five-field Cron and IANA timezone; compute next instants with locked cron-parser DST semantics.",
+      "sourceOfTruth": [
+        "docs/27-automations.md"
+      ],
+      "tests": [
+        "tests/automations.test.mjs",
+        "scripts/test-automations.mjs",
+        "scripts/test-automations-real.mjs"
+      ],
+      "allowedDependencies": [
+        "cron-parser",
+        "Intl",
+        "Date"
+      ],
+      "forbiddenDependencies": [
+        "Store",
+        "filesystem",
+        "Provider"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/27-automations.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "scheduling",
+          "task lifecycle"
+        ]
+      }
+    },
+    {
+      "id": "web.automations",
+      "path": "web/automations.mjs",
+      "kind": "presentation",
+      "owner": "client",
+      "purpose": "Paginated automation directory and trigger history; reuse task modal, shared workspace, tokens and navigation without client scheduling.",
+      "sourceOfTruth": [
+        "docs/27-automations.md"
+      ],
+      "tests": [
+        "tests/automations.test.mjs",
+        "scripts/test-automations.mjs",
+        "scripts/test-automations-real.mjs"
+      ],
+      "allowedDependencies": [
+        "authenticated HTTP",
+        "pagination.mjs",
+        "injected shared UI"
+      ],
+      "forbiddenDependencies": [
+        "Store",
+        "Provider",
+        "Node APIs"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/27-automations.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "scheduling",
+          "task lifecycle"
         ]
       }
     }

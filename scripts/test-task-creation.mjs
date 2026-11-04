@@ -38,7 +38,7 @@ try{
   await page.getByRole('button',{name:'＋ 新建任务',exact:true}).click();
   const form=page.locator('#task-form'),criteria=form.locator('[name="acceptanceCriteria"]'),details=form.locator('.task-acceptance');await form.waitFor();
   await page.evaluate(()=>document.getAnimations().filter(animation=>Number.isFinite(animation.effect.getComputedTiming().endTime)).forEach(animation=>animation.finish()));
-  assert.ok(await criteria.isHidden());assert.equal(await form.locator('input,textarea,select').count(),6);
+  assert.ok(await criteria.isHidden());assert.equal(await form.locator('input,textarea,select').count(),5);
   assert.equal(await form.locator('#node-assignment-panel,[data-task-execution-boundary]').count(),0);
   const geometry=await form.evaluate(form=>{const box=node=>{const r=node.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom};};const textarea=form.elements.objective,style=getComputedStyle(textarea);return{modal:box(form.closest('.modal')),textarea:box(textarea),line:parseFloat(style.lineHeight),padding:parseFloat(style.paddingTop)+parseFloat(style.paddingBottom),members:box(form.querySelector('#task-members-picker .extension-picker-control')),flow:box(form.elements.workflowTemplateId),submit:box(form.querySelector('[type="submit"]')),overflow:document.documentElement.scrollWidth>innerWidth};});
   evidence.geometry.push({theme,width,height,...geometry});
@@ -61,12 +61,12 @@ try{
   assert.equal(await form.locator('[name="objective"]').inputValue(),description);
   await details.locator('summary').click();await criteria.fill(Array.from({length:21},(_,i)=>'标准 '+i).join('\n'));await details.locator('summary').click();
   await form.getByRole('button',{name:'创建并开始',exact:true}).click();await form.getByText('验收标准最多 20 条。',{exact:true}).waitFor();assert.ok(await criteria.isVisible(),'invalid hidden criteria reopen');
-  await form.locator('[name=priority]').selectOption('high');await criteria.fill(height===1000?'第一项验收\n第二项验收':'');await details.locator('summary').click();await details.locator('summary').click();assert.equal(await criteria.inputValue(),height===1000?'第一项验收\n第二项验收':'');await details.locator('summary').click();
+  await criteria.fill(height===1000?'第一项验收\n第二项验收':'');await details.locator('summary').click();await details.locator('summary').click();assert.equal(await criteria.inputValue(),height===1000?'第一项验收\n第二项验收':'');await details.locator('summary').click();
   await form.locator('.modal-scroll').evaluate(body=>{body.scrollTop=0;});
   await page.screenshot({path:join(root,`${theme}-${width}x${height}.png`)});
   const response=page.waitForResponse(r=>r.url().endsWith('/api/tasks')&&r.request().method()==='POST');await form.getByRole('button',{name:'创建并开始',exact:true}).click();const createdResponse=await response;assert.ok(createdResponse.ok());const {task}=await createdResponse.json();await form.waitFor({state:'detached'});
   await page.locator(`[data-run-task="${task.id}"]`).waitFor();
-  const saved=(await api('/api/tasks')).tasks.find(t=>t.id===task.id);assert.equal(saved.objective,description);assert.equal(Object.hasOwn(saved,'teamId'),false);assert.deepEqual(saved.memberAgentIds,[manager.id,worker.id,extra.id]);assert.equal(saved.workflowTemplateId,flows[1].id);assert.deepEqual(saved.acceptanceCriteria,height===1000?['第一项验收','第二项验收']:[]);assert.equal(saved.priority,'high');assert.equal(saved.status,'backlog');assert.ok(launchIds.includes(task.id));
+  const saved=(await api('/api/tasks')).tasks.find(t=>t.id===task.id);assert.equal(saved.objective,description);assert.equal(Object.hasOwn(saved,'teamId'),false);assert.deepEqual(saved.memberAgentIds,[manager.id,worker.id,extra.id]);assert.equal(saved.workflowTemplateId,flows[1].id);assert.deepEqual(saved.acceptanceCriteria,height===1000?['第一项验收','第二项验收']:[]);assert.equal(Object.hasOwn(saved,'priority'),false);assert.equal(saved.status,'backlog');assert.ok(launchIds.includes(task.id));
  }
  evidence.cases.push('two themes at 1320x1000, 760x760 and 800x560; six to twelve visible description lines, fixed same-row selectors and submit; optional criteria retain drafts and reopen on validation errors; real HTTP creation persists combined independent employees/workflow and rejects another manager and empty or supplied criteria; rejected launch retains backlog task');
  for(const theme of ['minimal','warm']){

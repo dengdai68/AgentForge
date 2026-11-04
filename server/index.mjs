@@ -1,3 +1,5 @@
+import { createAutomationScheduler } from "./automation-scheduler.mjs";
+import { previewSchedule } from "./automation-schedule.mjs";
 import { createServer } from "node:http";
 import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
@@ -489,6 +491,29 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   if (teamMatch && request.method === "DELETE") {
     sendJson(response, 200, { team: store.deleteTeam(teamMatch[1]) }); return true;
   }
+  if (pathname === "/api/automations/preview" && request.method === "POST") {
+    const input = await readJson(request);
+    sendJson(response, 200, { times: previewSchedule(input.cron, input.timeZone) }); return true;
+  }
+  if (pathname === "/api/automations" && request.method === "GET") {
+    sendJson(response, 200, store.listAutomations(Object.fromEntries(searchParams))); return true;
+  }
+  if (pathname === "/api/automations" && request.method === "POST") {
+    sendJson(response, 201, { automation: store.saveAutomation(await readJson(request)) }); return true;
+  }
+  const automationMatch = pathname.match(/^\/api\/automations\/([^/]+)(?:\/(triggers|trigger))?$/);
+  if (automationMatch) {
+    const [, automationId, action] = automationMatch;
+    if (request.method === "GET" && action === "triggers") { sendJson(response, 200, store.listAutomationTriggers(automationId, Object.fromEntries(searchParams))); return true; }
+    if (request.method === "POST" && action === "trigger") {
+      const record = store.triggerAutomation(automationId);
+      if (record.runId && record.outcome === "started") void executeRun(store, record.runId, runExecutionOptions).catch(error => diagnostic("automation.execute_failed", {error, runId: record.runId}));
+      sendJson(response, 201, { trigger: record }); return true;
+    }
+    if (!action && request.method === "GET") { sendJson(response, 200, { automation: store.getAutomation(automationId) }); return true; }
+    if (!action && request.method === "PUT") { sendJson(response, 200, { automation: store.saveAutomation(await readJson(request), automationId) }); return true; }
+    if (!action && request.method === "DELETE") { sendJson(response, 200, store.deleteAutomation(automationId)); return true; }
+  }
   if (request.method === "GET" && pathname === "/api/tasks") {
     sendJson(response, 200, { tasks: store.listTasks() });
     return true;
@@ -824,3 +849,7 @@ const taskPatrol = createTaskPatrol({
 });
 taskPatrol.start();
 server.on("close", () => taskPatrol.stop());
+
+const automationScheduler = createAutomationScheduler({ getStore: () => store, execute: (current, runId) => executeRun(current, runId, runExecutionOptions), blocked: () => resettingData || Boolean(updateRestartLease), onError: (error, runId) => diagnostic("automation.scheduler_failed", { error, runId }) });
+automationScheduler.start();
+server.on("close", () => automationScheduler.stop());

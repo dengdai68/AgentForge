@@ -106,3 +106,5 @@ DeepSeek Harness 根据原生 system/message 中的完整应用指令匹配保�
 沟通应用提示词保留沟通与 Task/Run 的入口区分、讨论答疑边界和实际交付指引；移除固定中文、逐项 Git/发布/凭据限制、代表自己/经理无特权以及附件读取/非指令的重复句子。输出协议、真实附件路径与统一来源/如实表达规则保持；不改变 API 权限或存量原生历史。
 
 任务系统规则建议 clone 独立成一次工具调用，后续再修改和提交，为内置仓库登记 Hook 提供清晰边界。沟通提示词与协调协议不变。
+
+Task.kind=automation 时替换人类验收/澄清指令：只列经理/员工，只允许 agent consultation，缺少事实由经理协调，不能继续时 automationFailure 明确错误中断。经理以 null nextNodeId/nextAgentId 提交交付，下一触发自动确认；普通任务提示词保持原有规则。Store 和 Orchestrator 同时阻止人类路由，不能只靠提示词。

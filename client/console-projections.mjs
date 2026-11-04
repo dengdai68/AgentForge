@@ -587,9 +587,9 @@ export function collaborationRecords(workspace = {}) {
     if (event.type === "run.awaiting_acceptance") {
       const matches = messages.filter(item => item.kind === "manager_decision" && item.traceId && item.traceId === event.data?.acceptanceRequest?.traceId);
       const anchor = matches.length === 1 ? recordById.get(matches[0].id) : record;
-      anchor.title = "提交人类验收"; anchor.human = true;
+      anchor.title = run.task?.kind === "automation" ? "本轮交付完成" : "提交人类验收"; anchor.human = run.task?.kind !== "automation";
       if (anchor !== record) {
-        anchor.relatedEvents.push({ ...publicEvent(event), content: event.message === anchor.content ? "经理已提交人类验收。" : event.message || "" });
+        anchor.relatedEvents.push({ ...publicEvent(event), content: event.message === anchor.content ? (run.task?.kind === "automation" ? "经理已完成本轮交付。" : "经理已提交人类验收。") : event.message || "" });
       } else records.push(record);
       const latestFiles = new Map();
       for (const file of asArray(workspace.artifacts).filter(item => !item.createdAt || time(item.createdAt) <= time(event.timestamp))) {

@@ -3,6 +3,7 @@ export const PREFERENCES_KEY = "agentforge.presentation.v1";
 export const NAVIGATION = [
   { id: "overview", label: "总览", group: "OPERATIONS" },
   { id: "tasks", label: "任务中心", group: "OPERATIONS" },
+  { id: "automations", label: "自动化", group: "OPERATIONS" },
   { id: "communication", label: "沟通", group: "OPERATIONS" },
   { id: "teams", label: "团队", group: "OPERATIONS" },
   { id: "workflows", label: "工作流", group: "OPERATIONS" },

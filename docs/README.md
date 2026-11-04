@@ -20,3 +20,5 @@
 - [DeepSeek Harness Runtime 接入决策](25-dsh-runtime.md)
 
 - [26：Runtime 插件源标准兼容](26-runtime-plugin-compatibility.md)：统一导入、原生组件、冻结计划及明确失败边界。
+
+- [自动化](27-automations.md)：定时配置、触发历史、全自动协作、分页和下一轮自动确认；含 Cron 依赖架构决策。

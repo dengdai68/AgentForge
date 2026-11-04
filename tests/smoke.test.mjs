@@ -432,7 +432,7 @@ test("task creation presents explicit acceptance criteria before execution", asy
 
 test("task creation keeps optional criteria and a small workspace hint without execution boilerplate", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const modal = source.slice(source.indexOf("function newTaskModal()"), source.indexOf("function workflowNodeRow("));
+  const modal = source.slice(source.indexOf("function newTaskModal("), source.indexOf("function workflowNodeRow("));
   assert.match(modal, /系统工作根目录/);
   assert.doesNotMatch(modal, /data-task-execution-boundary|modal-intro|团队项目经理/);
   assert.match(modal, /class="task-acceptance"/);
@@ -580,7 +580,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 
 test("task form combines employee selections and workflow without expanded staffing details or preassignments", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const modal = source.slice(source.indexOf("function newTaskModal()"), source.indexOf("function workflowNodeRow("));
+  const modal = source.slice(source.indexOf("function newTaskModal("), source.indexOf("function workflowNodeRow("));
   assert.match(modal, /name="workflowTemplateId"/);
   assert.match(modal, /id: 'task-members'/);
   assert.doesNotMatch(modal, /name="teamId"/);

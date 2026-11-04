@@ -25,6 +25,7 @@
           <p class="nav-label">OPERATIONS</p>
           <button class="nav-item" data-view="overview" aria-label="总览"><span class="nav-icon">◈</span><span class="nav-text">总览</span></button>
           <button class="nav-item active" data-view="tasks" aria-label="任务中心"><span class="nav-icon">✓</span><span class="nav-text">任务中心</span><span class="nav-count" id="nav-task-count">0</span><span class="nav-hint" id="nav-ws-hint" style="display:none">待处理</span></button>
+          <button class="nav-item" data-view="automations" aria-label="自动化"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="nav-text">自动化</span></button>
           <button class="nav-item" data-view="communication" aria-label="沟通"><span class="nav-icon">☏</span><span class="nav-text">沟通</span><span class="nav-count nav-unread" id="nav-communication-count" hidden></span></button>
           <button class="nav-item" data-view="teams" aria-label="团队"><span class="nav-icon">⌘</span><span class="nav-text">团队</span></button>
           <button class="nav-item" data-view="workflows" aria-label="工作流"><span class="nav-icon">⌁</span><span class="nav-text">工作流</span></button>
@@ -86,6 +87,7 @@
         </section>
 
         <!-- 任务中心 -->
+        <section class="view" id="automations-view"><div id="automations-root"></div></section>
         <section class="view active" id="tasks-view">
           <div class="sr-only" id="tasks-heading"></div>
           <div class="filter-bar" id="task-filter-bar"></div>

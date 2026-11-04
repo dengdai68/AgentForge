@@ -16,7 +16,7 @@
 
 - 客户端界面 / Electron 负责呈现与发命令；HTTP 负责认证、路由和边界校验；Store 拥有领域规则与状态；Orchestrator 通过 Store 推进执行；Runtime 只适配 Provider，不拥有领域状态。文件内容由 Run Files 管理，SQLite 只存元数据。
 - CLI 通过同一受认证 HTTP 配置资源、创建/启动任务、查询执行与协作、发送指令及精确回复澄清；不直接访问数据库、提取浏览器会话或绕过 Store。人类最终确认保留在 客户端。契约见 [docs/21](docs/21-configuration-cli.md)。
-- Task/Run 记录协调状态；平台只执行员工与经理的协调决定，不做业务结果、流程完整性或内容证据校验，不自动改判或增加复核。员工可用普通文字交接；任务完成由人类显式确认。
+- Task/Run 记录协调状态；平台只执行员工与经理的协调决定，不做业务结果、流程完整性或内容证据校验，不自动改判或增加复核。员工可用普通文字交接；普通任务完成由人类显式确认；自动化按用户配置的下一轮触发规则确认，边界见 docs/27-automations.md。
 - 保留冻结快照、不可变事件、Trace/Artifact 历史及成员会话隔离；不按角色名称硬编码派工。角色、团队与 Task 不限制数字员工的本机操作；协议破坏须更新 `docs/03-domain-model.md` 与 CHANGELOG。
 - 认证默认拒绝；禁止泄露凭据、完整提示或未脱敏工具输出。私有配置、诊断、扩展与历史可见性按 [docs/08](docs/08-real-local-agent-runtime.md)、[14](docs/14-console-authentication.md)、[15](docs/15-employee-runtime-configuration.md)、[17](docs/17-communication.md)、[19](docs/19-agent-history.md) 执行。
 - 本机单管理员 MVP/Beta 不是多租户、生产沙箱或高可用系统；Runtime bypass 不是沙箱。Electron 保持隔离和关闭式宿主接口，不新增通用文件/进程桥；详见 [docs/18](docs/18-electron-client.md)。
@@ -51,4 +51,4 @@ git diff --check
 - 未验证、失败或被阻塞必须如实说明；交付报告包含改动、证据、已知限制与后续事项。只有实现、同步和验证齐全才算完成。
 - 本仓库是独立客户端，`npm start` 启动 Electron 及其随机端口子服务。验证使用隔离 HOME/数据目录，不占用或重启原仓库的 Web `4310`，不覆盖操作者安装。宿主关闭只管理自己的后台。
 - 需要提交时使用格式 `<type>(<scope>): <imperative summary>`，正文含 Intent / Changes / Verification / Risks / History，并运行 `npm run check:commit -- <消息文件>`。提交前检查范围、凭据与无关文件。
-- 平台不设置任务级操作权限或角色文件范围；数字员工以本机用户权限依据任务目标执行本地和远程操作。操作结果仍须如实记录，最终任务完成仍由人类确认。
+- 平台不设置任务级操作权限或角色文件范围；数字员工以本机用户权限依据任务目标执行本地和远程操作。操作结果仍须如实记录，普通任务最终完成仍由人类确认；自动化遵循 docs/27 的明确例外。

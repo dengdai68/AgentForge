@@ -170,3 +170,5 @@ Runtime 启动恢复：local-cli/codex-app-server 在原生会话建立前识别
 待答复的人类澄清卡片由共享样式 `.collaboration-row.needs-answer` 保留左右 12px 内边距，时间、正文及操作与左侧状态色条分开；桌面紧凑布局只覆盖垂直内边距，水平内边距遵循共享样式。仅样式调整，无 CLI/API 或消息语义变化。
 
 员工卡片布局由 web/app.js 与 web/styles.css 维护：头像、姓名与右上状态/经理类型顶部对齐，同排左右对齐 Runtime 与扩展数量；纯展示变化。
+
+自动化入口：server/automations.mjs 管理配置/分页记录和事务触发，automation-schedule.mjs 使用固定 cron-parser 计算五段 Cron/IANA 时区，automation-scheduler.mjs 每10秒领取并异步执行；web/automations.mjs 目录复用 app.js 创建弹窗和任务工作区。普通列表排除自动化，人类协作按 Task.kind 隔离。契约见 docs/27；验收 tests/automations.test.mjs、scripts/test-automations.mjs、scripts/test-automations-real.mjs。

@@ -1,6 +1,6 @@
 # 领域模型
 
-任务创建接受可选 teamIds 和 memberAgentIds；至少选一人或一个团队。Store 展开可用团队中的 active 成员，与显式员工合并去重，校验最终恰好一位可用经理；显式停用/删除员工、停用/不存在团队、数组内重复 ID 拒绝。teamIds 不持久化，不恢复旧 teamId 团队绑定。任务 priority 只接受 low/medium/high，默认 medium；冻结事实和人类最终确认不变。
+任务创建接受可选 teamIds 和 memberAgentIds；至少选一人或一个团队。Store 展开可用团队中的 active 成员，与显式员工合并去重，校验最终恰好一位可用经理；显式停用/删除员工、停用/不存在团队、数组内重复 ID 拒绝。teamIds 不持久化，不恢复旧 teamId 团队绑定。任务 不再使用任务优先级，默认 medium；冻结事实和人类最终确认不变。
 
 任务独立持有 `memberAgentIds` 与冻结员工快照，必须且只能有一位可用项目经理；不再写入或接受 `teamId`。团队只是可空的员工集合，可含零位或多位经理；在任务或群聊选团队时展开为员工 ID 并集，之后团队编辑/删除不影响已加入的成员。任务列表、详情和员工控制台不展示团队名称。新任务启动前拒绝已删除成员；在途 Run 继续使用原冻结成员完成执行，不重建会话或改写历史。
 
@@ -118,3 +118,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 沟通失败保留原消息、投递和调用历史，nextAttemptAt 为 null，不由轮询自动重试。失败消息下提供“查看控制台”和“重试”；重试使用当前员工配置，未确认原生会话时创建真实新会话，已确认时续接。同员工 FIFO、其他群成员并行及服务重启恢复在途调用保持原规则。
 
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
+
+自动化新增 Automation 与 AutomationTrigger 元数据集合。Task.kind=automation 冻结 automationId/automationTriggerId/automationVersion；普通任务为 manual（历史未设置视为普通）。自动化每轮独立工作目录/会话/快照，无 human participant，不允许人类消息、澄清或交接；经理交付后 awaiting_acceptance，下一轮实际创建成功的同一事务自动确认，confirmedBy=automation 并关联 confirmedByTriggerId。错误/暂停/取消不自动确认。普通任务的人类最终验收不变。任务优先级输入已废弃，明确拒绝，当前读模型不展示；旧冻结事实不重写，不要求重置真实数据。详见 [自动化](27-automations.md)。

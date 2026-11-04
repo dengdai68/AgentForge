@@ -255,8 +255,8 @@ test("workspace removes delivery-version navigation without removing backend Art
   assert.doesNotMatch(source, /data-ws-tab="artifacts"|artifact-snapshots-panel|loadArtifactSnapshot|selectedArtifactId/);
   assert.match(source, /data-open-acceptance-directory/);
   assert.ok(source.includes('>CHANGE</button>'));
-  assert.match(source, /data-back-to-tasks aria-label="返回任务列表"/);
-  assert.ok(source.includes('if ((target = el("[data-back-to-tasks]"))) return setView("tasks")'));
+  assert.match(source, /data-back-to-tasks aria-label=.*返回触发记录.*返回任务列表/);
+  assert.match(source, /data-back-to-tasks.*setView\("automations"\).*return setView\("tasks"\)/);
   const apiSource = await readFile(new URL("../server/index.mjs", import.meta.url), "utf8");
   assert.ok(apiSource.includes('runFiles.readArtifact'));
 });

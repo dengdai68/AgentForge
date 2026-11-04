@@ -20,11 +20,14 @@ function persona(agent) {
 
 export function taskPrompt({ task, run, node, trace, agent, directory, cwd, workspace, messages, roster, mode, delivery, session }) {
   const manager = agent.id === run.manager?.id;
+  const autonomous = task.kind === "automation";
+  const automaticRules = '本轮是全自动任务，只存在经理和员工，不存在人类参与者或澄清环节。信息不足先查询资料或 consultation.audience=agent 咨询其他成员；经理依据目标决策，不编造事实。无法继续时返回 {"summary":"明确原因","automationFailure":"无法继续的原因"}，平台记录错误中断。完成交付时经理返回 managerDecision.nextNodeId=null、nextAgentId=null，进入待验收；下一轮启动前自动确认。';
   const systemPrompt = [
-    truth, persona(agent), taskRules, consultationRules,
-    '问题发现、处理进度、修复结果和核验结论均在 summary 或 consultation.question 中向相关成员说明，通过协作消息交接，不维护独立问题清单或关闭状态。所有成员都可通过 handoff.recipientAgentId @ 任意其他员工或经理（不能是自己）；需要人类回答时用 consultation.audience=human。handoff 与 consultation、managerDecision 不同时使用。',
+    truth, persona(agent), autonomous ? taskRules.replace('最终完成须由人类确认。', '交付完成后进入待验收，下一轮启动前自动确认。') : taskRules,
+    autonomous ? automaticRules : consultationRules,
+    !autonomous && '问题发现、处理进度、修复结果和核验结论均在 summary 或 consultation.question 中向相关成员说明，通过协作消息交接，不维护独立问题清单或关闭状态。所有成员都可通过 handoff.recipientAgentId @ 任意其他员工或经理（不能是自己）；需要人类回答时用 consultation.audience=human。handoff 与 consultation、managerDecision 不同时使用。',
     `可咨询角色：${JSON.stringify(roster)}`,
-    mode === "inquiry" ? inquiryMode : mode === "consultation" ? consultationMode : manager ? managerRules : nodeRules,
+    autonomous ? (mode === "consultation" ? consultationMode.replace("或人类", "") : manager ? managerRules.replace("请求人类验收", "提交交付") : nodeRules) : mode === "inquiry" ? inquiryMode : mode === "consultation" ? consultationMode : manager ? managerRules : nodeRules,
     manager && `工作流定义（仅经理持有；人员需求是选人依据，不是员工绑定）：${JSON.stringify(task.workflowSnapshot)}`,
     `执行环境：\n任务：${task.title}\n任务工作目录：${task.workspacePath}\n本次运行目录：${cwd}\nRun：${run.id}；Trace：${trace.id}\n本 Trace 输出目录：${directory}/output`,
     task.repositorySources?.length && `团队共享仓库：${JSON.stringify(task.repositorySources)}\n你的默认工作仓库：${JSON.stringify(task.repositoryBindings?.[agent.id] || null)}`,
@@ -33,7 +36,7 @@ export function taskPrompt({ task, run, node, trace, agent, directory, cwd, work
   const input = [
     `当前投递：${JSON.stringify({ id: delivery.id, purpose: mode, ...(!manager || mode !== "manager" ? { workflowNodeId: node.id } : {}), attempts: delivery.attempts, ...(delivery.lastError ? { lastError: delivery.lastError } : {}) })}`,
     delivery.continueRequested && '继续。修复中断原因后，从当前进度接着执行本轮工作。',
-    delivery.patrol && '当前任务仍在进行，但已没有执行中的角色或待执行交接。请根据当前状态与协作记录继续推进，明确 @ 下一位成员、询问人类或提交验收；不要只报告已完成。',
+    delivery.patrol && (autonomous ? '当前自动化已没有执行中的成员，请根据协作记录推进，交接其他员工或提交交付，不询问人类。' : '当前任务仍在进行，但已没有执行中的角色或待执行交接。请根据当前状态与协作记录继续推进，明确 @ 下一位成员、询问人类或提交验收；不要只报告已完成。'),
     session.inputContext && '续接已有工作；未重复列出的目标和约定继续有效，不从头执行。',
   ].filter(Boolean);
   const inputContext = { ...(session.inputContext || {}) };

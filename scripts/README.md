@@ -1,6 +1,6 @@
 # 工程脚本
 
-test-task-creation.mjs 同时验收核心 App/CLI 对齐：真实 CLI 子进程与认证 HTTP 操作角色、团队、工作流、员工、MCP、插件和任务；验证团队合并选人、无额外验收标准、优先级、工作流独立交接来源、员工能力/角色往返、团队启停，以及两主题宽窄编辑。该展示/协议验收不启动 Provider；--start 成功/失败和不重试语义由 configuration-cli 测试覆盖。
+test-task-creation.mjs 同时验收核心 App/CLI 对齐：真实 CLI 子进程与认证 HTTP 操作角色、团队、工作流、员工、MCP、插件和任务；验证团队合并选人、无额外验收标准、工作流独立交接来源、员工能力/角色往返、团队启停，以及两主题宽窄编辑。该展示/协议验收不启动 Provider；--start 成功/失败和不重试语义由 configuration-cli 测试覆盖。
 
 test-directory-headers.mjs 同时验证任务工作流列、冻结名称、工作流筛选后分页、名称/状态组合与重置，覆盖 minimal 宽屏和 warm 窄屏；不执行 Provider。
 
@@ -135,3 +135,9 @@ AGENTFORGE_CODEX_LOGIN_REAL=1 node scripts/test-codex-login-recovery-real.mjs �
 完整测试仍通过 npm test 的隔离入口运行；磁盘较慢或同机任务较多时，可显式设置 `AGENTFORGE_TEST_CONCURRENCY=2 npm test` 降低 Node 测试文件并发，不过滤测试、不调整断言或超时；默认并发保持 Node 默认值。
 
 NAS 冷启动可用 `AGENTFORGE_TEST_STARTUP_TIMEOUT_MS=180000` 为两项隔离服务启动验收设置更长等待；仅影响 application-updates/auth 的首次 ready 等待，不改变后续 IPC 期限、运行时超时或安全断言。默认仍为原来的20/30秒。
+
+test-automations.mjs 在隔离 Electron 验证自动化弹窗、两主题宽窄/短屏、服务端两级分页、普通任务隔离、完整工作区往返及 CLI 配置往返；不调用 Provider。AGENTFORGE_AUTOMATIONS_REAL=1 node scripts/test-automations-real.mjs 使用已有 Claude 登录，在隔离 HOME/数据中执行普通任务到界面人工确认，以及真正定时触发和下一轮自动确认；不修改操作者实例。
+
+自动化真实验收遇到 Provider 延迟时，可用 AGENTFORGE_AUTOMATIONS_RESUME 指向本脚本已有的 .data/automations-real-* 目录续验已创建的自动化；使用同一冻结 Run/会话，不重建任务或复制凭据，等待上限为每轮十五分钟。
+
+自动化真实验收可设置 AGENTFORGE_AUTOMATIONS_PROVIDER=codex；默认 claude-code。只切换隔离实例的员工 Runtime，不改变操作者配置；默认模型可通过 AGENTFORGE_AUTOMATIONS_MODEL 指定。

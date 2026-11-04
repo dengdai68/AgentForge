@@ -151,9 +151,9 @@ test('task team selection merges active employees once and freezes independent m
   const team = store.createTeam({name:'团队',memberAgentIds:[manager.id,worker.id,inactive.id]});
   const overlap = store.createTeam({name:'重叠团队',memberAgentIds:[worker.id]});
   const flow = store.createWorkflowTemplate({name:'流程',nodes:[{id:'work',title:'工作',staffingGuidance:'可用员工'}]});
-  const input = {title:'任务',objective:'验证独立成员',teamIds:[team.id,overlap.id],memberAgentIds:[worker.id],workflowTemplateId:flow.id,acceptanceCriteria:[],priority:'high'};
+  const input = {title:'任务',objective:'验证独立成员',teamIds:[team.id,overlap.id],memberAgentIds:[worker.id],workflowTemplateId:flow.id,acceptanceCriteria:[]};
   const task = store.createTask(input);
-  assert.deepEqual(task.memberAgentIds,[worker.id,manager.id]); assert.deepEqual(task.acceptanceCriteria,[]); assert.equal(task.priority,'high');
+  assert.deepEqual(task.memberAgentIds,[worker.id,manager.id]); assert.deepEqual(task.acceptanceCriteria,[]); assert.equal(Object.hasOwn(task,'priority'),false);
   assert.equal(task.teamIds,undefined); assert.equal(task.teamId,undefined);
   assert.throws(()=>store.createTask({...input,teamIds:[team.id,team.id]}),/teamIds/);
   assert.throws(()=>store.createTask({...input,teamIds:null}),/teamIds/);

@@ -395,7 +395,7 @@ test('text failures go only to stderr with exit code and recovery; no raw errors
 test('AI CLI provides offline comprehensive group/command schemas and safe examples', async () => {
   const failFetch = () => { throw new Error('help must be offline'); };
   const help = await execute(['help'], { fetcher: failFetch });
-  assert.equal(Object.keys(help.resources).length, 8); assert.match(help.sequence.join(' '), /runtimes.*plugins.*mcps.*roles.*agents.*teams.*workflows/);
+  assert.equal(Object.keys(help.resources).length, 9); assert.match(help.sequence.join(' '), /runtimes.*plugins.*mcps.*roles.*agents.*teams.*workflows/);
   for (const group of Object.keys(resources)) {
     const schema = await execute(['schema', group], { fetcher: failFetch });
     assert.equal(schema.schema.additionalProperties, false); assert.ok(schema.notes.length);
@@ -738,4 +738,29 @@ test('CLI search includes employee capabilities and rejects unknown task statuse
   const f = await fixture(); f.state.agents[0].capabilities=['独立审片'];
   assert.equal((await f.invoke(['agents','list','--search',' 独立审片 '])).total,1);
   await assert.rejects(execute(['tasks','list','--status','not_a_status','--session-file',f.sessionFile],{fetcher:()=>assert.fail('invalid status must not query tasks')}),error=>error.code==='USAGE');
+});
+
+test('automation CLI exposes discovery, trigger IDs, status paging and readable list output', async () => {
+  assert.match((await captured(['--help'])).stdout, /automations/);
+  for (const operation of ['trigger', 'triggers']) {
+    const result = await captured(['automations', operation, '--help']);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, new RegExp(`automations ${operation} ID`));
+    assert.match(result.stdout, /ID：必填/);
+    if (operation === 'triggers') {
+      assert.match(result.stdout, /--page N \| --all/);
+      assert.match(result.stdout, /awaiting_acceptance/);
+    }
+  }
+  assert.match((await captured(['automations', 'list', '--help'])).stdout, /all\/enabled\/disabled/);
+  const data = {items:[{id:'auto_one',title:'每日检查',enabled:true,cron:'0 9 * * *',timeZone:'Asia/Shanghai'}],total:21,page:1,pageSize:20,hasMore:true};
+  const output = formatOutput(['automations','list'],data);
+  assert.match(output,/每日检查/); assert.match(output,/已启用/); assert.match(output,/automations list --page 2/);
+  const f = await fixture();
+  const result = await execute(['automations','list','--all','--session-file',f.sessionFile], {fetcher:async url => {
+    const page=Number(new URL(url).searchParams.get('page'));
+    return new Response(JSON.stringify({items:[{id:`auto_${page}`,title:'分页',enabled:false}],page,pageSize:20,total:21,totalPages:2}));
+  }});
+  assert.equal(result.items.length,2); assert.equal(result.page,null); assert.equal(result.hasMore,false);
+  assert.match(formatOutput(['automations','list'],result),/--all/);
 });

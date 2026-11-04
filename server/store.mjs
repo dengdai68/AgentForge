@@ -1,3 +1,4 @@
+import { automationCommands } from "./automations.mjs";
 import { statSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { isAbsolute, resolve, dirname } from "node:path";
@@ -236,7 +237,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   for (const current of state.runs) {
     const task = state.tasks.find((item) => item.id === current.taskId), team = state.teams.find((item) => item.id === task?.teamId);
     current.manager ||= clone(state.agents.find((item) => item.id === managerId));
-    current.participants ||= [...(team?.memberAgentIds || [...new Set(Object.values(task?.nodeAssignments || {}))]).map((memberId) => state.agents.find((item) => item.id === memberId)).filter(Boolean).map((item) => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...clone(current.manager), type: "agent", kind: "manager" }, clone(humanMember)];
+    current.participants ||= [...(team?.memberAgentIds || [...new Set(Object.values(task?.nodeAssignments || {}))]).map((memberId) => state.agents.find((item) => item.id === memberId)).filter(Boolean).map((item) => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...clone(current.manager), type: "agent", kind: "manager" }, ...(task?.kind === "automation" ? [] : [clone(humanMember)])];
     current.failure ??= null;
   }
   persistence.save(state);
@@ -260,7 +261,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     if (Object.hasOwn(input, "managerAgentId")) throw new Error("团队不再指定项目经理，请将经理放入 memberAgentIds；任务创建时校验恰好一位项目经理");
     return { memberAgentIds: memberIds(input.memberAgentIds, { empty: true }) };
   }
-  const taskReadModel = task => { const { teamId, team, ...record } = task; return clone({ ...record, memberAgentIds: task.memberAgentIds || [...(task.memberSnapshots || []).map(member => member.id), task.managerSnapshot?.id || task.managerAgentId].filter(Boolean) }); };
+  const taskReadModel = task => { const { teamId, team, priority, ...record } = task; return clone({ ...record, memberAgentIds: task.memberAgentIds || [...(task.memberSnapshots || []).map(member => member.id), task.managerSnapshot?.id || task.managerAgentId].filter(Boolean) }); };
   function recoverableFailedTraces(runId) {
     const current = getRun(runId);
     return state.traces.filter(trace => {
@@ -309,6 +310,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   }
   return {
     ...communicationCommands(state, save),
+    ...automationCommands(state),
     ...historyCommands(state, { databasePath }),
     close() { this.closeHistory(); listeners.clear(); persistence.close(); },
     prepareDataReset() {
@@ -317,15 +319,15 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     getNavigationNotifications() {
       const attention = new Set(["awaiting_human", "awaiting_acceptance", "paused", "blocked", "failed"]);
-      return { taskAttentionCount: new Set(state.runs.filter(run => !getTask(run.taskId)?.archivedAt && attention.has(run.status)).map(run => run.taskId)).size, communicationUnreadCount: this.listCommunications().reduce((sum, item) => sum + item.unreadCount, 0) };
+      return { taskAttentionCount: new Set(state.runs.filter(run => getTask(run.taskId)?.kind !== "automation" && !getTask(run.taskId)?.archivedAt && attention.has(run.status)).map(run => run.taskId)).size, communicationUnreadCount: this.listCommunications().reduce((sum, item) => sum + item.unreadCount, 0) };
     },
     getBootstrap() {
-      const tasks = state.tasks.map((task) => ({ id: task.id, title: task.title, objective: task.objective.slice(0, 240), status: task.status, workspaceKind: task.workspaceManaged ? "managed" : "legacy", memberAgentIds: taskReadModel(task).memberAgentIds, workflowTemplateId: task.workflowTemplateId, workflowSnapshot: { name: task.workflowSnapshot.name }, archivedAt: task.archivedAt, deletionBlockedBy: taskDeletionBlock(task.id), createdAt: task.createdAt, updatedAt: task.updatedAt }));
+      const tasks = state.tasks.filter(task => task.kind !== "automation").map((task) => ({ id: task.id, title: task.title, objective: task.objective.slice(0, 240), status: task.status, workspaceKind: task.workspaceManaged ? "managed" : "legacy", memberAgentIds: taskReadModel(task).memberAgentIds, workflowTemplateId: task.workflowTemplateId, workflowSnapshot: { name: task.workflowSnapshot.name }, archivedAt: task.archivedAt, deletionBlockedBy: taskDeletionBlock(task.id), createdAt: task.createdAt, updatedAt: task.updatedAt }));
       const taskById = new Map(tasks.map((task) => [task.id, task]));
       const counts = new Map(state.runs.map((run) => [run.id, { traceCount: 0, artifactCount: 0 }]));
       for (const trace of state.traces) if (counts.has(trace.runId)) counts.get(trace.runId).traceCount++;
       for (const artifact of state.artifacts) if (counts.has(artifact.runId)) counts.get(artifact.runId).artifactCount++;
-      return { installationId: state.settings.installationId, communicationUnreadCount: this.listCommunications().reduce((sum, item) => sum + item.unreadCount, 0), tasks: clone(tasks), runs: state.runs.map((run) => ({ id: run.id, taskId: run.taskId, status: run.status, startedAt: run.startedAt, completedAt: run.completedAt, task: clone(taskById.get(run.taskId)), ...counts.get(run.id) })), agents: this.listAgents(), roles: this.listRoles(), teams: this.listTeams(), workflowTemplates: this.listWorkflowTemplates(), events: state.events.slice(-6).map((event) => ({ id: event.id, type: event.type, runId: event.runId, actor: clone(event.actor), timestamp: event.timestamp, message: event.message.slice(0, 240), data: {} })) };
+      return { installationId: state.settings.installationId, communicationUnreadCount: this.listCommunications().reduce((sum, item) => sum + item.unreadCount, 0), tasks: clone(tasks), runs: state.runs.filter(run => taskById.has(run.taskId)).map((run) => ({ id: run.id, taskId: run.taskId, status: run.status, startedAt: run.startedAt, completedAt: run.completedAt, task: clone(taskById.get(run.taskId)), ...counts.get(run.id) })), agents: this.listAgents(), roles: this.listRoles(), teams: this.listTeams(), workflowTemplates: this.listWorkflowTemplates(), events: state.events.filter(event => !event.type.startsWith("automation.") && (!event.runId || taskById.has(getRun(event.runId)?.taskId))).slice(-6).map((event) => ({ id: event.id, type: event.type, runId: event.runId, actor: clone(event.actor), timestamp: event.timestamp, message: event.message.slice(0, 240), data: {} })) };
     },
     getConsoleContentReference(runId, eventId) {
       const event = state.events.find(item => item.id === eventId && item.runId === runId && item.type === "runtime.event" && item.data?.auditVersion === 2);
@@ -619,6 +621,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         const questionType = consultation.questionType || "协作", routingReason = consultation.routingReason || "员工请求转交";
         const considered = Array.isArray(consultation.consideredMemberIds) ? consultation.consideredMemberIds : [];
         const human = consultation.audience === "human", recipientId = consultation.recipientAgentId;
+        if (human && getTask(current.taskId).kind === "automation") throw new Error("自动化不接受人类澄清，请咨询经理或其他员工；无法继续则明确报告错误");
         if (!human && consultation.audience !== "agent") throw new Error("咨询受众无效");
         if (!human && (!runAgent(current, recipientId) || recipientId === delivery.recipientAgentId)) throw new Error("消息需要一个可送达的其他成员");
         const sender = runAgent(current, delivery.recipientAgentId);
@@ -644,6 +647,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current?.taskId);
         if (!current || task.archivedAt) throw new Error("任务已归档，不接受新消息");
+        if (task.kind === "automation") throw new Error("自动化不接受人类协作消息");
         if (current.status === "failed") throw new Error("任务因错误中断，请先重试失败员工；当前不能发送消息或 @ 其他成员");
         const interactionOnly = ["completed", "cancelled", "paused"].includes(current.status);
         if (current.status === "awaiting_acceptance" && !input.replyToMessageId) {
@@ -666,6 +670,14 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         }
         this.syncWaiting(runId); return { message, queued: true, resumed: false, interactionOnly };
       });
+    },
+    confirmAutomationCompletion(runId, triggerId) {
+      const current = getRun(runId), task = getTask(current?.taskId);
+      if (!current || task.kind !== "automation" || current.status !== "awaiting_acceptance" || !this.canCompleteRun(runId)) throw new Error("自动确认只能用于已结束执行的自动化待验收记录");
+      current.status = "completed"; current.completedAt = now(); current.confirmedAt = current.completedAt; current.confirmedBy = "automation"; current.confirmedByTriggerId = triggerId;
+      current.summary = "下一轮执行前已自动确认完成。"; current.currentFocus = null;
+      task.status = "done"; task.updatedAt = now();
+      addEvent({ type: "run.completed", runId, message: current.summary, data: { confirmedAt: current.confirmedAt, triggerId, completion: "automatic" } }); save(); return clone(current);
     },
     confirmRunCompletion(runId) {
       return this.transaction(() => {
@@ -697,6 +709,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     requestHumanAcceptance(runId, { traceId = null, summary = "项目经理已提交人类验收。" } = {}) {
       const current = getRun(runId), task = getTask(current.taskId);
+      if (task.kind === "automation" && summary === "项目经理已提交人类验收。") summary = "项目经理已完成本轮交付。";
       this.settleCoordinationFollowups(runId);
       current.acceptanceRequest = { traceId, summary, requestedAt: now(), managerAgentId: current.manager.id };
       current.status = "awaiting_acceptance"; current.summary = summary;
@@ -705,14 +718,14 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       save(); return clone(current);
     },
     canCompleteRun(runId) { return !state.traces.some((item) => item.runId === runId && item.status === "running") && !state.dispatches.some((item) => item.runId === runId && !["done", "cancelled"].includes(item.status)); },
-    assertTaskDeletionAllowed(taskId) { const task = getTask(taskId); if (!task) throw new Error("Task 不存在"); const blockedBy = taskDeletionBlock(taskId); if (blockedBy) throw new Error(taskDeletionError(blockedBy)); return taskReadModel(task); },
+    assertTaskDeletionAllowed(taskId) { const task = getTask(taskId); if (!task) throw new Error("Task 不存在"); if (task.kind === "automation") throw new Error("自动化触发历史需保留，请停用自动化"); const blockedBy = taskDeletionBlock(taskId); if (blockedBy) throw new Error(taskDeletionError(blockedBy)); return taskReadModel(task); },
     deleteTask(taskId) { const task = this.assertTaskDeletionAllowed(taskId); const relatedRuns = state.runs.filter((run) => run.taskId === taskId); const runIds = new Set(relatedRuns.map((run) => run.id)); state.tasks = state.tasks.filter((item) => item.id !== taskId); state.runs = state.runs.filter((item) => !runIds.has(item.id)); state.traces = state.traces.filter((item) => !runIds.has(item.runId)); state.artifacts = state.artifacts.filter((item) => !runIds.has(item.runId)); state.messages = state.messages.filter((item) => !runIds.has(item.runId)); state.dispatches = state.dispatches.filter((item) => !runIds.has(item.runId)); state.decisions = state.decisions.filter((item) => !runIds.has(item.runId)); state.events = state.events.filter((item) => !runIds.has(item.runId)); save(); return { task: clone(task), runIds: [...runIds] }; },
     getExecutionLogs: (query) => executionLogs(state, query),
     snapshot: () => clone(state), subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, addEvent,
     listAgents: () => state.agents.filter(item => item.status !== "deleted").map(employeeConfiguration), listTeams: () => clone(state.teams.map((item) => {
       const { managerAgentId, ...team } = item, memberAgentIds = teamMembers(item);
       return { ...team, memberAgentIds, members: memberAgentIds.map(value => ({ ...employeeConfiguration(getAgent(value)), type: "agent" })) };
-    })), listTasks: () => state.tasks.map(taskReadModel), listWorkflowTemplates: () => clone(state.workflowTemplates), timeline: (runId = null) => clone(state.events.filter((item) => !runId || item.runId === runId)),
+    })), listTasks: () => state.tasks.filter(task => task.kind !== "automation").map(taskReadModel), listWorkflowTemplates: () => clone(state.workflowTemplates), timeline: (runId = null) => clone(state.events.filter((item) => !runId || item.runId === runId)),
     listRuns: () => clone(state.runs.map((item) => ({ ...item, task: taskReadModel(getTask(item.taskId)), traceCount: state.traces.filter((trace) => trace.runId === item.id).length, artifactCount: state.artifacts.filter((artifact) => artifact.runId === item.id).length }))),
     getRun(runId) { const item = getRun(runId); if (!item) throw new Error("Run 不存在"); return clone(item); }, getTask(taskId) { const item = getTask(taskId); if (!item) throw new Error("任务不存在"); return taskReadModel(item); }, getRunAgent(runId, agentId) { return clone(runAgent(getRun(runId), agentId)); },
     getRunTask(runId) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const task = getTask(current.taskId); return clone({ ...taskReadModel(task), taskWorkspacePath: task.workspacePath, workspacePath: current.workspacePath || task.workspacePath, deletionBlockedBy: taskDeletionBlock(task.id) }); },
@@ -912,12 +925,13 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         save(); return this.listTeams().find(item => item.id === teamId);
       });
     },
-    createTask(input = {}) {
+    buildTask(input = {}) {
       if (Object.hasOwn(input, "teamId")) throw new Error("任务不再绑定团队，请将团队员工加入 memberAgentIds");
       if (input.repositorySources !== undefined) throw new Error("不再接受仓库绑定，请将仓库说明写入提示词或任务内容");
       const teamIds = input.teamIds === undefined ? [] : input.teamIds;
       if (!Array.isArray(teamIds) || teamIds.some(value => typeof value !== "string") || new Set(teamIds).size !== teamIds.length) throw new Error("teamIds 必须是不重复的团队 ID 数组");
-      if (input.priority !== undefined && !["low", "medium", "high"].includes(input.priority)) throw new Error("任务优先级无效");
+      if (Object.hasOwn(input, "priority")) throw new Error("priority 已废弃，任务不再使用优先级");
+      if ((input.kind !== undefined && input.kind !== "manual") || ["automationId", "automationTriggerId"].some(key => Object.hasOwn(input, key))) throw new Error("任务来源只能由自动化调度设置");
       const selectedTeams = teamIds.map(teamId => { const team = getTeam(teamId); if (!team || team.status !== "active") throw new Error("请选择存在且可用的团队"); return team; });
       const explicitMembers = memberIds(input.memberAgentIds === undefined ? [] : input.memberAgentIds, { active: true, empty: true });
       const selectedIds = memberIds([...new Set([...explicitMembers, ...selectedTeams.flatMap(team => teamMembers(team).filter(agentId => currentEmployee(agentId)?.status === "active"))])], { active: true }), members = selectedIds.map(getAgent);
@@ -936,9 +950,10 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const repositories = { repositorySources: [], repositoryBindings: {} }, effectiveTemplate = clone(template);
       effectiveTemplate.nodes.forEach(node => { node.staffingGuidance ||= node.ownerRole ? `适合由熟悉${node.ownerRole}相关工作的成员承担；请结合成员提示词和能力判断。` : `选择能够完成「${node.title}」交付的成员。`; node.repositoryPath = null; });
       const nodeAssignments = input.nodeAssignments ? assignments({ memberAgentIds: selectedIds.filter(value => value !== managerAgentId) }, effectiveTemplate, input.nodeAssignments) : {};
-      const item = { id: taskId, workspaceManaged: Boolean(workspaceRoot), repositoryMode: "workspace", ...repositories, memberAgentIds: selectedIds, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), priority: input.priority || "medium", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId, managerRuntime: runtime(input.managerRuntime || managerSnapshot.runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: now(), updatedAt: now() };
-      state.tasks.unshift(item); save(); return clone(item);
+      const item = { id: taskId, workspaceManaged: Boolean(workspaceRoot), repositoryMode: "workspace", ...repositories, memberAgentIds: selectedIds, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), kind: "manual", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId, managerRuntime: runtime(input.managerRuntime || managerSnapshot.runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: now(), updatedAt: now() };
+      return item;
     },
+    createTask(input = {}) { const item = this.buildTask(input); state.tasks.unshift(item); save(); return clone(item); },
     archiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (current.status !== "done") throw new Error("只有已完成任务可以归档"); if (current.archivedAt) throw new Error("任务已经归档"); if (state.runs.some((run) => run.taskId === taskId && !this.canCompleteRun(run.id))) throw new Error("仍有未结束协作，不能归档"); current.archivedAt = now(); current.updatedAt = current.archivedAt; const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.archived", runId: latestRun?.id || null, message: `任务「${current.title}」已归档，交付记录仍可查看。`, data: { taskId, archivedAt: current.archivedAt } }); save(); return taskReadModel(current); },
     unarchiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (!current.archivedAt) throw new Error("任务尚未归档"); current.archivedAt = null; current.updatedAt = now(); const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.unarchived", runId: latestRun?.id || null, message: `任务「${current.title}」已恢复至任务中心。`, data: { taskId } }); save(); return taskReadModel(current); },
     createRun(taskId) {
@@ -950,11 +965,11 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (frozen.some(employee => getAgent(employee.id)?.status === "deleted")) throw new Error("任务尚未开始且有成员已删除，请重新选择成员创建任务");
       for (const employee of frozen) assertRuntimeEnabled(employee.runtime);
       const manager = { ...withRoleSnapshot(clone(sourceManager)), id: id("manager"), sourceAgentId: sourceManager.id, runtime: clone(currentTask.managerRuntime) };
-      const participants = [...currentTask.memberSnapshots.map(item => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...manager, type: "agent" }, clone(humanMember)];
+      const participants = [...currentTask.memberSnapshots.map(item => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...manager, type: "agent" }, ...(currentTask.kind === "automation" ? [] : [clone(humanMember)])];
       const runId = id("run"), item = { id: runId, workspacePath: currentTask.workspaceManaged ? resolve(currentTask.workspacePath, runId) : currentTask.workspacePath, taskId, manager, participants, status: "running", currentFocus: null, waitingConversationId: null, waitingNodeId: null, waitingAgentId: null, pendingMessageIds: [], startedAt: now(), completedAt: null, failure: null, summary: null, deliveryReview: null };
       state.runs.unshift(item); currentTask.status = "running"; save(); return clone(item);
     },
-    updateRun(runId, patch = {}) { if (patch.status === "completed") throw new Error("完成必须由人类确认"); const current = getRun(runId); if (!current) throw new Error("Run 不存在"); if (patch.status && patch.status !== current.status && !runTransitions[current.status]?.includes(patch.status)) throw new Error(`Run 不能从 ${current.status} 变更为 ${patch.status}`); Object.assign(current, clone(patch)); save(); return clone(current); }, setTaskStatus(taskId, status) { if (status === "done") throw new Error("完成必须由人类确认"); const current = getTask(taskId); if (!current || (status !== current.status && !taskTransitions[current.status]?.includes(status))) throw new Error("Task 状态变更不合法"); current.status = status; current.updatedAt = now(); save(); return clone(current); },
+    updateRun(runId, patch = {}) { if (patch.status === "completed") throw new Error("完成必须由人类确认"); const current = getRun(runId); if (!current) throw new Error("Run 不存在"); if (patch.status === "awaiting_human" && getTask(current.taskId).kind === "automation") throw new Error("自动化不等待人类澄清"); if (patch.status && patch.status !== current.status && !runTransitions[current.status]?.includes(patch.status)) throw new Error(`Run 不能从 ${current.status} 变更为 ${patch.status}`); Object.assign(current, clone(patch)); save(); return clone(current); }, setTaskStatus(taskId, status) { if (status === "done") throw new Error("完成必须由人类确认"); const current = getTask(taskId); if (!current || (status !== current.status && !taskTransitions[current.status]?.includes(status))) throw new Error("Task 状态变更不合法"); current.status = status; current.updatedAt = now(); save(); return clone(current); },
     getRunRecoveryPlan(runId) {
       const current = getRun(runId);
       const empty = { shouldExecute: false, interruptedTraceIds: [], recoveredDispatchIds: [] };
@@ -1003,6 +1018,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current?.taskId);
         if (!current || !task || task.archivedAt || current.status !== "failed") throw new Error("只能恢复未归档的失败 Run");
+        this.assertAutomationRunAvailable(runId);
         if (current.failure?.phase === "workspace_baseline_missing") throw new Error("工作目录基线缺失，旧 Run 不能安全重试；请核对文件并在干净工作区新建 Task/Run");
         assertNode(current, nodeId);
         const failures = failedBusinessTraces(runId), failedNodeIds = new Set(failures.map((trace) => trace.workflowNodeId));
@@ -1019,6 +1035,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current?.taskId);
         if (!current || !task || task.archivedAt || current.status !== "failed") throw new Error("只能恢复未归档的失败 Run");
+        this.assertAutomationRunAvailable(runId);
         if (current.failure?.phase === "workspace_baseline_missing") throw new Error("工作目录基线缺失，旧 Run 不能安全重试；请核对文件并在干净工作区新建 Task/Run");
         const businessFailures = failedBusinessTraces(runId);
         if (businessFailures.length) throw new Error("存在失败的业务职责，请从该职责的恢复操作重新开始");
@@ -1034,7 +1051,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       });
     },
     pauseRun(runId, reason = "用户暂停") { const current = getRun(runId), task = getTask(current?.taskId); if (!current || !["planning", "running", "awaiting_human", "review"].includes(current.status)) throw new Error("只有活跃 Run 可以暂停"); current.pausedFromStatus = current.status; current.status = "paused"; task.status = "paused"; task.updatedAt = now(); addEvent({ type: "run.paused", runId, message: "Run 已暂停；当前本机角色执行已停止，历史 Trace 与产物保留。", data: { reason } }); save(); return clone(current); },
-    resumeRun(runId) { const current = getRun(runId), task = getTask(current?.taskId); if (!current || current.status !== "paused") throw new Error("只有已暂停 Run 可以继续"); const restoredStatus = this.hasPendingHumanQuestion(runId) ? "awaiting_human" : ["awaiting_human", "review"].includes(current.pausedFromStatus) ? current.pausedFromStatus : "running"; current.status = restoredStatus; task.status = restoredStatus; task.updatedAt = now(); delete current.pausedFromStatus; addEvent({ type: "run.resumed", runId, message: "Run 已继续；项目经理将依据当前状态决定后续角色协作。", data: {} }); save(); return clone(current); },
+    resumeRun(runId) { const current = getRun(runId), task = getTask(current?.taskId); if (!current || current.status !== "paused") throw new Error("只有已暂停 Run 可以继续"); this.assertAutomationRunAvailable(runId); const restoredStatus = this.hasPendingHumanQuestion(runId) ? "awaiting_human" : ["awaiting_human", "review"].includes(current.pausedFromStatus) ? current.pausedFromStatus : "running"; current.status = restoredStatus; task.status = restoredStatus; task.updatedAt = now(); delete current.pausedFromStatus; addEvent({ type: "run.resumed", runId, message: "Run 已继续；项目经理将依据当前状态决定后续角色协作。", data: {} }); save(); return clone(current); },
     collaborationCandidates(runId) { const current = getRun(runId); return clone(getTask(current.taskId).workflowSnapshot.nodes); }, setCurrentFocus(runId, nodeId, reason = "项目经理已选择下一次协作") { const current = getRun(runId); assertNode(current, nodeId); current.currentFocus = { nodeId, reason: text(reason, "当前工作重心说明"), updatedAt: now() }; save(); return clone(current.currentFocus); },
     createTrace(runId, input = {}) { const current = getRun(runId); assertNode(current, input.workflowNodeId); if (!runAgent(current, input.agentId)) throw new Error("Trace Agent 不属于 Run"); const item = { id: id("trace"), inputMessageId: id("input"), runId, workflowNodeId: input.workflowNodeId, agentId: input.agentId, type: input.type || "node", status: "running", startedAt: now(), endedAt: null, tracePath: `runs/${runId}/traces/`, inputArtifactIds: [], outputArtifactIds: [], promptRef: null, error: null }; state.traces.push(item); save(); return clone(item); }, completeTrace(traceId, patch = {}) { const current = getTrace(traceId); if (!current) throw new Error("Trace 不存在"); current.status = patch.status || "completed"; current.endedAt = now(); current.tracePath = patch.tracePath || `runs/${current.runId}/traces/${current.id}/events.ndjson`; current.error = patch.error || null; save(); return clone(current); },
     attachTracePrompt(traceId, reference = {}) { const current = getTrace(traceId); if (!current) throw new Error("Trace 不存在"); if (current.promptRef || reference.storagePath !== `runs/${current.runId}/traces/${current.id}/prompt-snapshot.json` || !/^[0-9a-f]{64}$/.test(reference.sha256 || "") || !Number.isInteger(reference.bytes) || reference.bytes < 1 || reference.bytes > 300000) throw new Error("提示词快照关联无效"); current.promptRef = { storagePath: reference.storagePath, bytes: reference.bytes, sha256: reference.sha256 }; save(); return clone(current); },
@@ -1052,8 +1069,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       save();
       return clone(currentTrace);
     }, failNode(runId, nodeId, traceId, error) { const current = getRun(runId); assertNode(current, nodeId); this.completeTrace(traceId, { status: "failed", error }); save(); },
-    addMessage(input = {}) { const current = getRun(input.runId); if (!current) throw new Error("Run 不存在"); const recipient = input.recipientHuman ? { type: "human", id: "human_operator", name: "你" } : input.recipientAgentId ? runAgent(current, input.recipientAgentId) : { type: "team", id: "team", name: "全体团队" }; if (!recipient) throw new Error("消息接收者不属于当前 Run");
-        const item = { id: id("message"), runId: current.id, conversationId: input.conversationId || `conversation_${current.id}_${input.workflowNodeId || "general"}`, workflowNodeId: input.workflowNodeId || null, sender: input.sender || { type: "human", id: "human_operator", name: "你" }, recipient: { type: recipient.type || "agent", id: recipient.id, name: recipient.name }, traceId: input.traceId || null, startMessageId: input.traceId ? getTrace(input.traceId)?.inputMessageId || null : null, replyToMessageId: input.replyToMessageId || null, questionType: input.questionType || null, routingReason: input.routingReason || null, consideredMemberIds: input.consideredMemberIds || [], kind: input.kind || "instruction", content: text(input.content, "消息内容"), createdAt: now() }; state.messages.push(item); addEvent({ type: "message.sent", runId: current.id, actor: item.sender, message: item.content, data: { messageId: item.id, conversationId: item.conversationId, workflowNodeId: item.workflowNodeId } }); return clone(item); }, waitForHuman(runId, nodeId, conversationId) { const current = getRun(runId); current.waitingNodeId = nodeId; current.waitingAgentId = null; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待人类澄清", updatedAt: now() }; current.status = "awaiting_human"; getTask(current.taskId).status = "awaiting_human"; save(); }, resumeHuman(runId, messageId) { const current = getRun(runId), message = find(state.messages, messageId); if (!current?.waitingNodeId || !message || message.conversationId !== current.waitingConversationId) throw new Error("当前 Run 没有匹配的人类澄清"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; current.status = "running"; getTask(current.taskId).status = "running"; save(); return clone(current); }, waitForAgent(runId, nodeId, agentId, conversationId) { const current = getRun(runId); if (!runAgent(current, agentId)) throw new Error("被咨询数字员工不属于当前 Run"); current.waitingNodeId = nodeId; current.waitingAgentId = agentId; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待角色协作答复", updatedAt: now() }; save(); }, resumeAgent(runId, conversationId) { const current = getRun(runId); if (!current?.waitingNodeId || !current.waitingAgentId || current.waitingConversationId !== conversationId) throw new Error("当前 Run 没有匹配的角色协作"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; save(); return clone(current); },
+    addMessage(input = {}) { const current = getRun(input.runId); if (!current) throw new Error("Run 不存在"); if (getTask(current.taskId).kind === "automation" && (input.recipientHuman || input.sender?.type === "human" || !input.sender)) throw new Error("自动化只允许员工与经理之间沟通"); const recipient = input.recipientHuman ? { type: "human", id: "human_operator", name: "你" } : input.recipientAgentId ? runAgent(current, input.recipientAgentId) : { type: "team", id: "team", name: "全体团队" }; if (!recipient) throw new Error("消息接收者不属于当前 Run");
+        const item = { id: id("message"), runId: current.id, conversationId: input.conversationId || `conversation_${current.id}_${input.workflowNodeId || "general"}`, workflowNodeId: input.workflowNodeId || null, sender: input.sender || { type: "human", id: "human_operator", name: "你" }, recipient: { type: recipient.type || "agent", id: recipient.id, name: recipient.name }, traceId: input.traceId || null, startMessageId: input.traceId ? getTrace(input.traceId)?.inputMessageId || null : null, replyToMessageId: input.replyToMessageId || null, questionType: input.questionType || null, routingReason: input.routingReason || null, consideredMemberIds: input.consideredMemberIds || [], kind: input.kind || "instruction", content: text(input.content, "消息内容"), createdAt: now() }; state.messages.push(item); addEvent({ type: "message.sent", runId: current.id, actor: item.sender, message: item.content, data: { messageId: item.id, conversationId: item.conversationId, workflowNodeId: item.workflowNodeId } }); return clone(item); }, waitForHuman(runId, nodeId, conversationId) { const current = getRun(runId); if (getTask(current.taskId).kind === "automation") throw new Error("自动化不等待人类澄清"); current.waitingNodeId = nodeId; current.waitingAgentId = null; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待人类澄清", updatedAt: now() }; current.status = "awaiting_human"; getTask(current.taskId).status = "awaiting_human"; save(); }, resumeHuman(runId, messageId) { const current = getRun(runId), message = find(state.messages, messageId); if (!current?.waitingNodeId || !message || message.conversationId !== current.waitingConversationId) throw new Error("当前 Run 没有匹配的人类澄清"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; current.status = "running"; getTask(current.taskId).status = "running"; save(); return clone(current); }, waitForAgent(runId, nodeId, agentId, conversationId) { const current = getRun(runId); if (!runAgent(current, agentId)) throw new Error("被咨询数字员工不属于当前 Run"); current.waitingNodeId = nodeId; current.waitingAgentId = agentId; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待角色协作答复", updatedAt: now() }; save(); }, resumeAgent(runId, conversationId) { const current = getRun(runId); if (!current?.waitingNodeId || !current.waitingAgentId || current.waitingConversationId !== conversationId) throw new Error("当前 Run 没有匹配的角色协作"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; save(); return clone(current); },
     requestReplan(runId, messageId) { const current = getRun(runId); current.pendingMessageIds.push(messageId); save(); }, pendingMessages(runId) { const current = getRun(runId); return clone(state.messages.filter((item) => current?.pendingMessageIds.includes(item.id))); }, consumePendingMessages(runId) { getRun(runId).pendingMessageIds = []; save(); }, noteReassessment(runId, nodeIds, reason = "项目经理确认变更影响") { const current = getRun(runId); for (const nodeId of nodeIds) assertNode(current, nodeId); addEvent({ type: "run.reassessment_requested", runId, message: reason, data: { nodeIds } }); save(); return clone(current); },
     cancelRun(runId, reason) {
       const current = getRun(runId), task = getTask(current?.taskId);
