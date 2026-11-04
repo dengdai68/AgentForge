@@ -27,6 +27,7 @@ store.createTask({ title: '目录工具栏验收', objective: '仅检查列表�
 const taskFlow = store.createWorkflowTemplate({ name: '任务筛选流程旧名', nodes: seedFlow.nodes });
 for (let i = 0; i < 23; i++) store.createTask({ title: '工作流筛选任务 ' + i, objective: '仅检查列表，不运行模型。', memberAgentIds: seedTeam.memberAgentIds, workflowTemplateId: taskFlow.id });
 store.updateWorkflowTemplate(taskFlow.id, { name: '任务筛选流程新名', nodes: seedFlow.nodes });
+store.createRole({name:'布局验收角色',prompt:'用于检查角色目录。'});
 store.close();
 const app = await electron.launch({ ...(packaged ? { executablePath: resolve('release/mac-arm64/AgentForge.app/Contents/MacOS/AgentForge') } : {}), args: packaged ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 60000 });
 const errors = [], evidence = { baseline, packaged, root, views: [] };
@@ -36,17 +37,27 @@ try {
   const login = async p => { p.on('pageerror', e => errors.push(e.message)); await p.goto(origin + '/login'); await p.locator('#username').fill('directory-qa'); await p.locator('#password').fill(password); await p.getByRole('button', { name: '登录', exact: true }).click(); await p.locator('#account-name').waitFor(); };
   await login(page);
   await page.evaluate(async () => { const r = await fetch('/api/runtime/mcp-marketplace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '目录验收 MCP', description: '只用于卡片参考，不执行服务。', content: JSON.stringify({ mcpServers: { fixture: { command: 'node', args: ['--version'] } } }) }) }); if (!r.ok) throw Error(await r.text()); });
-  const views = { tasks: '#tasks-table .task-row, #tasks-table tr', communication: '.communication-sidebar-heading', teams: '#teams-grid .team-card', workflows: '#workflows-grid .workflow-list-row', agents: '#agents-grid .agent-card', 'mcp-marketplace': '.installed-extension-card' };
+  const views = { tasks: '#tasks-table .task-row, #tasks-table tr', communication: '.communication-sidebar-heading', teams: '#teams-grid .team-card', workflows: '#workflows-grid .workflow-list-row', agents: '#agents-grid .agent-card', roles: '#roles-grid .agent-card', automations: '#automation-search', marketplace: '#marketplace-root .directory-toolbar', 'mcp-marketplace': '.installed-extension-card' };
   const inspect = async (p, mode) => {
+    let taskControlHeight, employeeGeometry;
     for (const [view, ready] of Object.entries(views)) {
       await p.goto(origin + '/' + view); await p.locator(`#${view}-view.active`).waitFor(); await p.locator(ready).first().waitFor();
       await p.waitForFunction(() => document.querySelector('.application-icon')?.naturalWidth > 0);
       const geometry = await p.locator(`#${view}-view`).evaluate(node => {
-        const toolbar = node.querySelector('.directory-toolbar, .page-heading:has(> button)'), list = node.querySelector('#teams-grid, #workflows-grid');
+        const toolbar = node.querySelector('.directory-toolbar, .page-heading:has(> button)'), list = node.querySelector('#teams-grid, #workflows-grid, #agents-grid, #roles-grid');
         const rect = el => { const r = el?.getBoundingClientRect(); return r ? { x: r.x, y: r.y, width: r.width, height: r.height, bottom: r.bottom } : null; };
-        return { toolbar: rect(toolbar), button: rect(toolbar?.querySelector('button')), list: rect(list), borderTop: list ? getComputedStyle(list).borderTopWidth : null, overflow: document.documentElement.scrollWidth > innerWidth };
+        return { toolbar: rect(toolbar), button: rect(toolbar?.querySelector('button')), list: rect(list), borderTop: list ? getComputedStyle(list).borderTopWidth : null, controls: [...node.querySelectorAll('.directory-toolbar input,.directory-toolbar select,.task-search-form input,.task-search-form select')].map(el=>({id:el.id||el.name||el.getAttribute('aria-label'),...rect(el)})), top:node.getBoundingClientRect().top, overflow: document.documentElement.scrollWidth > innerWidth };
       });
+      if(view==='tasks')taskControlHeight=geometry.controls[0].height;
+      if(view==='agents')employeeGeometry=geometry;
       if (!baseline) {
+        for(const control of geometry.controls)assert.equal(control.height,taskControlHeight,`${mode}/${view}/${control.id} matches task controls`);
+        if(view==='roles'){
+          assert.equal(geometry.toolbar.y-geometry.top,employeeGeometry.toolbar.y-employeeGeometry.top,'role toolbar top matches employee directory');
+          assert.equal(geometry.controls[0].y-geometry.top,employeeGeometry.controls[0].y-employeeGeometry.top,'role search top matches employee directory');
+          assert.equal(geometry.list.y-geometry.top,employeeGeometry.list.y-employeeGeometry.top,'role cards start at employee card position');
+        }
+
         assert.equal(geometry.overflow, false, `${mode}/${view} fits`);
         if (['teams', 'workflows'].includes(view)) {
           assert.equal(geometry.borderTop, '0px', `${mode}/${view} has no toolbar/list divider`);

@@ -481,7 +481,8 @@ body:has(.login-card) { background:var(--bg); }
 html #tasks-view .task-search-form { gap:8px; padding:4px 0 0; }
 html #tasks-view #task-filter-bar { margin-bottom:8px; }
 html #tasks-view > .full-panel { padding:0; }
-html #tasks-view .task-search-form input,html #tasks-view .task-search-form select { min-height:32px; height:32px; padding:5px 9px; font-size:12px; border-radius:5px; }
+/* Main directory searches and selectors use the task inventory density. */
+html .view:not(#workspace-view) :is(.task-search-form,.directory-toolbar) :is(input,select) { min-height:32px; height:32px; padding:5px 9px; font-size:12px; border-radius:5px; }
 html #tasks-view .task-search-form button { min-height:32px; }
 html #tasks-table { padding:0; }
 html #tasks-table td { padding:10px 12px; }
@@ -542,7 +543,5 @@ html:root, html:root[data-theme] {
 /* Inline rename uses its accent border as the keyboard focus indicator. */
 html:root .communication-header .communication-name-input:focus-visible { outline:none; box-shadow:none; border:1px solid var(--accent); }
 
-/* Match directory filters to the task inventory controls. */
-html :is(.directory-filter-toolbar,#automation-search) :is(input,select) { height:32px; min-height:32px; padding:5px 9px; font-size:12px; border-radius:5px; }
 html #automation-search { padding:4px 0 0; margin-bottom:8px; }
 html .automation-detail-header { padding-bottom:8px; margin-bottom:0; }

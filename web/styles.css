@@ -4,7 +4,7 @@
 .directory-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
 .directory-toolbar input { flex:1; min-width:0; max-width:400px; min-height:36px; padding:8px 10px; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:8px; }
 .directory-toolbar > button { flex:none; white-space:nowrap; }
-:is(#teams-view,#workflows-view,#agents-view,#marketplace-view,#mcp-marketplace-view) .directory-toolbar { min-height:44px; padding:4px 0; margin-bottom:14px; }
+:is(#teams-view,#workflows-view,#agents-view,#roles-view,#marketplace-view,#mcp-marketplace-view) .directory-toolbar { min-height:44px; padding:4px 0; margin-bottom:14px; }
 .market-row { display:grid; grid-template-columns:minmax(160px,1fr) 60px 160px 80px; align-items:center; gap:16px; padding:12px 8px; border-bottom:1px solid var(--line); font-size:13px; }
 .market-row p { color:var(--muted); margin:5px 0 0; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .market-row small { display:block; margin-top:5px; overflow-wrap:anywhere; color:var(--muted); }

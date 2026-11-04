@@ -186,3 +186,5 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 自动化与员工筛选密度：web/automations.mjs 管理输入防抖、状态即查和触发分页，styles.css/compact.css 对齐任务列表控件与8px间距；配置复用 workflowDetails 查看流程，test-automations 覆盖两主题宽窄布局、即时查询与返回分页。执行协议不变。
 
 群聊追问由 communication-store 按每条明确 @ 消息入队，复用同成员 FIFO 与完成幂等，不再按人类根消息抑制已参与员工。prompts 同步忙碌排队与结束语义。communication.test 覆盖 A→B→A、忙碌/失败队首及重复回调。员工详情共用展开 Markdown 提示词，文件工具进入预览标题，test-issue3-ui 检查两主题宽窄布局。
+
+主目录控件统一：compact.css 让任务、自动化、团队、工作流、员工、角色、插件/MCP 市场共用32px搜索/筛选高度；styles.css 将角色页纳入44px目录工具栏。test-directory-headers 对比任务控件高度及员工/角色顶部、搜索和卡片坐标。无 CLI/API 变化。
