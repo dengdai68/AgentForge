@@ -13,3 +13,5 @@ Artifact 按冻结信息验证。派发提示词快照及私有凭据不进入�
 契约和范围见 [历史查询](../../docs/19-agent-history.md)。
 
 索引不再投影独立问题清单集合；历史问题与处理反馈通过原有任务 Message/Trace 读取，不合成历史发言或改写权威记录。
+
+新增只读 list_employees(query/status/page/limit) 与 read_employee(agentId)，共十个工具。详情复用 Store 员工配置并附角色；身份由服务绑定，不提供配置写入或登录凭据。

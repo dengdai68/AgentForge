@@ -416,9 +416,9 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   }
   function setMembersOpen(open) { query('.communication-panes').classList.toggle('members-open',open);query('[data-toggle-chat-members]').setAttribute('aria-expanded',String(open)); }
   function openMemberConsole(agentId) {
-    const state = view(currentId); state.consoleAgentId = agentId; state.consoleOpen = true; state.consoleRequest = null; state.consoleRenderKey = null;
+    const state = view(currentId); const closing=state.consoleOpen && state.consoleAgentId===agentId; state.consoleAgentId = agentId; state.consoleOpen = !closing; state.consoleRequest = null; state.consoleRenderKey = null;
     if (query('.communication-member-detail').open) query('.communication-member-detail').close();
-    setMembersOpen(false); renderConsolePanel(); void loadConsole();
+    setMembersOpen(false); renderConsolePanel(); if(state.consoleOpen) void loadConsole();
   }
   function renderRoster() {
     const state = view(currentId), container = query('[data-chat-roster]'); if (!container || !state.conversation) return;
@@ -429,7 +429,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     query('[data-toggle-chat-members]').textContent = `成员 ${members.length}`;
     query('[data-toggle-communication-console]').hidden = group;
     query('[data-chat-member-count]').textContent = `成员 ${members.length}`;
-    const html = members.map(member => `<div class="communication-roster-member"><button type="button" class="text-action communication-member-identity" data-chat-member-detail="${escapeHtml(member.id)}" title="${escapeHtml(member.name)}">${renderAvatar(member)}<span class="communication-member-name">${escapeHtml(member.name)}</span></button><button type="button" class="text-action member-console-icon" data-chat-member-console="${escapeHtml(member.id)}" aria-pressed="${state.consoleOpen && state.consoleAgentId === member.id}" aria-label="查看 ${escapeHtml(member.name)} 的控制台" title="查看控制台">${consoleIcon}</button></div>`).join('') || '<p class="field-hint">暂无员工</p>';
+    const html = members.map(member => `<div class="communication-roster-member"><button type="button" class="text-action communication-member-identity" data-chat-member-detail="${escapeHtml(member.id)}" title="${escapeHtml(member.name)}">${renderAvatar(member)}<span class="communication-member-name">${escapeHtml(member.name)}</span></button>${member.running ? '<span class="member-running-dot" role="status" aria-label="正在运行" title="正在运行"></span>' : ''}<button type="button" class="text-action member-console-icon" data-chat-member-console="${escapeHtml(member.id)}" aria-pressed="${state.consoleOpen && state.consoleAgentId === member.id}" aria-label="查看 ${escapeHtml(member.name)} 的控制台" title="查看控制台">${consoleIcon}</button></div>`).join('') || '<p class="field-hint">暂无员工</p>';
     if (container.innerHTML !== html) container.innerHTML = html;
     container.onclick = event => {
       const detail = event.target.closest('[data-chat-member-detail]'), consoleButton = event.target.closest('[data-chat-member-console]');
@@ -500,11 +500,11 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         query(".communication-pager").onclick = (event) => { const button = event.target.closest("[data-page]"); if (button) { listPage = Number(button.dataset.page); renderList(); } };
       }
       const changed = fresh || currentId !== selectedId;
-      if (changed) { generation++; currentId = selectedId; setupConversation(); }
+      if (changed) { if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} generation++; currentId = selectedId; if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} setupConversation(); }
       const update = () => { poll(); loadMessages(); void loadConsole(); };
       renderList(); renderReadErrors();
       if (changed || !timer) { clearInterval(timer); timer = setInterval(update, 2000); update(); }
     },
-    unmount() { clearInterval(timer); timer = null; closeFloatingLists(host); host = null; currentId = null; generation++; }
+    unmount() { for(const state of views.values()){state.consoleOpen=false;state.consoleRequest=null;} clearInterval(timer); timer = null; closeFloatingLists(host); host = null; currentId = null; generation++; }
   };
 }

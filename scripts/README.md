@@ -30,7 +30,7 @@ AGENTFORGE_PROMPT_E2E_REAL=1 AGENTFORGE_NATIVE_SKILLS_REAL=1 node scripts/test-p
 
 真实任务的窄窗口截图必须在 setContentSize/setViewportSize 后等待 renderer 的 innerWidth/innerHeight 达到目标尺寸，不能把 OS 尚未完成调整的上一帧当作窄屏证据。
 
-AGENTFORGE_PROMPT_E2E_REAL=1 AGENTFORGE_PROMPT_E2E_PACKAGED=1 node scripts/test-prompt-e2e.mjs 使用当前安装包的隔离 Electron（不与 WEB 模式混用）。两个真实 Provider 在续接时实际调用平台历史 search_private_chat/read_context 取回未放入提示词的随机资料；再完成 Claude 团队代码开发、澄清、独立测试、人类确认、完成后历史答疑和归档拒绝。调用使用现有模型登录，不读取/复制凭据，不覆盖操作者实例；证据明确 packaged surface。package:mac:check 另用受控 Provider 消费实际 Codex 参数，连接真正的打包历史 MCP，断言 Node 标记仅在子进程且八工具及记录可读，不冒充模型。
+AGENTFORGE_PROMPT_E2E_REAL=1 AGENTFORGE_PROMPT_E2E_PACKAGED=1 node scripts/test-prompt-e2e.mjs 使用当前安装包的隔离 Electron（不与 WEB 模式混用）。两个真实 Provider 在续接时实际调用平台历史 search_private_chat/read_context 取回未放入提示词的随机资料；再完成 Claude 团队代码开发、澄清、独立测试、人类确认、完成后历史答疑和归档拒绝。调用使用现有模型登录，不读取/复制凭据，不覆盖操作者实例；证据明确 packaged surface。package:mac:check 另用受控 Provider 消费实际 Codex 参数，连接真正的打包历史 MCP，断言 Node 标记仅在子进程且十工具及记录可读，不冒充模型。
 
 build-app-icon.cjs 保留用户原始 application.png，使用 macOS Swift/CoreGraphics 生成干净圆角 UI 图、透明边距 100/1024 的 Dock 图及 18/36px 单色菜单栏模板，sips/iconutil 从 Dock 图生成同尺度 ICNS。临时文件使用专用 mkdtemp；无浏览器、网络、新包依赖或操作者配置访问。按 web/icons/README.md 重生成并验证，发布读取已生成资源。
 
@@ -141,3 +141,5 @@ test-automations.mjs 在隔离 Electron 验证自动化弹窗、两主题宽窄/
 自动化真实验收遇到 Provider 延迟时，可用 AGENTFORGE_AUTOMATIONS_RESUME 指向本脚本已有的 .data/automations-real-* 目录续验已创建的自动化；使用同一冻结 Run/会话，不重建任务或复制凭据，等待上限为每轮十五分钟。
 
 自动化真实验收可设置 AGENTFORGE_AUTOMATIONS_PROVIDER=codex；默认 claude-code。只切换隔离实例的员工 Runtime，不改变操作者配置；默认模型可通过 AGENTFORGE_AUTOMATIONS_MODEL 指定。
+
+node scripts/test-issue3-ui.mjs 隔离验证两主题宽窄布局、成员 App/CLI 往返及沟通控制台；显示夹具不算模型证据。AGENTFORGE_ISSUE3_REAL=1 node scripts/test-issue3-real.mjs 验证真实新成员执行、员工目录 MCP、澄清与人类验收，不覆盖安装。

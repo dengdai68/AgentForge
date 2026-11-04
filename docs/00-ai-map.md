@@ -2,7 +2,7 @@
 
 GitHub 发布入口：`.codex/skills/agentforge-release/SKILL.md`；默认 Beta、正式版补丁递增、仅正式版显式打 tag，以及版本标题/简洁说明规则由该 skill 定义。现有旧 CI 发布入口的差异在 skill 中列明。
 
-核心管理双端对齐：Store.createTask 展开 teamIds/个人成员，cli/main.mjs 支持 create --start 与部分成功回执；web/app.js 独立保存员工 capabilities、工作流 handoffFrom，编辑团队状态与任务优先级。configuration-cli/catalog 测试及 test-task-creation 隔离 App/CLI 交叉验收覆盖协议与回读。
+核心管理双端对齐：Store.createTask 展开 teamIds/个人成员，cli/main.mjs 支持 create --start 与部分成功回执；web/app.js 独立保存员工 capabilities、工作流 handoffFrom，编辑团队状态并移除任务优先级。configuration-cli/catalog 测试及 test-task-creation 隔离 App/CLI 交叉验收覆盖协议与回读。
 
 任务列表工作流：web/app.js 按稳定工作流 ID 组合筛选、展示冻结名称；cli/main.mjs 的 tasks list 同步 --workflow ID_OR_NAME 与引用摘要。scripts/test-directory-headers.mjs 覆盖跨页、组合条件、重置、两主题宽窄布局。
 
@@ -174,3 +174,5 @@ Runtime 启动恢复：local-cli/codex-app-server 在原生会话建立前识别
 自动化入口：server/automations.mjs 管理配置/分页记录和事务触发，automation-schedule.mjs 使用固定 cron-parser 计算五段 Cron/IANA 时区，automation-scheduler.mjs 每10秒领取并异步执行；web/automations.mjs 目录复用 app.js 创建弹窗和任务工作区。普通列表排除自动化，人类协作按 Task.kind 隔离。契约见 docs/27；验收 tests/automations.test.mjs、scripts/test-automations.mjs、scripts/test-automations-real.mjs。
 
 发布上传恢复：`.github/workflows/recover-release-upload.yml` 在 GitHub runner 还原草稿中的原始安装包分片，校验操作者清单哈希、分片和原 SHA256SUMS，保留原源码提交和构建，成功后清理临时分片但不公开；契约见 docs/24。
+
+Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks members 同步认证 PUT。history 增加员工目录两工具。tests/task-members.test.mjs、scripts/test-issue3-ui.mjs、scripts/test-issue3-real.mjs 验证 Issue #3。

@@ -20,7 +20,7 @@ const store=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRo
 const manager=store.createAgent({name:'创建界面经理',kind:'manager'}),worker=store.createAgent({name:'创建界面成员'});
 const extra=store.createAgent({name:'其他团队成员'}),secondManager=store.createAgent({name:'第二位经理',kind:'manager'});
 const inactive=store.createAgent({name:'停用团队成员',status:'inactive'});
-const teams=[store.createTeam({name:'创建界面团队 0',memberAgentIds:[manager.id,worker.id]}),store.createTeam({name:'创建界面团队 1',memberAgentIds:[extra.id]}),store.createTeam({name:'多经理冲突团队',memberAgentIds:[secondManager.id,extra.id]})];
+const teams=[store.createTeam({name:'创建界面团队 0',memberAgentIds:[manager.id,worker.id]}),store.createTeam({name:'创建界面团队 1',memberAgentIds:[worker.id,extra.id]}),store.createTeam({name:'多经理冲突团队',memberAgentIds:[secondManager.id,extra.id]})];
 const flows=[0,1].map(i=>store.createWorkflowTemplate({name:'创建界面流程 '+i,nodes:[{id:'work',title:'不应在创建表单展开的节点 '+i,staffingGuidance:'不应在创建表单展开的人员说明'}]}));
 store.close();
 const app=await electron.launch({...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')} :{}),args:bundle?[]:['apps/electron/main.mjs'],env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
@@ -52,12 +52,12 @@ try{
   await form.locator('[name="title"]').fill(title);await form.locator('[name="objective"]').fill(description);
   const add=async item=>{await form.locator('#task-members').fill(item.name);await form.locator(`[data-add-extension="${item.id}"]`).click();};
   await add(teams[0]);await add(teams[1]);
-  await form.locator('#task-members').fill(teams[2].name);assert.equal(await form.locator(`[data-add-extension="${teams[2].id}"]`).isDisabled(),true,'a second manager cannot enter through another team');
+  await form.locator('#task-members').fill(teams[2].name);assert.equal(await form.locator(`[data-add-extension="${teams[2].id}"]`).count(),0,'a conflicting manager team is omitted from candidates');
   const focusedStyle=await form.locator('#task-members').evaluate(input=>{const style=getComputedStyle(input);return[style.borderTopWidth,style.boxShadow,style.backgroundColor];});
   assert.deepEqual(focusedStyle,['0px','none','rgba(0, 0, 0, 0)'],'focused search stays inside the shared chip control without a nested frame');
   await form.locator('#task-members').press('Escape');
-  assert.equal(await form.locator('.extension-picked .extension-chip').count(),3,'team chips expand to independent employee chips');
-  assert.deepEqual((await form.locator('.extension-chip-name').allTextContents()).sort(),[manager.name,worker.name,extra.name].sort());await form.locator('[name="workflowTemplateId"]').selectOption(flows[1].id);
+  assert.equal(await form.locator('.extension-picked .extension-chip').count(),2,'selected teams remain grouped chips');
+  assert.deepEqual((await form.locator('.extension-chip-name').allTextContents()).sort(),[teams[0].name+' · 2 人',teams[1].name+' · 2 人'].sort());await form.locator('[name="workflowTemplateId"]').selectOption(flows[1].id);
   assert.equal(await form.locator('[name="objective"]').inputValue(),description);
   await details.locator('summary').click();await criteria.fill(Array.from({length:21},(_,i)=>'标准 '+i).join('\n'));await details.locator('summary').click();
   await form.getByRole('button',{name:'创建并开始',exact:true}).click();await form.getByText('验收标准最多 20 条。',{exact:true}).waitFor();assert.ok(await criteria.isVisible(),'invalid hidden criteria reopen');
@@ -146,7 +146,7 @@ try{
   assert.equal(await page.locator('#agent-form [name=description]').inputValue(),'独立简介');assert.equal(await page.locator('#agent-form [name=capabilities]').inputValue(),'独立审片');
   await page.screenshot({path:join(root,`parity-agent-${theme}.png`)});await page.locator('#agent-form [type=submit]').click();await page.locator('#agent-form').waitFor({state:'detached'});
   const agent=await cli(['agents','get',worker.id]);assert.deepEqual(agent.capabilities,['独立审片']);assert.deepEqual(agent.roleIds,[role.id]);assert.equal((await cli(['agents','list','--search','独立审片'])).total,1);
-  await page.goto(origin+'/teams');await page.locator(`[data-edit-team="${uiTeam.id}"]`).click();await page.locator('#team-form [name=status]').selectOption('inactive');await page.screenshot({path:join(root,`parity-team-${theme}.png`)});await page.locator('#team-form [type=submit]').click();await page.locator('#team-form').waitFor({state:'detached'});
+  await page.goto(origin+'/teams');await page.locator(`[data-edit-team="${uiTeam.id}"]`).click();await page.locator('#team-form [name=enabled]').uncheck();await page.screenshot({path:join(root,`parity-team-${theme}.png`)});await page.locator('#team-form [type=submit]').click();await page.locator('#team-form').waitFor({state:'detached'});
   assert.equal((await cli(['teams','get',uiTeam.id])).status,'inactive');await cli(['tasks','create','--file','-'],{...cliInput,teamIds:[uiTeam.id]},4);
   await cli(['teams','update',uiTeam.id,'--file','-'],{status:'active'});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);

@@ -312,7 +312,7 @@ test("real MCP SDK handshake/tool calls bind identity, paginate and clean up aft
     try{
       await client.connect(transport);
       const tools=(await client.listTools()).tools;
-      assert.equal(tools.length,8);
+      assert.equal(tools.length,10);
       const artifactTool=tools.find(tool=>tool.name==="read_artifact");
       const searchTool=tools.find(tool=>tool.name==="search_private_chat");
       assert.equal(artifactTool.inputSchema.properties.length.maximum,16000);
@@ -320,6 +320,10 @@ test("real MCP SDK handshake/tool calls bind identity, paginate and clean up aft
       assert.equal(searchTool.inputSchema.properties.limit.maximum,100);
       const output=await client.callTool({name:"search_private_chat",arguments:{query:"真实协议"}});
       assert.equal(JSON.parse(output.content[0].text).items[0].recordId,m.id);
+      const directory=await client.callTool({name:"list_employees",arguments:{limit:1,page:1}});
+      assert.equal(JSON.parse(directory.content[0].text).items.length,1);
+      const detail=await client.callTool({name:"read_employee",arguments:{agentId:employee}});
+      assert.deepEqual(JSON.parse(detail.content[0].text).employee,agent);
       const denied=await client.callTool({name:"search_private_chat",arguments:{agentId:peer}});
       assert.equal(denied.isError,true);
     }finally{await client.close();}

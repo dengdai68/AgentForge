@@ -118,3 +118,5 @@ tasks progress 不再输出 openDefects；任务与执行摘要不再提供独�
 任务仓库基准由内置工具 Hook 自动登记；当前文件 CHANGE/diff 属于现有客户端读取能力，不新增 CLI 命令、字段、身份或写操作权限。员工/插件/MCP 配置协议不变，用户无需绑定额外插件。
 
 automations list/get/create/update/delete/trigger/triggers 与 App 使用同一认证 HTTP。create 字段继承任务内容/成员/工作流/验收要求，附 cron、timeZone、enabled（默认 true）；update 是非空部分更新。list 支持 --search/--status enabled|disabled/--page，triggers ID 支持 --status/--page，两者 --all 显式逐页请求。trigger ID 立即运行，不改变下次计划时间，返回 started/failed/skipped；失败无新 Run，不能当作已执行。历史配置不倾倒在列表，详情返回 ID 关联；已有记录的自动化只能停用，不允许删除历史。普通 tasks list 只查普通任务；tasks create 不接受 priority。操作管理与提前确认在客户端，自动化的人类协作入口明确拒绝。
+
+`tasks members TASK_ID [--run RUN_ID]` 查询当前成员；附 `--file FILE.json`（或 `-`）完整替换 `{ "memberAgentIds": [...] }`，使用同一认证 PUT /api/runs/:id/members。经理可用其目录 ID 或当前 Run ID，但不能重复；不能移除经理或有未结投递的成员。历史快照保留。teams create/update 均接受 status=active|inactive，创建默认 active，与 App 名称旁启用复选框一致。tasks message 在存在待人类澄清时拒绝，须 tasks reply 精确回复。

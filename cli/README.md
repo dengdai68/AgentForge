@@ -72,3 +72,5 @@ tasks collaboration 文本/JSON 仅返回角色沟通，包含 startMessageId；
 tasks progress 移除 openDefects；问题报告与处理反馈统一使用 tasks collaboration 查询、tasks message/reply 交接。帮助/schema 同步此读模型变化，不增加命令或确认权限。
 
 automations 新增 list/get/create/update/delete/trigger/triggers；列表与触发历史按页查询，--all 显式逐页读取，配置字段与 App 弹窗一致。update 支持 enabled 开关，历史只可停用；trigger 的失败/跳过回执不代表任务已启动。tasks list 仅普通任务；priority 已废弃，输入/schema/输出同步移除。
+
+任务成员查询/修改使用 tasks members TASK_ID，写入附 --file，完整成员列表含经理；App 编辑与 CLI 共用 Store 的状态、忙碌成员、唯一经理校验。团队创建支持 status，默认 active。

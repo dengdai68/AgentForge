@@ -52,7 +52,7 @@ function details(value, columns, indent = '', key = '') {
   }).join('\n');
 }
 export function commandUsage(group, operation) {
-  if (group === 'tasks') return `agentforge tasks ${operation}${['list', 'create'].includes(operation) ? '' : ' TASK_ID'}${['create', 'message', 'reply'].includes(operation) ? ' --file FILE.json' : ''}${operation === 'create' ? ' [--start]' : ''}${operation === 'list' ? ' [--search TEXT] [--status STATUS] [--workflow ID_OR_NAME] [--archived] [--page N | --all]' : ['collaboration', 'questions', 'artifacts'].includes(operation) ? ' [--run RUN_ID] [--page N | --all]' : ['progress', 'message', 'reply', 'terminate'].includes(operation) ? ' [--run RUN_ID]' : ''}${['terminate', 'delete'].includes(operation) ? ' --yes' : ''}`;
+  if (group === 'tasks') return `agentforge tasks ${operation}${['list', 'create'].includes(operation) ? '' : ' TASK_ID'}${['create', 'message', 'reply'].includes(operation) ? ' --file FILE.json' : ''}${operation === 'create' ? ' [--start]' : operation === 'members' ? ' [--file FILE.json] [--run RUN_ID]' : ''}${operation === 'list' ? ' [--search TEXT] [--status STATUS] [--workflow ID_OR_NAME] [--archived] [--page N | --all]' : ['collaboration', 'questions', 'artifacts'].includes(operation) ? ' [--run RUN_ID] [--page N | --all]' : ['progress', 'message', 'reply', 'terminate'].includes(operation) ? ' [--run RUN_ID]' : ''}${['terminate', 'delete'].includes(operation) ? ' --yes' : ''}`;
   if (group === 'auth') return `agentforge auth ${operation}${operation === 'login' ? ' --username NAME [--password-stdin]' : ''}`;
   const id = ['get', 'update', 'delete', 'test', 'trigger', 'triggers'].includes(operation) ? ' ID' : operation === 'models' ? ' PROVIDER' : '';
   if (group === 'automations' && ['list', 'triggers'].includes(operation)) return `agentforge automations ${operation}${id}${operation === 'list' ? ' [--search TEXT]' : ''} [--status STATUS] [--page N | --all]`;
@@ -79,10 +79,10 @@ function applicableFlags(group, ops) {
     ...(ops.includes('create') ? ['--start：创建成功后立即启动，与 App 创建并开始等价；失败保留任务 ID，请查询状态，勿重复创建。'] : []),
     ...(ops.some(op => ['terminate', 'delete'].includes(op)) ? ['--yes：显式确认终止执行或永久删除任务及本地交付记录；活跃任务须先 terminate。'] : []),
     ...guide.flags.filter(([flag]) => ['--help', '--json', '--session-file PATH', '--endpoint-file PATH'].includes(flag)).map(([flag, description]) => `${flag}：${description}`),
-    ...(ops.some(op => ['create', 'message', 'reply'].includes(op)) ? ['--file PATH | -：JSON 对象文件；- 从 stdin 读取，最多1MiB；字段与示例见下方。'] : []),
+    ...(ops.some(op => ['create', 'message', 'reply', 'members'].includes(op)) ? ['--file PATH | -：JSON 对象文件；- 从 stdin 读取，最多1MiB；字段与示例见下方。'] : []),
     ...(ops.includes('list') ? ['--search TEXT：任务名称不区分大小写包含匹配。', '--status STATUS：精确任务状态：backlog/planning/running/awaiting_human/review/awaiting_acceptance/paused/blocked/failed/done/cancelled。', '--workflow ID_OR_NAME：按工作流精确 ID 或唯一名称筛选（含任务冻结名称），与名称、状态组合后分页。', '--archived：仅查询已归档任务，默认只显示未归档。'] : []),
     ...(ops.some(op => ['list', 'collaboration', 'questions', 'artifacts'].includes(op)) ? ['--page N | --all：默认每页20项；--all 显式读取全部，不可与 --page 混用。协作记录最新在前。'] : []),
-    ...(ops.some(op => ['progress', 'collaboration', 'questions', 'artifacts', 'message', 'reply', 'terminate'].includes(op)) ? ['--run RUN_ID：可选，选择同一任务的指定执行；默认最新执行，输出回显所选 runId。'] : [])
+    ...(ops.some(op => ['progress', 'collaboration', 'questions', 'artifacts', 'message', 'reply', 'terminate', 'members'].includes(op)) ? ['--run RUN_ID：可选，选择同一任务的指定执行；默认最新执行，输出回显所选 runId。'] : [])
   ];
   return guide.flags.filter(([flag]) => {
     if (flag.startsWith('--file')) return ops.some(op => ['create', 'update', 'import', 'auto-update'].includes(op));
@@ -114,7 +114,7 @@ function help(data, columns, { schema = false } = {}) {
     ...(data.group === 'auth' ? [] : [paragraph(data.description, columns)]),
     section('子命令', (data.group === 'auth' ? [
       ['login', '登录已有管理员账号'], ['status', '验证本 CLI 会话状态'], ['logout', '退出本 CLI 会话']
-    ] : data.operations.map(op => [op, data.group === 'tasks' ? ({ list: '搜索任务列表', get: '读取任务目标与要求', create: '创建待启动任务', start: '启动真实任务执行', terminate: '终止执行并保留记录', delete: '永久删除任务及本地记录', progress: '读取当前执行进度与下一步', collaboration: '查看完整协作记录（消息、派工与状态）', questions: '查询未答人类澄清', message: '向一位指定成员发送指令', reply: '按问题 ID 精确回复澄清', artifacts: '查询已接纳交付信息' })[op] : operations[op]])).map(([op, description]) => `  ${op.padEnd(14)} ${description}`).join('\n')),
+    ] : data.operations.map(op => [op, data.group === 'tasks' ? ({ list: '搜索任务列表', get: '读取任务目标与要求', create: '创建待启动任务', start: '启动真实任务执行', terminate: '终止执行并保留记录', delete: '永久删除任务及本地记录', progress: '读取当前执行进度与下一步', collaboration: '查看完整协作记录（消息、派工与状态）', questions: '查询未答人类澄清', message: '向一位指定成员发送指令', reply: '按问题 ID 精确回复澄清', artifacts: '查询已接纳交付信息', members: '查询或修改当前执行成员' })[op] : operations[op]])).map(([op, description]) => `  ${op.padEnd(14)} ${description}`).join('\n')),
     `查看具体操作参数：在命令后加 --help，例如 agentforge ${data.group} ${data.group === 'auth' ? 'login' : 'list'} --help。`
   ].join('\n\n');
   if (data.group === 'auth') return [
@@ -128,11 +128,11 @@ function help(data, columns, { schema = false } = {}) {
     section('安全边界', bullets(guide.limits, columns))
   ].join('\n\n');
   const ops = data.operation ? [data.operation] : data.operations;
-  const writing = schema || ['create', 'update', 'import', 'message', 'reply', 'auto-update'].includes(data.operation);
+  const writing = schema || ['create', 'update', 'import', 'message', 'reply', 'auto-update', 'members'].includes(data.operation);
   const notes = schema ? data.notes : writing
     ? data.notes.filter(note => !/^(delete |test )/.test(note))
     : data.notes.filter(note => note.startsWith(`${data.operation} `));
-  const id = ['get', 'update', 'delete', 'test', 'start', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers'].includes(data.operation);
+  const id = ['get', 'update', 'delete', 'test', 'start', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers', 'members'].includes(data.operation);
   return [
     `AgentForge CLI — ${groups[data.group]}${data.operation ? ' / ' + data.operation : ''}`,
     paragraph(data.description, columns),

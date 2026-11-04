@@ -13,7 +13,7 @@ import { createRunFiles } from "../server/run-files.mjs";
 import { createSqlitePersistence } from "../server/persistence.mjs";
 import { executeRun, readNodeResult, parseEmployeeResponse, terminateRun } from "../server/orchestrator.mjs";
 import { runClaudeCodeCli, RuntimeSessionMissingError } from "../server/runtime/local-cli.mjs";
-import { collaborationRecords, mentionables } from "../client/console-projections.mjs";
+import { collaborationRecords, mentionables, roleExecutionStatus } from "../client/console-projections.mjs";
 
 async function directory(prefix) { const path = await mkdtemp(join(tmpdir(), prefix)); await mkdir(join(path, "repos", "app", ".git"), { recursive: true }); return path; }
 
@@ -1259,7 +1259,7 @@ test("task properties render safe recorded facts independently of the active tab
   const start = source.indexOf("function workspaceDirectoryDetails("), end = source.indexOf("\nfunction renderWorkspace()", start);
   assert.ok(start >= 0 && end > start);
   const esc = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
-  const details = new Function("esc", "workflowDiagramCanvas", `${source.slice(start, end)}; return workspaceDetailsMarkup;`)(esc, () => '<div class="workflow-diagram">职责图</div>');
+  const details = new Function("esc", "workflowDiagramCanvas", "roleColor", "initialsOf", "roleExecutionStatus", "state", `${source.slice(start, end)}; return workspaceDetailsMarkup;`)(esc, () => '<div class="workflow-diagram">职责图</div>', () => "blue", () => "A", roleExecutionStatus, {});
   const workspace = { run: { id: "run_test", task: { objective: '<script>bad()</script>', workspacePath: '/tmp/" onclick="bad()', team: { name: "A&B" }, workflowSnapshot: { name: "审批流程" } } } };
   for (const tab of ["collaboration", "artifacts", "directory", "console"]) {
     const markup = details(workspace, { agents: [{ id: "a" }], currentFocusNode: { title: "核验交付" }, view: { tab, disclosures: { brief: true } }, artifactCount: 2 });

@@ -38,7 +38,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (operation === 'login') allowed.push('username', 'password-stdin');
   } else {
     if (!Object.hasOwn(resources, group) || !resources[group].operations.includes(operation)) throw usage('不存在此配置命令');
-    if (['get', 'update', 'delete', 'test', 'start', 'terminate', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers'].includes(operation)) { if (args.length !== 3 || !(group === 'runtimes' && ['Claude Code', 'Codex', 'DeepSeek Harness'].includes(id)) && !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw usage('需要精确资源ID，不能使用名称或路径'); }
+    if (['get', 'update', 'delete', 'test', 'start', 'terminate', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers', 'members'].includes(operation)) { if (args.length !== 3 || !(group === 'runtimes' && ['Claude Code', 'Codex', 'DeepSeek Harness'].includes(id)) && !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw usage('需要精确资源ID，不能使用名称或路径'); }
     else if (operation === 'models') { if (args.length !== 3 || !['claude-code', 'codex', 'dsh'].includes(id)) throw usage('models 需要 Provider 参数：claude-code、codex 或 dsh'); }
     else if (args.length !== 2) throw usage('此命令不接受额外参数');
     if (['create', 'update', 'import', 'auto-update'].includes(operation)) allowed.push('file');
@@ -47,9 +47,9 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (group === 'automations' && ['list','triggers'].includes(operation)) allowed.push('status', 'page', 'all');
     if (group === 'tasks') {
       if (operation === 'create') allowed.push('start');
-      if (['message', 'reply'].includes(operation)) allowed.push('file');
+      if (['message', 'reply', 'members'].includes(operation)) allowed.push('file');
       if (operation === 'list') allowed.push('status', 'archived', 'workflow');
-      if (['progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'terminate'].includes(operation)) allowed.push('run');
+      if (['progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'terminate', 'members'].includes(operation)) allowed.push('run');
       if (['collaboration', 'questions', 'artifacts'].includes(operation)) allowed.push('page', 'all');
     }
   }
@@ -112,7 +112,6 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
   if (group === 'mcps' && operation === 'create' && input.description === undefined) input.description = '';
   validateInput(input, resource.operationInputs?.[operation]?.schema || resource.schema, 'input', operation === 'update' && ['agents', 'teams', 'roles'].includes(group));
   if(group==='mcps' && operation==='update' && !Object.keys(input).length)throw usage('MCP 编辑至少提供 name、description、content 中一项');
-  if (operation === 'create' && group === 'teams' && Object.hasOwn(input, 'status')) throw usage('teams create 不接受 status，创建后为 active；需停用请 update');
   if (operation === 'update' && group === 'agents' && input.runtime) {
     const { item } = await get();
     input = { ...input, runtime: { ...keyFields(item.runtime, ['profileId', 'extensionSelection']), ...input.runtime } };
@@ -199,6 +198,11 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     return { taskId: id, run: runReceipt(result.run) };
   }
   const workspace = run ? await client.request(`/api/runs/${run.id}/workspace?view=summary`) : { run: null, pendingQuestions: [], traces: [], dispatches: [], artifacts: [], messages: [] };
+  if(operation==='members') {
+    if(!run)throw new CliError('RUN_REQUIRED','任务尚未启动，暂不能修改执行成员','先启动任务。',4);
+    if(flags.file){const patch=await readInput(flags.file,stdin);validateInput(patch,resources.tasks.operationInputs.members.schema);return client.request(`/api/runs/${run.id}/members`,{method:'PUT',body:patch});}
+    return {taskId:id,runId:run.id,members:workspace.run.participants.filter(member=>member.type==='agent'&&!(workspace.run.removedParticipantIds || []).includes(member.id)).map(member=>keyFields(member,['id','name','kind']))};
+  }
   const questions = workspace.pendingQuestions.filter(question => question.recipient?.type === 'human');
   if (input) {
     if (operation === 'reply' && !questions.some(question => question.id === input.replyToMessageId)) throw new CliError('QUESTION_NOT_PENDING', '此问题不是所选执行的待答人类澄清', '先运行 tasks questions 任务ID，并按问题ID回复；过期问题不能重复作答。', 4);

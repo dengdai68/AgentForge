@@ -70,3 +70,5 @@ runtime-paths.mjs 复用 server/data-home.mjs 的纯路径函数，将默认任�
 员工卡片顶部采用头像、姓名、类型/状态三列，compact.css 的桌面网格与共享样式保持顶部对齐，不将状态挤入下一行。
 
 自动化导航在共享 preferences 注册，并提供宿主时钟蒙版；业务由认证子服务调度，没有新增宿主接口。离线错过不补跑。
+
+群聊行内重命名由 compact.css 保持单细强调色边框作为焦点指示，不叠加宿主默认外框；隔离两主题宽窄验收见 scripts/test-issue3-ui.mjs。

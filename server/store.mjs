@@ -244,7 +244,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   let transactionDepth = 0;
   const pendingEvents = [];
   const listeners = new Set(), save = () => { if (!transactionDepth) persistence.save(state); }, find = (collection, value) => collection.find((item) => item.id === value), getAgent = (value) => find(state.agents, value), getTeam = (value) => find(state.teams, value), getTask = (value) => find(state.tasks, value), getRun = (value) => find(state.runs, value), getTrace = (value) => find(state.traces, value), getRole = (value) => find(state.roles, value);
-  const runAgent = (current, agentId) => current?.participants?.find((item) => item.type === "agent" && item.id === agentId) || (current?.manager?.id === agentId ? current.manager : null);
+  const runAgent = (current, agentId) => current?.participants?.find((item) => item.type === "agent" && item.id === agentId && !(current.removedParticipantIds || []).includes(item.id)) || (current?.manager?.id === agentId ? current.manager : null);
   const addEvent = ({ type, runId = null, actor = { type: "system", name: "AgentForge" }, message, data = {} }) => { const item = { id: id("evt"), type, runId, timestamp: now(), actor: clone(actor), message: text(message, "事件说明"), data: clone(data) }; state.events.push(item); save(); if (transactionDepth) pendingEvents.push(item); else listeners.forEach((listener) => listener(clone(item))); return item; };
   const definition = (current, nodeId) => getTask(current.taskId)?.workflowSnapshot?.nodes.find((item) => item.id === nodeId); const assertNode = (current, nodeId) => { if (!definition(current, nodeId)) throw new Error("工作流节点不存在"); };
   function assignments(currentMembers, template, input = {}) { const result = {}; for (const item of template.nodes) { const agentId = input[item.id] || (item.reuseOwnerFrom && result[item.reuseOwnerFrom]); if (!agentId || !currentMembers.memberAgentIds.includes(agentId) || getAgent(agentId)?.status !== "active") throw new Error(`节点「${item.title}」必须显式分配给一位可用任务成员`); result[item.id] = agentId; } const repositories = new Map(); for (const item of template.nodes.filter((node) => node.repositoryPath)) { const owner = result[item.id]; if (repositories.has(owner) && repositories.get(owner) !== item.repositoryPath) throw new Error("一个成员只能处理一个 Git 仓库"); repositories.set(owner, item.repositoryPath); } return result; }
@@ -311,7 +311,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   return {
     ...communicationCommands(state, save),
     ...automationCommands(state),
-    ...historyCommands(state, { databasePath }),
+    ...historyCommands(state, { databasePath, employeeConfiguration }),
     close() { this.closeHistory(); listeners.clear(); persistence.close(); },
     prepareDataReset() {
       if (state.runs.some(run => ["planning", "running", "review"].includes(run.status)) || state.traces.some(trace => trace.status === "running") || state.dispatches.some(delivery => delivery.status === "claimed") || state.communicationDeliveries.some(delivery => ["claimed", "running"].includes(delivery.status))) throw new Error("请先停止正在执行的任务和沟通，再清除数据");
@@ -340,7 +340,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     getConsoleEvents(runId, { agentId, traceId = null, before = null, limit = 200 } = {}) {
       const current = getRun(runId);
-      if (!current || !runAgent(current, agentId)) throw new Error("Run 成员不存在");
+      if (!current || !current.participants.some(member => member.type === "agent" && member.id === agentId)) throw new Error("Run 成员不存在");
       if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("日志页大小必须在 1 至 500 之间");
       if (traceId && !state.traces.some((trace) => trace.id === traceId && trace.runId === runId && trace.agentId === agentId)) throw new Error("Trace 不属于当前成员");
       const events = state.events.filter((event) => event.runId === runId && event.actor?.id === agentId && (!traceId || event.data?.traceId === traceId));
@@ -643,12 +643,40 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         this.syncWaiting(runId); return message;
       });
     },
+    updateRunMembers(runId, input = {}) {
+      return this.transaction(() => {
+        const current=getRun(runId), task=getTask(current?.taskId);
+        if(!current || task.archivedAt || ["completed","cancelled","failed","awaiting_acceptance"].includes(current.status)) throw new Error("当前任务状态不允许修改成员");
+        if(!input || Object.keys(input).some(key=>key!=="memberAgentIds") || !Array.isArray(input.memberAgentIds) || new Set(input.memberAgentIds).size!==input.memberAgentIds.length || input.memberAgentIds.some(id=>typeof id!=="string"))throw new Error("请提供不重复的 memberAgentIds 数组");
+        const selected=input.memberAgentIds.map(agentId => agentId === current.manager.sourceAgentId ? current.manager.id : agentId);
+        if(new Set(selected).size!==selected.length)throw new Error("请勿重复选择同一员工");
+        if(!selected.includes(current.manager.id))throw new Error("任务必须保留当前项目经理");
+        const before=current.participants.filter(item=>item.type==="agent" && !(current.removedParticipantIds || []).includes(item.id));
+        const removed=before.filter(item=>!selected.includes(item.id));
+        for(const member of removed) {
+          if(state.traces.some(trace=>trace.runId===runId&&trace.agentId===member.id&&trace.status==="running") || state.dispatches.some(delivery=>delivery.runId===runId&&delivery.recipientAgentId===member.id&&!["done","cancelled"].includes(delivery.status)))throw new Error(`「${member.name}」仍有执行、待处理或等待回复的投递，暂不能移除`);
+        }
+        const added=selected.filter(id=>!before.some(member=>member.id===id));
+        for(const agentId of added) {
+          const employee=currentEmployee(agentId);
+          if(!employee || employee.status!=="active")throw new Error("新增成员必须是可用数字员工");
+          if(employee.kind==="manager")throw new Error("任务只允许当前一位项目经理");
+          const frozen=current.participants.find(item=>item.id===agentId);
+          if(!frozen){assertRuntimeEnabled(resolveAgentRuntime(employee.runtime));current.participants.push({...withRoleSnapshot(employeeConfiguration(employee)),type:"agent"});}
+        }
+        current.removedParticipantIds=current.participants.filter(item=>item.type==="agent"&&!selected.includes(item.id)).map(item=>item.id);
+        task.updatedAt=now();
+        addEvent({type:"run.members_updated",runId,actor:humanMember,message:"人类更新了当前任务成员；历史快照和记录保留。",data:{addedAgentIds:added,removedAgentIds:removed.map(item=>item.id)}});
+        save();return {runId,memberAgentIds:selected,members:current.participants.filter(item=>item.type==="agent"&&selected.includes(item.id)).map(({id,name,kind})=>({id,name,kind}))};
+      });
+    },
     submitHumanMessage(runId, input) {
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current?.taskId);
         if (!current || task.archivedAt) throw new Error("任务已归档，不接受新消息");
         if (task.kind === "automation") throw new Error("自动化不接受人类协作消息");
         if (current.status === "failed") throw new Error("任务因错误中断，请先重试失败员工；当前不能发送消息或 @ 其他成员");
+        if (!input.replyToMessageId && this.pendingQuestions(runId).some(question => question.recipient.type === "human")) throw new Error("任务正在等待人类澄清，请先回复待回答问题，不能追加新指令");
         const interactionOnly = ["completed", "cancelled", "paused"].includes(current.status);
         if (current.status === "awaiting_acceptance" && !input.replyToMessageId) {
           current.status = "running"; current.deliveryReview = null; current.acceptanceRequest = null; task.status = "running"; task.updatedAt = now();
@@ -728,8 +756,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     })), listTasks: () => state.tasks.filter(task => task.kind !== "automation").map(taskReadModel), listWorkflowTemplates: () => clone(state.workflowTemplates), timeline: (runId = null) => clone(state.events.filter((item) => !runId || item.runId === runId)),
     listRuns: () => clone(state.runs.map((item) => ({ ...item, task: taskReadModel(getTask(item.taskId)), traceCount: state.traces.filter((trace) => trace.runId === item.id).length, artifactCount: state.artifacts.filter((artifact) => artifact.runId === item.id).length }))),
     getRun(runId) { const item = getRun(runId); if (!item) throw new Error("Run 不存在"); return clone(item); }, getTask(taskId) { const item = getTask(taskId); if (!item) throw new Error("任务不存在"); return taskReadModel(item); }, getRunAgent(runId, agentId) { return clone(runAgent(getRun(runId), agentId)); },
-    getRunTask(runId) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const task = getTask(current.taskId); return clone({ ...taskReadModel(task), taskWorkspacePath: task.workspacePath, workspacePath: current.workspacePath || task.workspacePath, deletionBlockedBy: taskDeletionBlock(task.id) }); },
-    getRunWorkspace(runId, { summary = false } = {}) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const traces = state.traces.filter((item) => item.runId === runId).map((item) => ({ ...item, agent: summary ? { id: item.agentId, name: runAgent(current, item.agentId)?.name } : runAgent(current, item.agentId) })); const artifacts = state.artifacts.filter((item) => item.runId === runId).map((item) => (summary ? { ...item } : { ...item, trace: getTrace(item.traceId), agent: runAgent(current, item.ownerAgentId) })); return clone({ deletedAgentIds: state.agents.filter(item => item.status === "deleted").map(item => item.id), failureEvents: state.events.filter((event) => event.runId === runId && event.type === "trace.failed").slice(-20).map(consoleAuditProjection), pendingQuestions: this.pendingQuestions(runId), dispatches: this.listDispatches(runId), run: { ...current, task: this.getRunTask(runId), artifactCount: artifacts.length }, traces, artifacts, messages: state.messages.filter((item) => item.runId === runId), decisions: state.decisions.filter((item) => item.runId === runId), events: state.events.filter((item) => item.runId === runId && (!summary || ["dispatch.retry_scheduled", "dispatch.retry_requested", "dispatch.retry_stopped", "dispatch.escalated", "dispatch.coordination_followups_settled", "session.reset", "run.completed", "run.awaiting_acceptance", "run.acceptance_reopened", "run.recovered", "run.cancelled", "run.paused", "run.resumed", "run.inquiries_cancelled", "run.failed", "run.retry_requested", "run.orchestration_retry_requested", "run.reassessment_requested"].includes(item.type))) }); },
+    getRunTask(runId) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const task = getTask(current.taskId); return clone({ ...taskReadModel(task), memberAgentIds: current.participants.filter(item=>item.type==="agent" && !(current.removedParticipantIds || []).includes(item.id)).map(item=>item.id), taskWorkspacePath: task.workspacePath, workspacePath: current.workspacePath || task.workspacePath, deletionBlockedBy: taskDeletionBlock(task.id) }); },
+    getRunWorkspace(runId, { summary = false } = {}) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const traces = state.traces.filter((item) => item.runId === runId).map((item) => ({ ...item, agent: summary ? { id: item.agentId, name: current.participants.find(member=>member.id===item.agentId)?.name } : current.participants.find(member=>member.id===item.agentId) })); const artifacts = state.artifacts.filter((item) => item.runId === runId).map((item) => (summary ? { ...item } : { ...item, trace: getTrace(item.traceId), agent: current.participants.find(member=>member.id===item.ownerAgentId) })); return clone({ deletedAgentIds: state.agents.filter(item => item.status === "deleted").map(item => item.id), failureEvents: state.events.filter((event) => event.runId === runId && event.type === "trace.failed").slice(-20).map(consoleAuditProjection), pendingQuestions: this.pendingQuestions(runId), dispatches: this.listDispatches(runId), run: { ...current, task: this.getRunTask(runId), artifactCount: artifacts.length }, traces, artifacts, messages: state.messages.filter((item) => item.runId === runId), decisions: state.decisions.filter((item) => item.runId === runId), events: state.events.filter((item) => item.runId === runId && (!summary || ["dispatch.retry_scheduled", "dispatch.retry_requested", "dispatch.retry_stopped", "dispatch.escalated", "dispatch.coordination_followups_settled", "session.reset", "run.completed", "run.awaiting_acceptance", "run.acceptance_reopened", "run.recovered", "run.cancelled", "run.paused", "run.resumed", "run.inquiries_cancelled", "run.failed", "run.retry_requested", "run.orchestration_retry_requested", "run.reassessment_requested"].includes(item.type))) }); },
     createWorkflowTemplate(input = {}) { validateWorkflowInput(input); const item = workflow(input, {current: true}); if (state.workflowTemplates.some((candidate) => candidate.name === item.name)) throw new Error("工作流名称必须唯一"); state.workflowTemplates.push(item); save(); return clone(item); },
     updateWorkflowTemplate(templateId, input = {}) { const current = find(state.workflowTemplates, templateId); if (!current) throw new Error("工作流不存在"); validateWorkflowInput(input); Object.assign(current, workflow(input, { templateId, system: current.system, current: true })); save(); return clone(current); },
     deleteWorkflowTemplate(templateId) {
@@ -908,8 +936,9 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       });
     },
     createTeam(input = {}) {
+      if (input.status !== undefined && !["active", "inactive"].includes(input.status)) throw new Error("团队状态无效");
       const members = validateTeam(input);
-      const item = { id: id("team"), name: text(input.name, "团队名称"), mission: input.mission?.trim() || "", ...members, status: "active", createdAt: now() };
+      const item = { id: id("team"), name: text(input.name, "团队名称"), mission: input.mission?.trim() || "", ...members, status: input.status ?? "active", createdAt: now() };
       state.teams.push(item); save(); return clone(item);
     },
     updateTeam(teamId, input = {}) {

@@ -106,3 +106,5 @@ Codex 在 Provider 确认 thread.started 之前出现明确鉴权/未登录错�
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
 
 自动化配置和分页触发历史由 automations.mjs 提供 Store commands；automation-schedule.mjs 计算下一时间，automation-scheduler.mjs 10秒检测并异步执行。Task 来源冻结、人类路由门禁、前轮事务确认见 docs/27。普通任务优先级已移除。
+
+PUT /api/runs/:id/members 经认证交给 Store 更新当前成员投影，不隐式启动执行；冻结历史保留。communication-store 的成员 running 来自该会话全部运行中投递，不依赖消息分页。

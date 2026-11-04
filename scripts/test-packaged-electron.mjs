@@ -167,7 +167,7 @@ assert.equal(config.required,true); assert.equal(config.env.ELECTRON_RUN_AS_NODE
 const client=new Client({name:'packaged-history-check',version:'1.0.0'});
 try {
   await client.connect(new StdioClientTransport({command:config.command,args:config.args,env:config.env,stderr:'pipe'}));
-  const tools=await client.listTools(); assert.equal(tools.tools.length,8);
+  const tools=await client.listTools(); assert.equal(tools.tools.length,10);
   const sessions=await client.callTool({name:'list_sessions',arguments:{}});
   assert.ok(!sessions.isError); assert.equal(JSON.parse(sessions.content[0].text).items.length,1);
   const result=await client.callTool({name:'search_private_chat',arguments:{query:${JSON.stringify(mcpProof)}}});
@@ -188,7 +188,7 @@ try {
   if(previousElectronNode===undefined) delete process.env.AGENTFORGE_ELECTRON_NODE; else process.env.AGENTFORGE_ELECTRON_NODE=previousElectronNode;
   historyStore.close();
 }
-console.log('PASS Codex adapter registers packaged history MCP: eight real tools and a stored random record, Node mode only in the MCP child');
+console.log('PASS Codex adapter registers packaged history MCP: ten real tools and a stored random record, Node mode only in the MCP child');
 // Native Skill transport must also run from ASAR under bundled Electron Node.
 // This is an explicit protocol fixture, not a real-model activation claim.
 const nativeProvider=join(evidenceRoot,'native-provider.mjs'),nativeSkill=join(evidenceRoot,'SKILL.md');

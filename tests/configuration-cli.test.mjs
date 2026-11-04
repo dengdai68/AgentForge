@@ -764,3 +764,18 @@ test('automation CLI exposes discovery, trigger IDs, status paging and readable 
   assert.equal(result.items.length,2); assert.equal(result.page,null); assert.equal(result.hasMore,false);
   assert.match(formatOutput(['automations','list'],result),/--all/);
 });
+
+test('task members CLI reads compact current roster and validates full replacements',async()=>{
+ const f=await fixture(),calls=[];
+ const fetcher=async(url,options)=>{
+  const path=url.slice(origin.length);calls.push({path,method:options.method,body:options.body});
+  const value=path==='/api/bootstrap'?{tasks:[{id:'t'}],runs:[{id:'r',taskId:'t'}]}:path.endsWith('/members')?{runId:'r',memberAgentIds:['m','b'],members:[{id:'m'},{id:'b'}]}:{run:{participants:[{id:'m',name:'经理',type:'agent',systemPrompt:'private'},{id:'a',type:'agent'}],removedParticipantIds:['a']}};
+  return new Response(JSON.stringify(value));
+ };
+ const invoke=(args,value)=>execute(['tasks','members','t',...args,'--session-file',f.sessionFile],{fetcher,stdin:input(value??'')});
+ assert.deepEqual((await invoke([])).members,[{id:'m',name:'经理'}]);
+ await assert.rejects(invoke(['--file','-'],{memberAgentIds:['m','m']}),error=>error.code==='USAGE');
+ assert.equal(calls.some(c=>c.method==='PUT'),false);
+ assert.deepEqual((await invoke(['--file','-'],{memberAgentIds:['m','b']})).memberAgentIds,['m','b']);
+ assert.equal(calls.at(-1).path,'/api/runs/r/members');assert.equal(calls.at(-1).method,'PUT');
+});

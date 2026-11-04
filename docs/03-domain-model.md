@@ -1,6 +1,6 @@
 # 领域模型
 
-任务创建接受可选 teamIds 和 memberAgentIds；至少选一人或一个团队。Store 展开可用团队中的 active 成员，与显式员工合并去重，校验最终恰好一位可用经理；显式停用/删除员工、停用/不存在团队、数组内重复 ID 拒绝。teamIds 不持久化，不恢复旧 teamId 团队绑定。任务 不再使用任务优先级，默认 medium；冻结事实和人类最终确认不变。
+任务创建接受可选 teamIds 和 memberAgentIds；至少选一人或一个团队。Store 展开可用团队中的 active 成员，与显式员工合并去重，校验最终恰好一位可用经理；显式停用/删除员工、停用/不存在团队、数组内重复 ID 拒绝。teamIds 不持久化，不恢复旧 teamId 团队绑定。任务不再使用任务优先级，废弃字段明确拒绝；冻结事实和人类最终确认不变。
 
 任务独立持有 `memberAgentIds` 与冻结员工快照，必须且只能有一位可用项目经理；不再写入或接受 `teamId`。团队只是可空的员工集合，可含零位或多位经理；在任务或群聊选团队时展开为员工 ID 并集，之后团队编辑/删除不影响已加入的成员。任务列表、详情和员工控制台不展示团队名称。新任务启动前拒绝已删除成员；在途 Run 继续使用原冻结成员完成执行，不重建会话或改写历史。
 
@@ -97,7 +97,7 @@ Runtime Provider 新增 dsh，固定槽位 runtime_dsh；与现有两个 Provide
 
 Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
-任务协作的人类新消息未提供 recipientAgentId（省略或 null）时，由 Store 路由给该 Run 的冻结项目经理；显式指定仍校验当前 Run 成员。精确澄清回复继续由 replyToMessageId 决定接收人，普通消息不能隐式回答待答问题。已完成/暂停/失败/终止 Run 的无指定消息仍为经理答疑，不恢复业务执行；已归档继续只读。
+任务协作的人类新消息未提供 recipientAgentId（省略或 null）时，由 Store 路由给该 Run 的冻结项目经理；显式指定仍校验当前 Run 成员。精确澄清回复继续由 replyToMessageId 决定接收人，普通消息不能隐式回答待答问题。已完成/暂停/终止 Run 的无指定消息仍为经理答疑，不恢复业务执行；失败 Run 拒绝新消息，先重试；已归档继续只读。
 
 插件新绑定的 `adapterVersion:2` 引用冻结 `planTarget`、`sourceDialect`、`planSha256`，只含元数据与摘要，不存原始提示词或 Hook 命令。新安装另外保留 `sourceRoot/sourceSha256` 完整性引用。执行计划按源标准解析；已有 Task/Run 的旧引用继续按旧适配语义执行，不自动换计划。MCP 新绑定 `mcpAdapterVersion:2` 保留源服务名，历史调用保留其记录的命名方式。详见 docs/26。
 
@@ -120,3 +120,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
 
 自动化新增 Automation 与 AutomationTrigger 元数据集合。Task.kind=automation 冻结 automationId/automationTriggerId/automationVersion；普通任务为 manual（历史未设置视为普通）。自动化每轮独立工作目录/会话/快照，无 human participant，不允许人类消息、澄清或交接；经理交付后 awaiting_acceptance，下一轮实际创建成功的同一事务自动确认，confirmedBy=automation 并关联 confirmedByTriggerId。错误/暂停/取消不自动确认。普通任务的人类最终验收不变。任务优先级输入已废弃，明确拒绝，当前读模型不展示；旧冻结事实不重写，不要求重置真实数据。详见 [自动化](27-automations.md)。
+
+运行中成员由 Run.participants 冻结快照与 removedParticipantIds 投影；添加成员冻结当前配置，移除不删除历史，重新加入复用原快照。必须保留当前经理；经理原始员工 ID 在写入口映射为 Run 身份，映射后拒绝重复。执行中、待投递或等待回复的成员不能移除。失败、已结束及待验收 Run 不允许编辑。成员变化仅产生审计事件，不插入协作消息。待人类澄清时仅接受精确 replyToMessageId 回复，拒绝新指令。

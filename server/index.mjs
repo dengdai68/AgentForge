@@ -560,6 +560,11 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
       return true;
     });
   }
+  const runMembersMatch = pathname.match(/^\/api\/runs\/([^/]+)\/members$/);
+  if (request.method === "PUT" && runMembersMatch) {
+    sendJson(response, 200, store.updateRunMembers(runMembersMatch[1], await readJson(request)));
+    return true;
+  }
   const runMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/run$/);
   if (request.method === "POST" && runMatch) {
     const run = store.createRun(runMatch[1]);

@@ -94,17 +94,19 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
 export const createMcpMarketplaceUI = options => marketUI(options,'mcp');
 // Shared employee picker: chips and search live inside one field boundary.
 // IDs remain the saved values; display order is not a priority control.
-export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items=[],selectedIds=[],available=()=>true,reason=()=>'',detail=()=>'',emptyMessage=()=> '没有可添加的匹配项',expand=item=>[item.id],onChange=()=>{}}) {
+export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items=[],selectedIds=[],available=()=>true,reason=()=>'',detail=()=>'',emptyMessage=()=> '没有可添加的匹配项',expand=item=>[item.id],preserveGroups=false,hideUnavailable=false,lockedIds=[],lockReason=()=>"当前成员不能移除",onChange=()=>{}}) {
   const selected=new Set(selectedIds);let catalog=items;
+  const values=()=>[...new Set([...selected].flatMap(id=>{const item=catalog.find(row=>row.id===id);return item?expand(item):[id];}))];
   target.classList.add('extension-picker');
   target.innerHTML=`<label for="${esc(id)}">${esc(label)}</label><div class="extension-picker-search"><div class="extension-picker-control"><div class="extension-picked"></div><input id="${esc(id)}" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${esc(id)}-options" autocomplete="off" placeholder="${esc(placeholder)}"></div><div class="extension-picker-options" id="${esc(id)}-options" role="listbox" hidden></div></div>`;
   const search=target.querySelector('.extension-picker-search'),control=target.querySelector('.extension-picker-control'),input=target.querySelector('input'),list=target.querySelector('[role=listbox]'),chips=target.querySelector('.extension-picked');
   const floating=createFloatingList(control,list,{onClose:()=>input.setAttribute('aria-expanded','false')});
   const close=(restoreFocus=false)=>{if(restoreFocus && list.contains(document.activeElement))input.focus({preventScroll:true});floating.close();input.setAttribute('aria-expanded','false');};
   const paint=()=>{
-    const found=catalog.filter(item=>!selected.has(item.id) && `${item.name} ${item.description || ''} ${item.id}`.toLowerCase().includes(input.value.trim().toLowerCase())).slice(0,20);
+    const covered=new Set(values());
+    const found=catalog.filter(item=>!selected.has(item.id) && !(preserveGroups && expand(item).length===1 && expand(item)[0]===item.id && covered.has(item.id)) && (!hideUnavailable || available(item)) && `${item.name} ${item.description || ''} ${item.id}`.toLowerCase().includes(input.value.trim().toLowerCase())).slice(0,20);
     list.innerHTML=found.map(item=>`<button type="button" role="option" aria-selected="false" data-add-extension="${esc(item.id)}" ${available(item)?'':`disabled title="${esc(reason(item))}"`}><strong>${esc(item.name)}</strong>${detail(item)}${available(item)?'':`<small>${esc(reason(item))}</small>`}</button>`).join('') || `<p class="field-hint">${esc(emptyMessage())}</p>`;
-    chips.innerHTML=[...selected].map(id=>{const item=catalog.find(item=>item.id===id),incompatible=item && !available(item),name=item?.name || '未安装版本 '+id.slice(0,8);return `<span class="extension-chip" title="${esc(id)}" data-incompatible="${Boolean(incompatible)}"><span class="extension-chip-name">${esc(name)}</span>${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" aria-label="移除${esc(name)}">×</button></span>`;}).join('');
+    chips.innerHTML=[...selected].map(id=>{const item=catalog.find(item=>item.id===id),incompatible=item && !available(item),name=item ? item.name+(preserveGroups && item.selectionKind==='team'?' · '+expand(item).length+' 人':'') : '未安装版本 '+id.slice(0,8);return `<span class="extension-chip" title="${esc(id)}" data-incompatible="${Boolean(incompatible)}"><span class="extension-chip-name">${esc(name)}</span>${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" ${lockedIds.includes(id)?`disabled title="${esc(lockReason(id))}"`:""} aria-label="移除${esc(name)}">×</button></span>`;}).join('');
     input.placeholder=selected.size?'继续添加…':placeholder;
   };
   const open=()=>{paint();floating.open();input.setAttribute('aria-expanded','true');};
@@ -113,16 +115,16 @@ export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items
   input.onkeydown=event=>{
     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}
     if(event.key==='ArrowDown'){event.preventDefault();open();list.querySelector('button:not(:disabled)')?.focus();}
-    if(event.key==='Backspace' && !input.value && selected.size){selected.delete([...selected].at(-1));paint();onChange([...selected]);}
+    if(event.key==='Backspace' && !input.value && selected.size){const removable=[...selected].filter(id=>!lockedIds.includes(id));if(removable.length)selected.delete(removable.at(-1));paint();onChange(values());}
   };
   list.onkeydown=event=>{const buttons=[...list.querySelectorAll('button:not(:disabled)')],index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;buttons[next]?.focus();}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(true);}};
-  list.onclick=event=>{const button=event.target.closest('[data-add-extension]');if(!button || button.disabled)return;expand(catalog.find(item=>item.id===button.dataset.addExtension)).forEach(value=>selected.add(value));input.value='';paint();onChange([...selected]);input.focus();close();};
-  chips.onclick=event=>{const button=event.target.closest('[data-remove-extension]');if(button){selected.delete(button.dataset.removeExtension);paint();onChange([...selected]);input.focus();close();}};
+  list.onclick=event=>{const button=event.target.closest('[data-add-extension]');if(!button || button.disabled)return;const item=catalog.find(item=>item.id===button.dataset.addExtension);if(preserveGroups){if(item.selectionKind==='team')expand(item).forEach(value=>selected.delete(value));selected.add(item.id);}else expand(item).forEach(value=>selected.add(value));input.value='';paint();onChange(values());input.focus();close();};
+  chips.onclick=event=>{const button=event.target.closest('[data-remove-extension]');if(button && !button.disabled){selected.delete(button.dataset.removeExtension);paint();onChange(values());input.focus();close();}};
   target.addEventListener('focusout',event=>{if(!search.contains(event.relatedTarget))close();});
   target.onpointerleave=event=>{if(event.pointerType==='mouse')close(true);};
   (target.closest('form') || target).addEventListener('pointerdown',event=>{if(!target.contains(event.target))close(true);});
   paint();
-  return {refresh(items=catalog){catalog=items;paint();},value(){return [...selected];},setValue(values){selected.clear();values.forEach(value=>selected.add(value));paint();onChange([...selected]);}};
+  return {refresh(items=catalog){catalog=items;paint();},value(){return values();},setValue(nextValues){selected.clear();nextValues.forEach(value=>selected.add(value));paint();onChange(values());}};
 }
 
 export function createMarketplaceUI(options) {

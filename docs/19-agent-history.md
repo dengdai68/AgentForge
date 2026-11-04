@@ -1,6 +1,6 @@
 # 员工历史查询
 
-打包版 Bridge 的命令是客户端内置 Electron，MCP env 包含 ELECTRON_RUN_AS_NODE=1。Codex 适配器完整转发该 Bridge 自有 env，并设置 required=true；缺失/无法初始化会真实失败，不能只在提示词写「已注册」后忽略故障。Codex 本身不继承 Node 模式；不用全局 Node、不改操作者配置。安装包测试实际握手并调用八工具目录及已存随机记录，真实模型验收另需显式运行。
+打包版 Bridge 的命令是客户端内置 Electron，MCP env 包含 ELECTRON_RUN_AS_NODE=1。Codex 适配器完整转发该 Bridge 自有 env，并设置 required=true；缺失/无法初始化会真实失败，不能只在提示词写「已注册」后忽略故障。Codex 本身不继承 Node 模式；不用全局 Node、不改操作者配置。安装包测试实际握手并调用十工具目录及已存随机记录，真实模型验收另需显式运行。
 
 历史工具目录、连接、身份绑定说明、schema 和分页由 MCP tools/list 与服务 instructions 提供，不再在应用系统指令重复列工具名和参数；应用只保留简短核对行为规则。平台不重放历史，快照只证明平台系统/当前输入，不包含 Provider 自动生成的技能/工具目录。
 
@@ -25,3 +25,5 @@
 测试见 `tests/history.test.mjs`；真实模型专项入口为客户端 `scripts/test-prompt-e2e.mjs`。
 
 历史索引不再生成独立问题清单实体；问题反馈通过任务协作消息和已有 Trace 查询。索引重建不迁移或删除权威存储中的历史内容，不伪造员工消息。
+
+员工目录 list_employees 支持 query/status/page/limit；read_employee(agentId) 返回 App/CLI 相同配置与角色。绑定调用者验证不变，均为只读，不含登录凭据。

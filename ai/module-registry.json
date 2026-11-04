@@ -1631,5 +1631,6 @@
         ]
       }
     }
-  ]
+  ],
+  "runMemberEditing": "Store.updateRunMembers preserves immutable history via removedParticipantIds; App/CLI tasks members share authenticated PUT and guards. tests/task-members.test.mjs and scripts/test-issue3-ui.mjs/test-issue3-real.mjs verify. History MCP adds list_employees/read_employee using shared configuration."
 }

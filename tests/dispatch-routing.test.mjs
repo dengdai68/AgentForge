@@ -103,11 +103,8 @@ test("an unanswered human question blocks every queued dispatch through messages
   assert.equal(store.claimDispatch(run.id).id, parent.id);
   const question = store.askQuestion(parent.id, { audience: "human", question: "请确认范围", questionType: "scope", routingReason: "需人类决定", consideredMemberIds: ["agent_analyst"] }, "trace_fixture");
   assert.equal(store.getRun(run.id).status, "awaiting_human");
-  const ordinary = store.submitHumanMessage(run.id, { content: "这是新指令，不是答复" });
-  assert.equal(ordinary.message.recipient.id, run.manager.id);
-  const directed = store.submitHumanMessage(run.id, { recipientAgentId: "agent_tester", content: "请先测试" });
-  assert.equal(ordinary.resumed, false);
-  assert.equal(directed.resumed, false);
+  assert.throws(() => store.submitHumanMessage(run.id, { content: "这是新指令，不是答复" }), /澄清/);
+  assert.throws(() => store.submitHumanMessage(run.id, { recipientAgentId: "agent_tester", content: "请先测试" }), /澄清/);
   assert.equal(store.getRun(run.id).status, "awaiting_human");
   assert.equal(store.claimDispatch(run.id), null);
   assert.equal(store.getRunRecoveryPlan(run.id).shouldExecute, false);
@@ -122,7 +119,7 @@ test("an unanswered human question blocks every queued dispatch through messages
   assert.equal(store.getRun(run.id).status, "running");
   assert.equal(store.claimDispatch(run.id).id, parent.id);
   assert.throws(() => store.answerQuestion(run.id, question.id, "重复", { type: "human", id: "human_operator" }), /待回答问题/);
-  assert.ok(store.getRunWorkspace(run.id).messages.some((item) => item.id === ordinary.message.id));
+  assert.ok(!store.getRunWorkspace(run.id).messages.some((item) => item.content === "这是新指令，不是答复"));
 });
 
 test('a malformed consultation inside managerDecision cannot request human acceptance', () => {
@@ -179,7 +176,7 @@ test("persistent restart and multiple unanswered questions retain the gate until
   const parent = store.enqueueDispatch(run.id, { recipientAgentId: "agent_analyst", workflowNodeId: "requirements", purpose: "node", messageIds: [] });
   store.claimDispatch(run.id);
   const first = store.askQuestion(parent.id, { audience: "human", question: "第一问", questionType: "scope", routingReason: "待人类", consideredMemberIds: ["agent_analyst"] }, "trace_first");
-  store.submitHumanMessage(run.id, { content: "这只是普通消息", recipientAgentId: run.manager.id });
+  assert.throws(()=>store.submitHumanMessage(run.id, { content: "这只是普通消息", recipientAgentId: run.manager.id }), /澄清/);
   const snapshot = store.snapshot(); store.close();
   const second = { ...first, id: "message_second_question", conversationId: "conversation_second", content: "第二问", sender: { type: "agent", id: "agent_tester", name: "测试" } };
   snapshot.messages.push(second);

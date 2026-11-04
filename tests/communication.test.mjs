@@ -373,6 +373,7 @@ test("group members execute in parallel but a member keeps FIFO", async () => {
     for (let i = 0; i < 100 && started.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 5));
     assert.equal(started.length, 2); assert.notEqual(started[0], started[1]);
     assert.equal(store.getCommunication(group.id).deliveries.filter((item) => item.status === "running").length, 2);
+    assert.equal(store.getCommunication(group.id).conversation.members.filter(member=>member.running).length,2);
     releases.splice(0).forEach((resolve) => resolve());
     for (let i = 0; i < 100 && started.length < 3; i++) await new Promise((resolve) => setTimeout(resolve, 5));
     assert.equal(started.length, 3);

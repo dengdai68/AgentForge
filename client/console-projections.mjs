@@ -334,7 +334,7 @@ export function workspaceAgents(workspace = {}, agents = [], { includeDeleted = 
   const members = new Map();
   for (const agent of [run.manager, ...assigned, ...asArray(workspace.traces).map((trace) => trace.agent)].filter(Boolean)) if (!members.has(agent.id)) members.set(agent.id, agent);
   const deleted = new Set(workspace.deletedAgentIds || []);
-  return [...members.values()].filter(member => includeDeleted || !deleted.has(member.sourceAgentId || member.id));
+  return [...members.values()].filter(member => includeDeleted || (!deleted.has(member.sourceAgentId || member.id) && !(run.removedParticipantIds || []).includes(member.id)));
 }
 
 // A running Trace is an invocation fact, but a terminal Run is the lifecycle

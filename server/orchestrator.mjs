@@ -222,7 +222,7 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
       : await files.snapshotWorkspace(task.workspacePath, { excludeRunFiles: true }).catch(() => new Map());
     // Only explicit inbox/chain messages or this responsibility's handoffs are
     // shared. Other members' private model context is never forwarded.
-    const roster = run.participants.map(({ id, type, name, kind, description, capabilities }) => ({ id, type, name, kind, description, capabilities }));
+    const roster = run.participants.filter(member=>!(run.removedParticipantIds || []).includes(member.id)).map(({ id, type, name, kind, description, capabilities }) => ({ id, type, name, kind, description, capabilities }));
     // A member keeps one cwd/session even when answering another node's question.
     const cwd = task.repositoryMode === "agent" ? (task.repositoryBindings[agent.id] ? resolve(task.workspacePath, task.repositoryBindings[agent.id].path) : task.workspacePath) : task.workspacePath;
     const session = store.prepareMemberSession(delivery.id, trace.id, cwd);
