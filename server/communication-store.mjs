@@ -238,10 +238,9 @@ export function communicationCommands(state, save) {
         state.communicationMessages.push(message); item.status = "done"; item.error = null; item.nextAttemptAt = null; item.updatedAt = now(); thread.updatedAt = now();
         if (thread.sessions[item.agentId]) thread.sessions[item.agentId].inputThroughMessageId = item.messageId;
         const senderPresent = roster.some(member => member.id === item.agentId && member.status === "active");
-        // A human message starts one discussion round. Each member may be
-        // explicitly awakened once in that round; plain replies never fan out.
+        // Each new addressed message queues a reply, even for a busy or previously
+        // participating member. Completion is idempotent; claim owns per-member FIFO.
         for (const agentId of senderPresent ? mentionAgentIds : []) {
-          if (state.communicationDeliveries.some(row => row.conversationId === key && (row.rootMessageId || row.messageId) === rootMessageId && row.agentId === agentId)) { event(item, "mention_recorded", "该成员已参与本轮，公开消息保留，不重复唤醒", { recipientAgentId: agentId, messageId: message.id }); continue; }
           state.communicationDeliveries.push({ id: id("chat_delivery"), conversationId: key, messageId: message.id, rootMessageId, agentId, agentSnapshot: withRole(state.agents.find(row => row.id === agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null });
         }
         event(item, "completed", "回复已保存"); save();

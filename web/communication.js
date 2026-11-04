@@ -443,7 +443,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   function renderMemberDetail(memberId, focus = false) {
     const member = view(currentId).conversation?.members?.find(row => row.id === memberId), panel = query('.communication-member-detail');
     if (!member) { if (panel.open) panel.close(); return; }
-    const html = `<header><strong>员工详细信息</strong><button type="button" class="text-action" data-close-member-detail aria-label="关闭员工详情">×</button></header>${employeeDetailMarkup(member,{renderAvatar})}`;
+    const html = employeeDetailMarkup(member,{renderAvatar,renderContent,closeControl:'<button type="button" class="text-action" data-close-member-detail aria-label="关闭员工详情">×</button>'});
     if (panel.innerHTML !== html) panel.innerHTML = html;
     panel.dataset.memberId = memberId;
     panel.querySelector('[data-close-member-detail]').onclick = () => panel.close();
@@ -508,7 +508,10 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   };
 }
 
-export function employeeDetailMarkup(member, {renderAvatar = () => ''} = {}) {
+export function employeeDetailMarkup(member, {renderAvatar = () => '', renderContent = escapeHtml, closeControl = ''} = {}) {
   const roles=member.roles || member.roleSnapshots || [];
-  return `<section class="employee-profile"><header class="employee-profile-identity">${renderAvatar(member)}<div><h3>${escapeHtml(member.name)}</h3><span class="employee-profile-kind">${member.kind==='manager'?'项目经理':'数字员工'}</span></div></header><p class="employee-profile-description">${escapeHtml(member.description || '暂无简介')}</p>${member.capabilities?.length?`<div class="employee-profile-tags">${member.capabilities.map(value=>`<span>${escapeHtml(value)}</span>`).join('')}</div>`:''}<section class="employee-profile-section"><h4>角色</h4><div class="employee-profile-tags">${roles.length?roles.map(role=>`<span>${escapeHtml(role.name)}</span>`).join(''):'<span>未绑定角色</span>'}</div></section><section class="employee-profile-section"><h4>工作提示词</h4><details class="employee-profile-prompt"><summary>员工提示词</summary><pre>${escapeHtml(member.systemPrompt || '未填写')}</pre></details>${roles.map(role=>`<details class="employee-profile-prompt"><summary>${escapeHtml(role.name)}</summary><pre>${escapeHtml(role.prompt || '未填写')}</pre></details>`).join('')}</section></section>`;
+  return `<section class="employee-profile"><header class="employee-profile-identity">${renderAvatar(member)}<div class="employee-profile-name"><h3>${escapeHtml(member.name)}</h3>${member.kind==='manager'?'<span class="employee-profile-kind">项目经理</span>':''}</div>${closeControl}</header>
+    <section class="employee-profile-section"><h4>简介</h4><p class="employee-profile-description">${escapeHtml(member.description || '暂无简介')}</p></section>
+    <section class="employee-profile-section"><h4>工作提示词</h4><div class="employee-profile-prompt communication-markdown">${renderContent(member.systemPrompt || '未填写')}${roles.map(role=>`<section class="employee-role-prompt"><h5>${escapeHtml(role.name)}</h5>${renderContent(role.prompt || '未填写')}</section>`).join('')}</div></section>
+  </section>`;
 }

@@ -221,7 +221,7 @@
       },
       "taskContextProjection": "Preserve message provenance, reply links and complete business bodies; omit storage/routing audit metadata, empty repository config, employee staffing guidance and automatic bulk Artifact digests. Handoff paths remain; full immutable evidence is queried through history tools.",
       "communicationContract": "Private chat uses reply-only; independent groups add explicit mentionAgentIds for peer questions. No handoff fields; Task managerDecision/consultation and frozen historical repository context remain separate.",
-      "membershipContract": "Only the Run coordinator ID receives manager/workflow rules. Private replies stay reply-only; independent groups carry explicit mentionAgentIds and bounded per-human-round member delivery.",
+      "membershipContract": "Only the Run coordinator ID receives manager/workflow rules. Private replies stay reply-only; independent groups carry explicit mentionAgentIds and per-message peer delivery with per-member FIFO.",
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
       "communicationPrompt": "Keep chat entry and discussion/file-change boundary; remove fixed language and enumerated Git/publish/credential, self/manager and attachment reminder sentences.",
       "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
@@ -533,7 +533,7 @@
       "path": "server/communication-store.mjs",
       "kind": "domain",
       "owner": "server",
-      "purpose": "Store-internal independent communication conversations, immutable messages, human mention/broadcast delivery queues and isolated sessions. Explicit group peer mentions are deduplicated by human discussion round; historical messages, attempts and provenance remain unchanged.",
+      "purpose": "Store-internal independent communication conversations, immutable messages, human mention/broadcast delivery queues and isolated sessions. Explicit group peer mentions enqueue each new message; idempotent completion and per-member FIFO prevent duplicate or overlapping execution; historical messages, attempts and provenance remain unchanged.",
       "sourceOfTruth": [
         "docs/17-communication.md",
         "docs/03-domain-model.md"
@@ -607,7 +607,7 @@
           "security"
         ]
       },
-      "membershipContract": "Independent kind=group/name/memberAgentIds; team selection only expands employees. Editing membership cancels unstarted removed-member replies, retains active replies/history and isolated sessions. Explicit mentions are public and bounded once per employee per human discussion round; no handoff protocol. See docs/17-communication.md."
+      "membershipContract": "Independent kind=group/name/memberAgentIds; team selection only expands employees. Editing membership cancels unstarted removed-member replies, retains active replies/history and isolated sessions. Explicit mentions are public and queued per new message even for busy or previously participating members; no handoff protocol. See docs/17-communication.md."
     },
     {
       "id": "server.authentication",

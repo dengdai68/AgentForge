@@ -651,22 +651,42 @@ test('independent groups retain names and members across team edits/deletion, me
   assert.ok(store.getCommunication(a.id).conversation.members[0].systemPrompt,'explicit detail contains employee instructions');store.close();
 });
 
-test('public group peer messages address real members once per human round and stop cycles without handoff',async()=>{
+test('public group peer replies wake an idle previous participant and concurrent pumps do not duplicate delivery',async()=>{
   const root=await mkdtemp(join(tmpdir(),'af-group-peers-')),store=createStore(),chat=store.openCommunication({kind:'group',name:'公开讨论',memberAgentIds:['agent_analyst','agent_designer']});
   try{
     const calls=[];const service=createCommunicationService(store,{root,invoke:async input=>{
       const analyst=input.workspacePath.endsWith('agent_analyst');calls.push(analyst?'A':'B');
-      assert.match(input.systemPrompt,/公开群聊|当前群聊成员/);assert.doesNotMatch(input.systemPrompt,/handoffToAgentId/);
-      if(!analyst)assert.match(input.prompt,/请设计师补充/);
-      return{finalText:JSON.stringify({reply:analyst?'请设计师补充':'公开答复，人类和同事都能看到',mentionAgentIds:[analyst?'agent_designer':'agent_analyst']})};
+      assert.match(input.systemPrompt,/公开群聊|当前群聊成员/);assert.doesNotMatch(input.systemPrompt,/最多被唤醒一次/);
+      if(calls.length===3)assert.match(input.prompt,/请分析师确认/);
+      return{finalText:JSON.stringify({reply:calls.length===1?'请设计师补充':calls.length===2?'请分析师确认':'确认收到，讨论结束',mentionAgentIds:calls.length===3?[]:[analyst?'agent_designer':'agent_analyst']})};
     }});
     send(store,chat.id,'两位交流',['agent_analyst']);await Promise.all([service.kick(chat.id),service.kick(chat.id)]);
-    const result=store.getCommunication(chat.id);assert.deepEqual(calls,['A','B']);assert.equal(result.messages.length,3);assert.equal(result.conversation.pending,0);
+    const result=store.getCommunication(chat.id);assert.deepEqual(calls,['A','B','A']);assert.equal(result.messages.length,4);assert.equal(result.conversation.pending,0);
+    const last=result.deliveries.at(-1);store.completeCommunication(chat.id,last.id,'重复完成',['agent_designer']);
+    assert.equal(store.getCommunication(chat.id).deliveries.length,3);
     assert.ok(result.messages.every(message=>message.visibleToAgentIds.includes('agent_analyst')&&message.visibleToAgentIds.includes('agent_designer')));
-    assert.equal(store.snapshot().communicationEvents.filter(event=>event.type==='mention_recorded').length,1);
-    send(store,chat.id,'下一轮',['agent_analyst']);await service.kick(chat.id);assert.deepEqual(calls,['A','B','A','B']);
     assert.equal(store.snapshot().tasks.length,0);
   }finally{store.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('peer messages queue behind a busy member and survive failed execution until explicit retry',()=>{
+  const store=createStore(),chat=store.openCommunication({kind:'group',name:'繁忙讨论',memberAgentIds:['agent_analyst','agent_designer']});
+  try {
+    send(store,chat.id,'两位同时回复');const a=store.claimCommunication(chat.id),b=store.claimCommunication(chat.id);
+    assert.notEqual(a.agentId,b.agentId);
+    store.completeCommunication(chat.id,a.id,'请补充这一点',[b.agentId]);
+    store.completeCommunication(chat.id,a.id,'重复通知',[b.agentId]);
+    assert.equal(store.getCommunication(chat.id).deliveries.length,3);
+    assert.equal(store.claimCommunication(chat.id),null,'busy peer cannot overlap its own next reply');
+    store.failCommunication(chat.id,b.id,'服务中断');assert.equal(store.claimCommunication(chat.id),null,'failed head retains FIFO');
+    store.retryCommunication(chat.id,b.id);const retried=store.claimCommunication(chat.id);assert.equal(retried.id,b.id);
+    store.completeCommunication(chat.id,b.id,'初始回复');
+    const next=store.claimCommunication(chat.id);assert.equal(next.agentId,b.agentId);assert.notEqual(next.messageId,b.messageId);
+    assert.equal(store.communicationContext(chat.id,next.id).message.content,'请补充这一点');
+    store.completeCommunication(chat.id,next.id,'补充后请确认',[a.agentId]);
+    const returned=store.claimCommunication(chat.id);assert.equal(returned.agentId,a.agentId);
+    store.completeCommunication(chat.id,returned.id,'已确认');assert.equal(store.getCommunication(chat.id).conversation.pending,0);
+  } finally { store.close(); }
 });
 
 test('deletion cancels queued chats, hides private/member lists, retains replies and in-flight completion',()=>{

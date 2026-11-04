@@ -184,3 +184,5 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 员工目录角色筛选入口为 web/app.js 与 cli/main.mjs，共用认证目录及 roleIds；任务详情 Tab 展开与自动化页头由 renderer 管理。员工澄清原投递等待/答复续接仍以 Store askQuestion/answerQuestion 为准，dispatch-routing 测试覆盖 A→B→A。
 
 自动化与员工筛选密度：web/automations.mjs 管理输入防抖、状态即查和触发分页，styles.css/compact.css 对齐任务列表控件与8px间距；配置复用 workflowDetails 查看流程，test-automations 覆盖两主题宽窄布局、即时查询与返回分页。执行协议不变。
+
+群聊追问由 communication-store 按每条明确 @ 消息入队，复用同成员 FIFO 与完成幂等，不再按人类根消息抑制已参与员工。prompts 同步忙碌排队与结束语义。communication.test 覆盖 A→B→A、忙碌/失败队首及重复回调。员工详情共用展开 Markdown 提示词，文件工具进入预览标题，test-issue3-ui 检查两主题宽窄布局。

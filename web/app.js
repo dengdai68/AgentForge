@@ -883,6 +883,12 @@ function workspaceDirectoryDetails(task) {
   return `<h5>工作目录</h5><div class="workspace-path"><span>${esc(relative)}</span><button class="text-action" data-copy="${esc(absolute)}">复制</button><button class="text-action" data-open-workspace-directory>打开</button></div>`;
 }
 
+async function showEmployeeDetail(member) {
+  await Promise.all([loadVendor("marked"),loadVendor("dompurify")]).catch(() => {});
+  openModal(`${employeeDetailMarkup(member,{renderContent:markdownContent,renderAvatar:agent=>`<span class="agent-card-avatar ${esc(roleColor(agent))}">${esc(initialsOf(agent))}</span>`})}<div class="form-actions"><button class="ghost-button" data-close-modal>关闭</button></div>`);
+  $('#modal-content').closest('.modal').classList.add('employee-detail-modal');
+}
+
 function taskDescriptionMarkup(task, view) {
   const characters = Array.from(task.objective || "");
   const long = characters.length > 100;
@@ -1570,9 +1576,8 @@ function renderWorkingDirectory(runId) {
     else if (/\.md$/i.test(view.selectedPath) && window.marked && window.DOMPurify) content = `<article class="markdown-preview">${window.DOMPurify.sanitize(window.marked.parse(preview.content))}</article>`;
     else content = `<pre class="artifact-preview code-preview hljs"><code>${preview.highlightedHtml || esc(preview.content)}</code></pre>`;
   }
-  host.innerHTML = `<div class="directory-toolbar"><div><strong>文件</strong></div><div class="directory-actions"><button class="ghost-button" data-download-working-file ${!view.selectedPath || view.downloadingPath ? "disabled" : ""} ${view.downloadingPath ? 'aria-busy="true"' : ""}>${view.downloadingPath ? "下载中…" : "下载"}</button><button class="ghost-button" data-refresh-directory ${view.directoryLoading ? 'disabled aria-busy="true"' : ""}>刷新</button></div></div>
-    ${view.directoryError ? `<p role="alert">${esc(view.directoryError)}</p>` : ""}${Object.entries(view.directoryPages || {}).filter(([,page])=>page.error).map(([path,page])=>`<p role="alert">${esc(path)}：${esc(page.error)}</p>`).join("")}
-    <div class="artifact-layout"><div class="artifact-files"><section class="artifact-root">${directoryPageMarkup('',view,theme)}</section></div><div class="artifact-viewer document"><div class="artifact-viewer-head"><strong>${esc(view.selectedPath || "文件预览")}</strong><small>当前工作文件 ${preview?.modifiedAt ? "· " + esc(preview.modifiedAt) : ""}</small></div>${content}</div></div>`;
+  host.innerHTML = `${view.directoryError ? `<p role="alert">${esc(view.directoryError)}</p>` : ""}${Object.entries(view.directoryPages || {}).filter(([,page])=>page.error).map(([path,page])=>`<p role="alert">${esc(path)}：${esc(page.error)}</p>`).join("")}
+    <div class="artifact-layout"><div class="artifact-files"><section class="artifact-root">${directoryPageMarkup('',view,theme)}</section></div><div class="artifact-viewer document"><div class="artifact-viewer-head"><div class="working-file-identity"><strong>${esc(view.selectedPath || "文件预览")}</strong><small>当前工作文件 ${preview?.modifiedAt ? "· " + esc(preview.modifiedAt) : ""}</small></div><div class="directory-actions"><button class="ghost-button" data-download-working-file ${!view.selectedPath || view.downloadingPath ? "disabled" : ""} ${view.downloadingPath ? 'aria-busy="true"' : ""}>${view.downloadingPath ? "下载中…" : "下载"}</button><button class="ghost-button" data-refresh-directory ${view.directoryLoading ? 'disabled aria-busy="true"' : ""}>刷新</button></div></div>${content}</div></div>`;
   host.querySelector(".artifact-files").scrollTop = view.directoryScroll.tree || 0;
   const reader = host.querySelector(".markdown-preview, .artifact-preview");
   if (reader) reader.scrollTop = view.directoryScroll[view.selectedPath] || 0;
@@ -2535,7 +2540,7 @@ document.addEventListener("click", (event) => {
   if ((target = el("[data-toggle-task-description]"))) { workspaceView().descriptionExpanded = !workspaceView().descriptionExpanded; return renderWorkspace(); }
   if ((target = el("[data-edit-task-members]"))) return editTaskMembers();
   if ((target = el("[data-task-member-console]"))) { state.selectedAgentId=target.dataset.taskMemberConsole;workspaceView().tab='console';workspaceView().jumpLatest=true;return renderWorkspace(); }
-  if ((target = el("[data-task-member-detail]"))) { const member=workspaceAgents(state.workspace,state.agents).find(a=>a.id===target.dataset.taskMemberDetail);if(member){openModal(`<h2>员工详细信息</h2>${employeeDetailMarkup(member,{renderAvatar:agent=>`<span class="agent-card-avatar ${esc(roleColor(agent))}">${esc(initialsOf(agent))}</span>`})}<div class="form-actions"><button class="ghost-button" data-close-modal>关闭</button></div>`);$('#modal-content').closest('.modal').classList.add('employee-detail-modal');};return; }
+  if ((target = el("[data-task-member-detail]"))) { const member=workspaceAgents(state.workspace,state.agents).find(a=>a.id===target.dataset.taskMemberDetail);if(member)void showEmployeeDetail(member);return; }
   if ((target = el("[data-task-workflow-details]"))) return workflowDetails(state.workspace.run.task.workflowSnapshot, { frozen: true });
   if ((target = el("[data-ws-tab]"))) { workspaceView().jumpLatest = true; workspaceView().tab = target.dataset.wsTab; renderWorkspace(); if (target.dataset.wsTab === "diff" && workspaceView().changes && !workspaceView().changesLoading) return loadWorkingChanges(state.selectedRunId); if (target.dataset.wsTab === "directory" && workspaceView().directory && !workspaceView().directoryLoading) return loadWorkingDirectory(state.selectedRunId); return; }
   if ((target = el("[data-reload-workspace]"))) return loadWorkspace();
