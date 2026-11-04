@@ -1,0 +1,107 @@
+name: Recover verified draft release upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: Existing draft Release ID containing upload-parts.json and parts
+        required: true
+        type: string
+      source_sha:
+        description: Full source SHA already verified for the original installers
+        required: true
+        type: string
+      manifest_sha256:
+        description: Locally verified SHA-256 of upload-parts.json
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recover-release-${{ inputs.release_id }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Reassemble original installers and verify before upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+        shell: python
+        run: |
+          import hashlib, json, os, re, subprocess, tempfile
+          from pathlib import Path
+          repo = os.environ['GH_REPO']
+          rid = os.environ['RELEASE_ID']
+          source = os.environ['SOURCE_SHA']
+          expected_manifest = os.environ['MANIFEST_SHA256']
+          assert re.fullmatch(r'[0-9]+', rid)
+          assert re.fullmatch(r'[0-9a-f]{40}', source)
+          assert re.fullmatch(r'[0-9a-f]{64}', expected_manifest)
+          base = f'repos/{repo}/releases/{rid}'
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', path]))
+          def draft():
+              value = api(base)
+              assert value['draft'] and value['target_commitish'] == source, 'Refuse public or different-source Release'
+              return value
+          release = draft()
+          tag = release['tag_name']
+          assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-beta\.[0-9]+)?', tag)
+          version = tag[1:]
+          allowed = {f'AgentForge-{version}-arm64.dmg', f'AgentForge-{version}-arm64.zip'}
+          work = Path(tempfile.mkdtemp(prefix='release-recovery-'))
+          def download(name):
+              subprocess.run(['gh', 'release', 'download', tag, '--repo', repo, '--pattern', name, '--dir', str(work)], check=True)
+              return work / name
+          manifest_bytes = download('upload-parts.json').read_bytes()
+          assert hashlib.sha256(manifest_bytes).hexdigest() == expected_manifest, 'Manifest does not match operator digest'
+          manifest = json.loads(manifest_bytes)
+          assert isinstance(manifest, list) and len(manifest) == 2 and {f['name'] for f in manifest} == allowed
+          sums = dict(line.split('  ', 1)[::-1] for line in download('SHA256SUMS.txt').read_text().splitlines())
+          cleanup = ['upload-parts.json']
+          for item in manifest:
+              name = item['name']
+              assert item['sha256'] == sums[name], 'Original checksum list differs'
+              assert 0 < item['size'] <= 2 * 1024**3 and 1 <= len(item['parts']) <= 1024
+              total = 0
+              digest = hashlib.sha256()
+              output = work / name
+              with output.open('wb') as stream:
+                  for index, part in enumerate(item['parts']):
+                      assert part['name'] == f'upload-part-{name}-{index:03d}', 'Invalid part name or order'
+                      assert 0 < part['size'] <= 8 * 1024**2
+                      path = download(part['name'])
+                      data = path.read_bytes()
+                      assert len(data) == part['size'] and hashlib.sha256(data).hexdigest() == part['sha256'], 'Part checksum mismatch'
+                      total += len(data)
+                      digest.update(data)
+                      stream.write(data)
+                      path.unlink()
+                      cleanup.append(part['name'])
+              assert total == item['size'] and digest.hexdigest() == item['sha256'], 'Reassembled installer differs from original'
+              current = draft()
+              asset = next((a for a in current['assets'] if a['name'] == name), None)
+              if asset:
+                  assert asset['state'] == 'uploaded' and asset['size'] == total and asset['digest'] == 'sha256:' + item['sha256'], 'Refuse to replace existing asset'
+              else:
+                  subprocess.run(['gh', 'release', 'upload', tag, str(output), '--repo', repo], check=True)
+              print('Verified original installer:', name, flush=True)
+          current = draft()
+          for item in manifest:
+              asset = next(a for a in current['assets'] if a['name'] == item['name'])
+              assert asset['state'] == 'uploaded' and asset['size'] == item['size'] and asset['digest'] == 'sha256:' + item['sha256']
+          for name in cleanup:
+              draft()
+              asset = next((a for a in current['assets'] if a['name'] == name), None)
+              if asset:
+                  subprocess.run(['gh', 'api', '-X', 'DELETE', f'repos/{repo}/releases/assets/{asset["id"]}'], check=True)
+          print('Original installers restored; temporary parts removed; Release remains draft.')

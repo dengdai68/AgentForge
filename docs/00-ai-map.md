@@ -172,3 +172,5 @@ Runtime 启动恢复：local-cli/codex-app-server 在原生会话建立前识别
 员工卡片布局由 web/app.js 与 web/styles.css 维护：头像、姓名与右上状态/经理类型顶部对齐，同排左右对齐 Runtime 与扩展数量；纯展示变化。
 
 自动化入口：server/automations.mjs 管理配置/分页记录和事务触发，automation-schedule.mjs 使用固定 cron-parser 计算五段 Cron/IANA 时区，automation-scheduler.mjs 每10秒领取并异步执行；web/automations.mjs 目录复用 app.js 创建弹窗和任务工作区。普通列表排除自动化，人类协作按 Task.kind 隔离。契约见 docs/27；验收 tests/automations.test.mjs、scripts/test-automations.mjs、scripts/test-automations-real.mjs。
+
+发布上传恢复：`.github/workflows/recover-release-upload.yml` 在 GitHub runner 还原草稿中的原始安装包分片，校验操作者清单哈希、分片和原 SHA256SUMS，保留原源码提交和构建，成功后清理临时分片但不公开；契约见 docs/24。

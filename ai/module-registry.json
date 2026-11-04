@@ -1596,6 +1596,40 @@
           "task lifecycle"
         ]
       }
+    },
+    {
+      "id": "release-upload-recovery",
+      "path": ".github/workflows/recover-release-upload.yml",
+      "kind": "developer-tooling",
+      "owner": "desktop-release",
+      "purpose": "Reassemble original verified installers from small draft-only transfer parts on GitHub; verify operator manifest digest and original checksums; never rebuild, replace or publish releases.",
+      "sourceOfTruth": [
+        "docs/24-desktop-updates.md"
+      ],
+      "tests": [
+        "tests/release-upload-recovery.test.mjs"
+      ],
+      "allowedDependencies": [
+        "GitHub Actions",
+        "GitHub CLI",
+        "Python standard library"
+      ],
+      "forbiddenDependencies": [
+        "public-release-mutation",
+        "credential-logging",
+        "rebuild-installers"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "docs/24-desktop-updates.md",
+          "docs/00-ai-map.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "release permissions",
+          "checksum validation"
+        ]
+      }
     }
   ]
 }
