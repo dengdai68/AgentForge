@@ -1,5 +1,7 @@
 # 工程脚本
 
+仓库更名为 `dengdai68/AgentForge`：应用更新 API、严格附件来源、设置 GitHub 链接与打包发布配置使用新地址；应用身份、数据目录和 CLI 业务协议保持不变。README 仅介绍能力，安装/开发入口见 CONTRIBUTING。
+
 test-task-creation.mjs 同时验收核心 App/CLI 对齐：真实 CLI 子进程与认证 HTTP 操作角色、团队、工作流、员工、MCP、插件和任务；验证团队合并选人、无额外验收标准、工作流独立交接来源、员工能力/角色往返、团队启停，以及两主题宽窄编辑。该展示/协议验收不启动 Provider；--start 成功/失败和不重试语义由 configuration-cli 测试覆盖。
 
 test-directory-headers.mjs 同时验证任务工作流列、冻结名称、工作流筛选后分页、名称/状态组合与重置，覆盖 minimal 宽屏和 warm 窄屏；不执行 Provider。

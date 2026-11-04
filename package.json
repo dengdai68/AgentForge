@@ -1,16 +1,16 @@
 {
   "name": "agentforge-app",
-  "version": "0.1.5-beta.1",
+  "version": "0.1.5",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Local AI teams powered by Claude Code and Codex",
+  "description": "Local AI teams, collaborative tasks and scheduled automation",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dengdai68/AgentForge-App.git"
+    "url": "https://github.com/dengdai68/AgentForge.git"
   },
-  "homepage": "https://github.com/dengdai68/AgentForge-App#readme",
+  "homepage": "https://github.com/dengdai68/AgentForge#readme",
   "bugs": {
-    "url": "https://github.com/dengdai68/AgentForge-App/issues"
+    "url": "https://github.com/dengdai68/AgentForge/issues"
   },
   "type": "module",
   "main": "apps/electron/main.mjs",
@@ -117,7 +117,7 @@
       {
         "provider": "github",
         "owner": "dengdai68",
-        "repo": "AgentForge-App",
+        "repo": "AgentForge",
         "releaseType": "release"
       }
     ]

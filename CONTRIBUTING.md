@@ -4,6 +4,23 @@
 
 先阅读 [AGENTS.md](AGENTS.md)、[代码导航](docs/00-ai-map.md) 和目标模块的 README。
 
+## 安装与本机运行
+
+从 [GitHub Releases](https://github.com/dengdai68/AgentForge/releases) 下载 DMG，将 AgentForge 拖入 Applications。当前安装包面向 macOS 13+ / Apple Silicon，采用 ad-hoc 签名，尚未经过 Apple 公证。应用内首次创建管理员，并在设置中配置 Runtime 和工作目录。Claude Code、Codex 或 DeepSeek Harness 需在本机安装并完成各自授权；应用自带本机服务，无需部署服务器。
+
+源码开发需要 Node.js 22.12+（推荐 Node 24）、npm 和 Git：
+
+```bash
+git clone https://github.com/dengdai68/AgentForge.git
+cd AgentForge
+npm ci
+npm start
+```
+
+`npm start` / `npm run dev` 启动 Electron 及其自有随机端口子服务，不复用 4310，也不提供独立 Web 部署。安装版数据位于 `~/.agentforge/desktop/`，开发版位于 `~/.agentforge/desktop-dev/`；任务工作目录默认 `~/agentforge`。仓库改名不改变应用身份与数据位置。数字员工以当前本机用户权限执行，Runtime bypass 不是沙箱；当前为本机单管理员应用。
+
+安装版启动时提供用户级 `agentforge` 命令，可在「设置 → 命令行 CLI」查看及修复；源码入口为 `npm run cli -- help`。CLI 连接运行中的客户端并复用当前登录授权，完整指南见 [docs/21](docs/21-configuration-cli.md)。
+
 ## 开发流程
 
 1. 确认问题、影响范围和现有测试。

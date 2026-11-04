@@ -28,6 +28,20 @@ test('only stable published versions upgrade, including beta-to-same-stable; no 
   assert.equal(selectRelease(release(),'1.0.0','x64').installer,null);
 });
 
+test('renamed repository is used for discovery, package publishing and strict asset selection', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.build.publish[0].repo, 'AgentForge');
+  assert.equal(RELEASE_ROOT, 'https://github.com/dengdai68/AgentForge/releases');
+  const result = await fetchLatestRelease(async (url, options) => {
+    assert.equal(url, 'https://api.github.com/repos/dengdai68/AgentForge/releases/latest');
+    assert.equal(options.redirect, 'error');
+    return Response.json(release());
+  });
+  assert.ok(selectRelease(result, '1.0.0', 'arm64').installer);
+  result.assets[0].browser_download_url = result.assets[0].browser_download_url.replace('/AgentForge/', '/AgentForge-App/');
+  assert.equal(selectRelease(result, '1.0.0', 'arm64').installer, null);
+});
+
 test('GitHub no-stable 404 differs from offline/rate-limit failure', async () => {
   assert.equal(await fetchLatestRelease(async()=>new Response('',{status:404})),null);
   await assert.rejects(fetchLatestRelease(async()=>new Response('',{status:403})),/GitHub/);

@@ -13,7 +13,8 @@
   "humanMap": "docs/00-ai-map.md",
   "releaseSkill": {
     "path": ".codex/skills/agentforge-release/SKILL.md",
-    "purpose": "GitHub Release workflow: Beta by default, patch-only stable increments, explicit stable tags, exact version titles and concise Chinese notes."
+    "purpose": "GitHub Release workflow: Beta by default, patch-only stable increments, explicit stable tags, exact version titles and concise Chinese notes.",
+    "repository": "dengdai68/AgentForge"
   },
   "developmentSkill": {
     "path": ".codex/skills/agentforge-development/SKILL.md",

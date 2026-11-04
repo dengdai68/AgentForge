@@ -10,7 +10,7 @@
 - 本仓库新功能与界面开发可使用 [agentforge-development](.codex/skills/agentforge-development/SKILL.md)；它提供共享样式与产品落地方法，贡献规则仍以本文件为准。
 - GitHub 打包发布使用 [agentforge-release](.codex/skills/agentforge-release/SKILL.md)，版本、渠道、标签及 Release 文案按该流程执行；仅本机安装不等于发布。
 - 按需查阅：产品 `docs/01`，架构 `docs/02`，领域 `docs/03`，设计 `docs/06`；完整文件名见 [文档索引](docs/README.md)。
-- 运行与安装看 [README](README.md)，工程流程与提交格式看 [CONTRIBUTING](CONTRIBUTING.md)；不要把功能说明、版本历史或验收台账堆入本文件。
+- 产品能力看 [README](README.md)，运行与安装看 [CONTRIBUTING](CONTRIBUTING.md)，工程流程与提交格式看 [CONTRIBUTING](CONTRIBUTING.md)；不要把功能说明、版本历史或验收台账堆入本文件。
 
 ## 分层与底线
 

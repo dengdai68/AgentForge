@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import semver from 'semver';
 
-export const RELEASE_ROOT = 'https://github.com/dengdai68/AgentForge-App/releases';
-const latestApi = 'https://api.github.com/repos/dengdai68/AgentForge-App/releases/latest';
+export const RELEASE_ROOT = 'https://github.com/dengdai68/AgentForge/releases';
+const latestApi = 'https://api.github.com/repos/dengdai68/AgentForge/releases/latest';
 const stableVersion = tag => typeof tag === 'string' && /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag) ? semver.valid(tag.replace(/^v/, '')) : null;
 
 export function selectRelease(release, currentVersion, arch = process.arch) {

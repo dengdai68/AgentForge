@@ -1,5 +1,7 @@
 # 测试
 
+仓库更名为 `dengdai68/AgentForge`：应用更新 API、严格附件来源、设置 GitHub 链接与打包发布配置使用新地址；应用身份、数据目录和 CLI 业务协议保持不变。README 仅介绍能力，安装/开发入口见 CONTRIBUTING。
+
 本仓库仅验收客户端。HTTP 夹具模拟自有 IPC 子服务，不是独立 Web 产品；UI 只操作隔离 Electron，真实任务用 test-prompt-e2e，沟通用 test-communication-workbench。
 
 工作目录回归：自定义目录/根文件/大媒体的真实Git状态、任务初始提交比较、1005项分页、根读取/下载、工作流路径和重启保留；路径穿越、内部凭据、链接拒绝。真实开发端到端通过CLI配置、Claude实现与独立测试、非docs产物/媒体、Web与打包界面、人类确认。

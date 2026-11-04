@@ -522,7 +522,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
           </section>
           <section class="settings-section" data-settings-panel="updates" hidden>
             <section class="settings-update-module" aria-labelledby="app-update-title">
-            <h3 id="app-update-title">应用更新</h3><p class="settings-description app-update-version"><span data-app-version>正在读取当前版本…</span><a data-app-github href="https://github.com/dengdai68/AgentForge-App" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+            <h3 id="app-update-title">应用更新</h3><p class="settings-description app-update-version"><span data-app-version>正在读取当前版本…</span><a data-app-github href="https://github.com/dengdai68/AgentForge" target="_blank" rel="noopener noreferrer">GitHub</a></p>
             <p data-app-update-status role="status" aria-live="polite">正在读取更新状态…</p>
             <div class="app-update-progress-row" data-app-update-progress hidden><progress class="app-update-progress" max="100" value="0" aria-label="安装包下载进度"></progress><span data-app-update-percent aria-hidden="true">0%</span></div>
             <div class="form-actions"><button type="button" class="small-button" data-app-update-check>检查更新</button><button type="button" class="primary-button compact" data-app-update-download hidden>下载更新</button><button type="button" class="primary-button compact" data-app-update-install hidden>重启并安装</button></div>

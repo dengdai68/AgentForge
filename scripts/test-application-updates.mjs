@@ -86,7 +86,7 @@ try{
   assert.equal(await page.locator('[data-app-release]').count(),0);
   assert.equal(await page.locator('[data-app-github]').innerText(),'GitHub');
   assert.equal(await page.locator('[data-app-version]').evaluate(el=>el.parentElement.querySelector('[data-app-github]')?.textContent),'GitHub');
-  assert.equal(await page.locator('[data-app-github]').getAttribute('href'),'https://github.com/dengdai68/AgentForge-App');
+  assert.equal(await page.locator('[data-app-github]').getAttribute('href'),'https://github.com/dengdai68/AgentForge');
   assert.equal(await page.locator('[data-app-github].small-button').count(),0);
   const check=()=>page.getByRole('button',{name:'检查更新',exact:true}).click();
   for(const mode of ['beta','none','offline']){
