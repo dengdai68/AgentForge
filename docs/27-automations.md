@@ -4,7 +4,7 @@
 
 ## 配置与查询
 
-名称 title、目标 objective、memberAgentIds/teamIds、workflowTemplateId、acceptanceCriteria 与普通任务共用验证，附加 cron（五段、数字及 * , - /）、timeZone（IANA）、enabled。团队在保存时展开成员，执行时冻结最新员工/工作流；历史保存配置版本及执行快照。优先级废弃，所有入口明确拒绝。
+名称 title、目标 objective、memberAgentIds/teamIds、workflowTemplateId、acceptanceCriteria 与普通任务共用验证，附加 cron（五段、数字及 * , - /）、enabled。工作流可省略、null 或空字符串，使用固定默认协作快照，不自动选目录中的首个模板。时区使用本机当地时间，保存配置时解析并记录 IANA 时区；timeZone 不再接受外部输入。团队在保存时展开成员，执行时冻结最新员工/工作流；历史保存配置版本及执行快照。优先级废弃，所有入口明确拒绝。
 
 GET/POST /api/automations；GET/PUT/DELETE /api/automations/:id；GET /api/automations/:id/triggers；POST /api/automations/:id/trigger；POST /api/automations/preview。列表支持 search、status、page、pageSize，返回 items/total/page/pageSize/totalPages；触发按时间倒序，默认20条。删除仅允许无历史的配置，有历史请停用。
 
@@ -18,7 +18,7 @@ GET/POST /api/automations；GET/PUT/DELETE /api/automations/:id；GET /api/autom
 
 ## 交互
 
-左侧自动化入口；列表搜索/状态/分页。新建与编辑复用任务创建弹窗，内容优先，验收标准折叠，成员/工作流选择，调度预览五次；按钮取消、保存为停用、创建并启用。配置保存失败保留草稿，防重复提交。触发列表返回保留分页；详情保留协作、文件/CHANGE、控制台、任务详情及执行操作，自动化隐藏人类输入和筛选。
+左侧自动化入口；列表搜索/状态/分页。新建与编辑复用任务创建弹窗，内容优先，验收标准折叠，成员/工作流选择，Cron 输入缩为约三分之一宽，右侧同一行预览下次执行时间；按钮取消、保存为停用、创建并启用。配置保存失败保留草稿，防重复提交。触发列表返回保留分页；详情保留协作、文件/CHANGE、控制台、任务详情及执行操作，自动化隐藏人类输入和筛选。
 
 ## 架构决策
 
@@ -26,4 +26,8 @@ GET/POST /api/automations；GET/PUT/DELETE /api/automations/:id；GET /api/autom
 
 普通任务旧 priority 输入已废弃，调用方须删除字段；不重置实例、不重写历史冻结事实。
 
-界面中的计划/触发时间按当前自动化所选时区显示；元数据保存 UTC 时间点，历史配置仍保留当时的时区与 Cron。
+界面中的计划时间按本机当地时区显示；元数据保存 UTC 时间点，历史配置仍保留当时的时区与 Cron。
+
+自动化列表的空目录与无匹配结果使用共享 directory-empty 的标题＋说明两行结构，与团队等目录页保持同等高度，不单独设置页面高度。仅展示变化，CLI/API 不变。
+
+自动化列表采用任务中心表格样式；状态选择立即查询并重置页码。触发列表保留计划时间，不重复展示触发时间或筛选提交按钮。详情顶部仅显示 Cron 与下次执行时间，启用/停用分别用主操作色/危险色。配置以成员头像卡片、流程、描述、验收和执行规则分区呈现。生成的任务名称为 `自动化名称（yyyy-MM-dd）`，日期取本轮计划时刻的当地日期。

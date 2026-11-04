@@ -27,16 +27,17 @@ try {
  else {
  const runtime={profileId:'runtime_'+provider,extensionSelection:{pluginIds:[],mcpIds:[]}};
  const {agent:worker}=await api('/api/agents',{name:'自动化验证员工',runtime,systemPrompt:'执行唯一工作：创建 result.txt，内容为任务目标中的探针值。用工具读取文件核对内容，随后交接经理。不要询问人类，不修改工作目录之外的文件。'});
- const {agent:manager}=await api('/api/agents',{name:'自动化验证经理',kind:'manager',runtime,systemPrompt:'先将唯一节点 deliver 派给唯一业务员工。员工完成后，返回 managerDecision，nextNodeId 与 nextAgentId 都为 null。不要自己编写文件，不要额外审查、派工或询问人类。'});
+ const {agent:manager}=await api('/api/agents',{name:'自动化验证经理',kind:'manager',runtime,systemPrompt:'先将默认协作节点 delivery 派给唯一业务员工。员工完成后，返回 managerDecision，nextNodeId 与 nextAgentId 都为 null。不要自己编写文件，不要额外审查、派工或询问人类。'});
  const {workflowTemplate:workflow}=await api('/api/workflow-templates',{name:'自动化验证流程',nodes:[{id:'deliver',title:'生成探针文件',staffingGuidance:'交给唯一业务员工',dependsOn:[],artifactPaths:['result.txt']}]});
- probe='automation-'+randomBytes(8).toString('hex');input={title:'真实自动化验证',objective:`在工作目录生成 result.txt，内容精确为 ${probe}。使用工具读取核验后向经理交付。`,memberAgentIds:[manager.id,worker.id],workflowTemplateId:workflow.id};
+ probe='automation-'+randomBytes(8).toString('hex');input={title:'真实自动化验证',objective:`在工作目录生成 result.txt，内容精确为 ${probe}。使用工具读取核验后向经理交付。`,memberAgentIds:[manager.id,worker.id]};
  }
- const waitRun=async id=>{for(let i=0;i<450;i++){const workspace=await api(`/api/runs/${id}/workspace?view=summary`);if(['failed','cancelled'].includes(workspace.run.status))throw Error('真实运行中断 '+JSON.stringify(workspace.run.failure));if(['awaiting_acceptance','completed'].includes(workspace.run.status))return workspace;await new Promise(r=>setTimeout(r,2000));}throw Error('真实任务未在十五分钟内交付');};
+ const retried=new Set();
+ const waitRun=async id=>{for(let i=0;i<450;i++){const workspace=await api(`/api/runs/${id}/workspace?view=summary`);if(workspace.run.status==='failed'&&resume&&process.env.AGENTFORGE_AUTOMATIONS_RETRY==='1'&&!retried.has(id)){retried.add(id);await page.goto(origin+`/runs/${id}`);await page.locator('#collaboration-panel').waitFor();if(await page.locator('#workspace-details').isHidden())await page.locator('[data-toggle-task-details]').click();await page.locator('[data-edit-task-members]').waitFor();await page.screenshot({path:join(root,'failed-retry-members.png')});await page.locator('[data-retry-orchestration], [data-retry-failed-node]').first().click();console.log('RETRY '+id);continue;}if(['failed','cancelled'].includes(workspace.run.status))throw Error('真实运行中断 '+JSON.stringify(workspace.run.failure));if(['awaiting_acceptance','completed'].includes(workspace.run.status))return workspace;await new Promise(r=>setTimeout(r,2000));}throw Error('真实任务未在十五分钟内交付');};
  if(!evidence.automationId){
  const {task}=await api('/api/tasks',{...input,title:'普通流程回归'});const {run:manual}=await api(`/api/tasks/${task.id}/run`,{});evidence.manualRunId=manual.id;
  await waitRun(manual.id);await page.goto(origin+`/runs/${manual.id}`);await page.locator('[data-open-completion-confirm]').click();await page.locator('#ack-completion').check();await page.locator('#confirm-completion').click();await page.locator('#modal-backdrop.open').waitFor({state:'hidden'});assert.equal((await api(`/api/runs/${manual.id}/workspace`)).run.status,'completed');
  }
- const {automation}=evidence.automationId?await api(`/api/automations/${evidence.automationId}`):await api('/api/automations',{...input,cron:'* * * * *',timeZone:'Asia/Shanghai',enabled:true});evidence.automationId=automation.id;
+ const {automation}=evidence.automationId?await api(`/api/automations/${evidence.automationId}`):await api('/api/automations',{...input,cron:'* * * * *',enabled:true});evidence.automationId=automation.id;
  let record;
  for(let i=0;i<45;i++){const result=await api(`/api/automations/${automation.id}/triggers`);record=result.items.find(item=>evidence.firstRunId?item.runId===evidence.firstRunId:item.runId);if(record)break;await new Promise(r=>setTimeout(r,2000));}
  assert.ok(record?.runId,'real timer generated a run');assert.equal(record.source,'schedule');evidence.firstRunId=record.runId;

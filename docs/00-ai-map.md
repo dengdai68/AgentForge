@@ -176,3 +176,7 @@ Runtime 启动恢复：local-cli/codex-app-server 在原生会话建立前识别
 发布上传恢复：`.github/workflows/recover-release-upload.yml` 在 GitHub runner 还原草稿中的原始安装包分片，校验操作者清单哈希、分片和原 SHA256SUMS，保留原源码提交和构建，成功后清理临时分片但不公开；契约见 docs/24。
 
 Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks members 同步认证 PUT。history 增加员工目录两工具。tests/task-members.test.mjs、scripts/test-issue3-ui.mjs、scripts/test-issue3-real.mjs 验证 Issue #3。
+
+自动化空态：web/automations.mjs 复用 directory-empty 标题＋说明结构，与其他目录页同高；搜索无匹配与尚未创建分别说明。
+
+当前任务/自动化默认流程为 Store 固定协作快照；可选模板协议见 docs/03、21、27。Provider 详细诊断在 local-cli 的 execution content，资料展示共享 web/communication.js 的 employeeDetailMarkup。

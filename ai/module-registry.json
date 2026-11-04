@@ -883,7 +883,7 @@
       "path": "server/runtime/",
       "kind": "runtime",
       "owner": "agent-runtime",
-      "purpose": "Launch/cancel local Claude Code (default) or Codex CLI, normalize JSONL into fixed summaries plus separately transported, bounded redacted public text/thinking/tool content; exclude prompts, raw stdout/stderr, signatures and provider session IDs from durable event payloads; preserve redacted original failures separately from retry eligibility, resume explicit member sessions, and strip Electron-only Node bootstrap settings plus the one-time setup secret before spawning a configured Provider. configuration.mjs manages private immutable MCP JSON, containment-checked Git plugin catalogs and status-only GitHub/GitLab HTTPS pull tokens; no domain writes.",
+      "purpose": "Launch/cancel local Claude Code (default) or Codex CLI, normalize JSONL into fixed summaries plus separately transported, bounded redacted public text/thinking/tool content; exclude prompts, raw stdout/stderr, signatures and provider session IDs from durable event payloads; preserve redacted original failures separately from retry eligibility, resume explicit member sessions, and strip Electron-only Node bootstrap settings plus the one-time setup secret before spawning a configured Provider. configuration.mjs manages private immutable MCP JSON, containment-checked Git plugin catalogs and status-only GitHub/GitLab HTTPS pull tokens; no domain writes. 仅提取脱敏诊断字段展示重试详情。",
       "sourceOfTruth": [
         "docs/15-employee-runtime-configuration.md",
         "docs/08-real-local-agent-runtime.md",
@@ -1455,7 +1455,7 @@
       "path": "server/automations.mjs",
       "kind": "domain-store",
       "owner": "server",
-      "purpose": "Store-owned automation configuration, filtered pagination, persistent trigger identity and atomic task creation/prior-run confirmation.",
+      "purpose": "Store-owned automation configuration, filtered pagination, persistent trigger identity and atomic task creation/prior-run confirmation. 使用当地 Cron 与可选流程模板，生成带日期名称的任务。",
       "sourceOfTruth": [
         "docs/27-automations.md"
       ],
@@ -1565,7 +1565,7 @@
       "path": "web/automations.mjs",
       "kind": "presentation",
       "owner": "client",
-      "purpose": "Paginated automation directory and trigger history; reuse task modal, shared workspace, tokens and navigation without client scheduling.",
+      "purpose": "Paginated automation directory and trigger history; reuse task modal, shared workspace, tokens and navigation without client scheduling. Empty lists share the directory-empty title and description structure with peer directories.",
       "sourceOfTruth": [
         "docs/27-automations.md"
       ],

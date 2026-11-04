@@ -285,7 +285,8 @@ process.exitCode=1;`);
       return true;
     });
     assert.ok(events.some((event) => event.message === "模型已更新执行进展"));
-    assert.doesNotMatch(JSON.stringify(events), /upstream service/);
+    assert.match(JSON.stringify(events.map(event=>event.content)), /upstream service/);
+    assert.doesNotMatch(JSON.stringify(events.map(event=>separateRuntimeSession(event).auditEvent)), /upstream service/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -493,3 +494,21 @@ if(!existsSync(${JSON.stringify(marker)})){const error=()=>${channel==='stderr'?
 });
 
 test("successful authentication diagnostics do not stop native startup",()=>{for(const text of ["authentication initialized", "authentication status: success", "using cached authentication"])assert.equal(runtimeAuthenticationFailure(text),false);});
+
+test('Claude retry and stderr retain useful diagnostics without request bodies or credentials', async()=>{
+ const root=await mkdtemp(join(tmpdir(),'af-retry-detail-'));
+ try{
+  const executable=join(root,'fixture.mjs'),events=[];
+  await writeFile(executable,`#!/usr/bin/env node
+console.log(JSON.stringify({type:'system',subtype:'api_retry',attempt:2,max_retries:10,retry_delay_ms:30000,error_status:429,error:{type:'rate_limit_error',message:'quota exceeded',request_id:'req-diagnostic',details:{messages:'PRIVATE_REQUEST_BODY'},token:'SECRET_SENTINEL'}}));
+console.error('ECONNRESET SYSTEM_PROMPT_SENTINEL USER_PROMPT_SENTINEL Authorization: Bearer SECRET_SENTINEL');
+console.log(JSON.stringify({type:'result',subtype:'success',structured_output:{ok:true}}));`);
+  await chmod(executable,0o755);
+  const result=await runClaudeCodeCli({runtime:{executable},workspacePath:root,traceDirectory:root,prompt:'USER_PROMPT_SENTINEL',systemPrompt:'SYSTEM_PROMPT_SENTINEL',runId:randomUUID(),onEvent:async e=>events.push(e)});
+  assert.deepEqual(JSON.parse(result.finalText),{ok:true});
+  const detail=events.find(e=>e.data?.subtype==='api_retry').content.fields.text.text;
+  for(const fact of ['429','30000','quota exceeded','rate_limit_error','req-diagnostic'])assert.ok(detail.includes(fact),fact);
+  const output=JSON.stringify(events.map(e=>e.content));assert.doesNotMatch(output,/PRIVATE_REQUEST_BODY|SECRET_SENTINEL|SYSTEM_PROMPT_SENTINEL|USER_PROMPT_SENTINEL/);
+  assert.ok(events.some(e=>e.providerEventType==='stderr'&&e.content));
+ }finally{await rm(root,{recursive:true,force:true});}
+});

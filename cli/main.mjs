@@ -122,7 +122,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
 
 const reference = (id, name) => id ? { id, name: name || null } : null;
 function taskView(task, { summary = false } = {}) {
-  const base = { id: task.id, title: task.title, status: task.status, workflow: reference(task.workflowTemplateId, task.workflowSnapshot?.name), memberCount: task.memberAgentIds?.length || (task.memberSnapshots?.length || 0) + (task.managerSnapshot ? 1 : 0), updatedAt: task.updatedAt, archivedAt: task.archivedAt };
+  const base = { id: task.id, title: task.title, status: task.status, workflow: {id: task.workflowTemplateId || null, name: task.workflowSnapshot?.name || "默认协作"}, memberCount: task.memberAgentIds?.length || (task.memberSnapshots?.length || 0) + (task.managerSnapshot ? 1 : 0), updatedAt: task.updatedAt, archivedAt: task.archivedAt };
   if (summary) return base;
   return { ...base, objective: task.objective, acceptanceCriteria: task.acceptanceCriteria,
     workspacePath: task.workspacePath,

@@ -104,11 +104,11 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     const top = list.scrollTop, height = list.scrollHeight;
     const messages = [...state.messages.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const html = messages.map((message) => {
-      const addressed = (message.mentionAgentIds || []).map(id => state.conversation.members.find(member => member.id === id)?.name).filter(Boolean);
+
       const attachments = (message.attachments || []).map(file => `<a class="communication-attachment" href="/api/communications/${encodeURIComponent(currentId)}/attachments/${encodeURIComponent(file.id)}" download="${escapeHtml(file.name)}" data-attachment-download><span aria-hidden="true">↧</span><span>${escapeHtml(file.name)}</span><small>${file.bytes} B</small></a>`).join('');
       const failed = [...state.deliveries.values()].filter(item => item.messageId === message.id && item.status === 'failed');
       const recovery = failed.map(item => `<div class="communication-recovery"><span>${escapeHtml(state.conversation.members.find(member=>member.id===item.agentId)?.name || '员工')} 回复失败</span><button type="button" class="text-action" data-chat-failure-console="${escapeHtml(item.agentId)}">查看控制台</button><button type="button" class="text-action" data-retry-chat-delivery="${escapeHtml(item.id)}">重试</button></div>`).join('');
-      return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header>${addressed.length ? `<small class="communication-addressed">→ ${escapeHtml(addressed.join("、"))}</small>` : ""}<div class="communication-body communication-markdown">${renderContent(message.content, (state.conversation?.members || []).map(member => member.name))}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}${recovery}</article>`;
+      return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header><div class="communication-body communication-markdown">${renderContent(message.content, (state.conversation?.members || []).map(member => member.name))}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}${recovery}</article>`;
     }).join("") || `<div class="communication-empty">${state.latestError ? "聊天记录读取失败，正在重连。" : state.loaded ? "从一句话开始沟通。消息将持续保留。" : "正在读取聊天记录…"}</div>`;
     if (list.innerHTML !== html) {
       list.innerHTML = html;
@@ -443,8 +443,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   function renderMemberDetail(memberId, focus = false) {
     const member = view(currentId).conversation?.members?.find(row => row.id === memberId), panel = query('.communication-member-detail');
     if (!member) { if (panel.open) panel.close(); return; }
-    const roles = member.roles || [];
-    const html = `<header><strong>员工详细信息</strong><button type="button" class="text-action" data-close-member-detail aria-label="关闭员工详情">×</button></header><dl><dt>名称</dt><dd>${escapeHtml(member.name)}</dd><dt>角色</dt><dd>${roles.map(role=>escapeHtml(role.name)).join('、') || '未绑定'}</dd><dt>提示词</dt><dd class="communication-member-prompt">${escapeHtml(member.systemPrompt || '未填写')}${roles.map(role=>`<h4>${escapeHtml(role.name)}</h4>${escapeHtml(role.prompt)}`).join('')}</dd><dt>能力与简介</dt><dd>${escapeHtml((member.capabilities || []).join('、'))}<p>${escapeHtml(member.description || '未填写')}</p></dd></dl>`;
+    const html = `<header><strong>员工详细信息</strong><button type="button" class="text-action" data-close-member-detail aria-label="关闭员工详情">×</button></header>${employeeDetailMarkup(member,{renderAvatar})}`;
     if (panel.innerHTML !== html) panel.innerHTML = html;
     panel.dataset.memberId = memberId;
     panel.querySelector('[data-close-member-detail]').onclick = () => panel.close();
@@ -507,4 +506,9 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     },
     unmount() { for(const state of views.values()){state.consoleOpen=false;state.consoleRequest=null;} clearInterval(timer); timer = null; closeFloatingLists(host); host = null; currentId = null; generation++; }
   };
+}
+
+export function employeeDetailMarkup(member, {renderAvatar = () => ''} = {}) {
+  const roles=member.roles || member.roleSnapshots || [];
+  return `<section class="employee-profile"><header class="employee-profile-identity">${renderAvatar(member)}<div><h3>${escapeHtml(member.name)}</h3><span class="employee-profile-kind">${member.kind==='manager'?'项目经理':'数字员工'}</span></div></header><p class="employee-profile-description">${escapeHtml(member.description || '暂无简介')}</p>${member.capabilities?.length?`<div class="employee-profile-tags">${member.capabilities.map(value=>`<span>${escapeHtml(value)}</span>`).join('')}</div>`:''}<section class="employee-profile-section"><h4>角色</h4><div class="employee-profile-tags">${roles.length?roles.map(role=>`<span>${escapeHtml(role.name)}</span>`).join(''):'<span>未绑定角色</span>'}</div></section><section class="employee-profile-section"><h4>工作提示词</h4><details class="employee-profile-prompt"><summary>员工提示词</summary><pre>${escapeHtml(member.systemPrompt || '未填写')}</pre></details>${roles.map(role=>`<details class="employee-profile-prompt"><summary>${escapeHtml(role.name)}</summary><pre>${escapeHtml(role.prompt || '未填写')}</pre></details>`).join('')}</section></section>`;
 }

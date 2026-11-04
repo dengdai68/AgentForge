@@ -646,7 +646,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     updateRunMembers(runId, input = {}) {
       return this.transaction(() => {
         const current=getRun(runId), task=getTask(current?.taskId);
-        if(!current || task.archivedAt || ["completed","cancelled","failed","awaiting_acceptance"].includes(current.status)) throw new Error("当前任务状态不允许修改成员");
+        if(!current || task.archivedAt || ["completed","cancelled"].includes(current.status)) throw new Error("当前任务状态不允许修改成员");
         if(!input || Object.keys(input).some(key=>key!=="memberAgentIds") || !Array.isArray(input.memberAgentIds) || new Set(input.memberAgentIds).size!==input.memberAgentIds.length || input.memberAgentIds.some(id=>typeof id!=="string"))throw new Error("请提供不重复的 memberAgentIds 数组");
         const selected=input.memberAgentIds.map(agentId => agentId === current.manager.sourceAgentId ? current.manager.id : agentId);
         if(new Set(selected).size!==selected.length)throw new Error("请勿重复选择同一员工");
@@ -791,7 +791,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       delete current.repository;
       if (input.kind) current.kind = input.kind;
       if (input.systemPrompt !== undefined) current.systemPrompt = String(input.systemPrompt).trim();
-      if (input.name) current.name = text(input.name, "数字员工名称");
+      if (input.name !== undefined) { current.name = text(input.name, "数字员工名称"); current.initials = Array.from(current.name).slice(0, 2).join("").toUpperCase(); }
       if (input.description !== undefined) current.description = input.description;
       if (input.capabilities) current.capabilities = input.capabilities;
       if (input.roleIds !== undefined) current.roleIds = assertRoleBindings(input.roleIds);
@@ -968,8 +968,10 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (managers.length !== 1) throw new Error("任务成员必须且只能包含一位可用项目经理");
       const managerAgentId = managers[0].id;
       if (members.some(member => !["business", "manager"].includes(member.kind))) throw new Error("任务成员含旧研发类型，请先编辑为普通员工");
-      const template = find(state.workflowTemplates, input.workflowTemplateId || state.workflowTemplates[0]?.id);
-      if (!template) throw new Error("任务需要可用工作流");
+      if (input.workflowTemplateId != null && typeof input.workflowTemplateId !== "string") throw new Error("工作流 ID 必须是字符串或 null");
+      const templateId = input.workflowTemplateId?.trim() || null;
+      const template = templateId ? find(state.workflowTemplates, templateId) : { id: null, name: "默认协作", description: "按任务目标和成员能力协作，由经理推进交接并提交验收。", nodes: [{ id: "delivery", title: "完成任务", staffingGuidance: "经理根据任务目标和成员能力安排执行，成员完成后明确交接；需要更多工作时继续协调，交付后提交验收。", deliverable: "完成用户要求，如实说明交付结果与尚未解决的问题。", artifactPaths: [], dependsOn: [], handoffFrom: [] }] };
+      if (!template) throw new Error("工作流不存在");
       const workspaceRoot = this.getWorkspaceSettings().workspaceRoot, taskId = "task_" + randomUUID();
       if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定");
       const workspacePath = workspaceRoot ? resolve(workspaceRoot, taskId) : text(input.workspacePath, "任务工作目录");

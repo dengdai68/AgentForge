@@ -12,7 +12,7 @@ await mkdir('.data',{recursive:true});
 const root=await mkdtemp(resolve('.data/automations-ui-')),home=join(root,'home'),data=join(root,'client');await mkdir(home,{recursive:true});
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('automation-qa',password);auth.close();
 const store=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});
-const input={title:'验收自动化',objective:'只用于隔离界面检查',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'0 9 * * 1-5',timeZone:'Asia/Shanghai',enabled:false};
+const input={title:'验收自动化',objective:'只用于隔离界面检查',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'0 9 * * 1-5',enabled:false};
 const automation=store.saveAutomation(input);const first=store.triggerAutomation(automation.id);assert.ok(first.runId,first.reason);store.requestHumanAcceptance(first.runId);
 store.updateAgent('agent_analyst',{status:'inactive'});for(let i=0;i<24;i++)store.triggerAutomation(automation.id);store.updateAgent('agent_analyst',{status:'active'});
 for(let i=0;i<24;i++)store.saveAutomation({...input,title:`分页自动化 ${i}`});
@@ -34,17 +34,24 @@ try {
     await page.goto(origin+'/settings/appearance');await page.locator(`[name=theme][value=${theme}]`).check();
     await page.goto(origin+'/automations');await page.locator('[data-auto-new]').click();const form=page.locator('#task-form');await form.waitFor();
     assert.equal(await form.locator('[name=priority]').count(),0);
+    assert.equal(await form.locator('[name=timeZone]').count(),0);assert.equal(await form.locator('[name=workflowTemplateId]').inputValue(),'');
     await form.locator('[name=title]').fill('自动化草稿');await form.locator('[name=objective]').fill('先保存规则，等待定时执行。');
     await form.locator('[name=cron]').fill('invalid');await page.locator('.automation-preview').filter({hasText:'Cron'}).waitFor();
-    await form.locator('[name=cron]').fill('0 9 * * 1-5');await page.locator('.automation-preview').filter({hasText:'接下来 5 次'}).waitFor();
+    await form.locator('[name=cron]').fill('0 9 * * 1-5');await page.locator('.automation-preview').filter({hasText:'下次执行：'}).waitFor();
+    const cronBox=await form.locator('[name=cron]').boundingBox(),previewBox=await form.locator('.automation-preview').boundingBox();assert.ok(previewBox.x>cronBox.x+cronBox.width,'preview follows input');assert.ok(Math.abs(previewBox.y-cronBox.y)<20,'preview stays inline');
     const box=await form.locator('[type=submit].primary-button').boundingBox();assert.ok(box.y>=0&&box.y+box.height<=height,'submit reachable');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.screenshot({path:join(root,`modal-${theme}-${width}.png`)});await form.getByRole('button',{name:'取消',exact:true}).click();
     await page.locator('.nav-item[data-view=tasks]').click();await page.locator('[data-action="new-task"]').click();assert.equal(await page.locator('.modal.automation-create-modal').count(),0);await page.locator('#task-form').getByRole('button',{name:'取消',exact:true}).click();await page.goto(origin+'/automations');await page.locator('[data-auto-new]').waitFor();
     await page.locator('[data-pagination=automations] [data-page="2"]').click();await page.locator('[data-pagination=automations]').filter({hasText:'2/2'}).waitFor();
     await page.goto(origin+`/automations/${automation.id}`);await page.locator('[data-pagination=automation-triggers]').waitFor();
+    assert.equal(await page.locator('#automation-record-filter [type=submit]').count(),0);
+    await page.locator('#automation-record-filter [name=status]').selectOption('skipped');await page.waitForFunction(()=>!document.querySelector('[data-auto-run]'));
+    await page.locator('#automation-record-filter [name=status]').selectOption('all');await page.locator('[data-pagination=automation-triggers]').waitFor();
+    await page.locator('[data-auto-tab=config]').click();await page.locator('.automation-config-members').waitFor();assert.notEqual(await page.locator('.automation-config-member .agent-card-avatar').first().evaluate(n=>getComputedStyle(n).backgroundColor),'rgba(0, 0, 0, 0)');await page.screenshot({path:join(root,`config-${theme}-${width}.png`)});await page.locator('[data-auto-tab=records]').click();await page.locator('[data-pagination=automation-triggers]').waitFor();
     const tabStyle=await page.locator('[data-auto-tab=records]').evaluate(el=>{const s=getComputedStyle(el);return {color:s.color,border:s.borderBottomWidth,background:s.backgroundColor};});assert.equal(tabStyle.border,'2px');assert.equal(tabStyle.background,'rgba(0, 0, 0, 0)');
     await page.locator('[data-pagination=automation-triggers] [data-page="2"]').click();await page.locator('[data-auto-run]').click();await page.locator('#collaboration-panel').waitFor();
+    if(await page.locator('#workspace-details').isHidden())await page.locator('[data-toggle-task-details]').click();await page.locator('[data-task-member-detail]').first().click();await page.locator('.employee-profile').waitFor();await page.screenshot({path:join(root,`employee-${theme}-${width}.png`)});await page.locator('[data-close-modal]').last().click();
     assert.equal(await page.locator('#instruction-form').count(),0);assert.equal(await page.getByRole('button',{name:'涉及人类',exact:true}).count(),0);
     await page.getByRole('tab',{name:'控制台',exact:true}).click();await page.locator('#console-panel').waitFor();await page.getByRole('tab',{name:'协作记录',exact:true}).click();
     await page.getByRole('button',{name:'返回触发记录',exact:true}).click();await page.locator('[data-pagination=automation-triggers]').filter({hasText:'2/2'}).waitFor();
@@ -58,8 +65,11 @@ try {
   const createForm=page.locator('#task-form');await createForm.locator('[name=title]').fill('App 新建自动化');await createForm.locator('[name=objective]').fill('保存输入与选择，不执行模型');
   for(const [id,name] of [['system_project_manager','项目经理'],['agent_analyst','内容编辑']]){await createForm.locator('#task-members').fill(name);await createForm.locator(`[data-add-extension="${id}"]`).click();}
   await createForm.locator('#task-members').press('Escape');await createForm.getByRole('button',{name:'保存为停用',exact:true}).click();await page.locator('#modal-backdrop.open').waitFor({state:'hidden'});
-  const saved=await cli('list','--search','App 新建自动化');assert.equal(saved.data.items.length,1);assert.equal(saved.data.items[0].enabled,false);await cli('delete',saved.data.items[0].id,'--yes');
-  const file=join(root,'create.json');await writeFile(file,JSON.stringify({...input,title:'CLI 创建自动化'}));const created=await cli('create','--file',file);assert.ok(created.ok);
+  const saved=await cli('list','--search','App 新建自动化');assert.equal(saved.data.items.length,1);assert.equal(saved.data.items[0].enabled,false);assert.equal((await cli('get',saved.data.items[0].id)).data.automation.workflowTemplateId,null);await cli('delete',saved.data.items[0].id,'--yes');
+  const file=join(root,'create.json');
+  for(const workflowTemplateId of [undefined,null,'']){await writeFile(file,JSON.stringify({title:'CLI 默认协作',objective:'无需模板',memberAgentIds:input.memberAgentIds,workflowTemplateId}));const result=JSON.parse((await promisify(execFile)(process.execPath,[resolve('cli/main.mjs'),'tasks','create','--file',file,'--endpoint-file',join(data,'desktop-endpoint.json'),'--json'],{env:{...process.env,HOME:home}})).stdout);const detail=JSON.parse((await promisify(execFile)(process.execPath,[resolve('cli/main.mjs'),'tasks','get',result.data.task.id,'--endpoint-file',join(data,'desktop-endpoint.json'),'--json'],{env:{...process.env,HOME:home}})).stdout);assert.equal(detail.data.workflow.id,null);assert.equal(detail.data.workflow.name,'默认协作');}
+  await writeFile(file,JSON.stringify({...input,timeZone:'UTC'}));await assert.rejects(cli('create','--file',file));
+ await writeFile(file,JSON.stringify({...input,title:'CLI 创建自动化',workflowTemplateId:null}));const created=await cli('create','--file',file);assert.ok(created.ok);
   await page.goto(origin+`/automations/${created.data.automation.id}`);await page.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-form [name=title]').fill('App 编辑自动化');await page.getByRole('button',{name:'保存修改',exact:true}).click();await page.locator('.automation-heading h3').filter({hasText:'App 编辑自动化'}).waitFor();assert.equal((await cli('get',created.data.automation.id)).data.automation.title,'App 编辑自动化');
   await writeFile(file,JSON.stringify({enabled:false}));assert.ok((await cli('update',created.data.automation.id,'--file',file)).ok);assert.ok((await cli('delete',created.data.automation.id,'--yes')).ok);
   assert.deepEqual(errors,[]);evidence.passed=true;console.log('PASS '+root);

@@ -77,3 +77,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 Codex 在 Provider 确认 thread.started 之前出现明确鉴权/未登录错误时，JSONL 与 app-server 调用立即失败并释放进程；此时控制台没有原生会话 ID 是真实事实，不使用应用占位 ID 续接。JSONL 的连续错误事件计入有上限的重试等待，不会无限重置空闲计时。已确认会话的 Provider 原生恢复仍按最终成功/失败结算。登录修复后，手动重试启动新的 CLI 进程读取当前账号状态，无需删除员工；已有已确认会话继续原 ID。
 
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
+
+Provider 重试和错误的详细正文通过 execution content 保存：错误类别/信息、HTTP 状态、请求 ID、重试次数/上限/延迟与可用 stderr 错误行。只提取允许的诊断字段，不序列化请求或整个 Provider frame；系统与用户提示分别脱敏，凭据过滤继续生效。持久事件仅保留摘要，控制台按 contentRef 展开。Provider 未提供的信息及旧记录不能补造。

@@ -74,3 +74,5 @@ tasks progress 移除 openDefects；问题报告与处理反馈统一使用 task
 automations 新增 list/get/create/update/delete/trigger/triggers；列表与触发历史按页查询，--all 显式逐页读取，配置字段与 App 弹窗一致。update 支持 enabled 开关，历史只可停用；trigger 的失败/跳过回执不代表任务已启动。tasks list 仅普通任务；priority 已废弃，输入/schema/输出同步移除。
 
 任务成员查询/修改使用 tasks members TASK_ID，写入附 --file，完整成员列表含经理；App 编辑与 CLI 共用 Store 的状态、忙碌成员、唯一经理校验。团队创建支持 status，默认 active。
+
+tasks/automations create 的 workflowTemplateId 可省略、null 或空字符串；默认协作不会隐式选取目录模板。automations 输入移除 timeZone，按本机当地时间执行。tasks members 支持失败与待验收等非终结状态，仍保护经理和未结投递成员。

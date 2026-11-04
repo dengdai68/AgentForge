@@ -146,7 +146,7 @@ try{
   assert.equal(await page.locator('#agent-form [name=description]').inputValue(),'独立简介');assert.equal(await page.locator('#agent-form [name=capabilities]').inputValue(),'独立审片');
   await page.screenshot({path:join(root,`parity-agent-${theme}.png`)});await page.locator('#agent-form [type=submit]').click();await page.locator('#agent-form').waitFor({state:'detached'});
   const agent=await cli(['agents','get',worker.id]);assert.deepEqual(agent.capabilities,['独立审片']);assert.deepEqual(agent.roleIds,[role.id]);assert.equal((await cli(['agents','list','--search','独立审片'])).total,1);
-  await page.goto(origin+'/teams');await page.locator(`[data-edit-team="${uiTeam.id}"]`).click();await page.locator('#team-form [name=enabled]').uncheck();await page.screenshot({path:join(root,`parity-team-${theme}.png`)});await page.locator('#team-form [type=submit]').click();await page.locator('#team-form').waitFor({state:'detached'});
+  await page.goto(origin+'/teams');await page.locator(`[data-edit-team="${uiTeam.id}"]`).click();await page.locator('#team-form [name=status][value=inactive]').check();await page.screenshot({path:join(root,`parity-team-${theme}.png`)});await page.locator('#team-form [type=submit]').click();await page.locator('#team-form').waitFor({state:'detached'});
   assert.equal((await cli(['teams','get',uiTeam.id])).status,'inactive');await cli(['tasks','create','--file','-'],{...cliInput,teamIds:[uiTeam.id]},4);
   await cli(['teams','update',uiTeam.id,'--file','-'],{status:'active'});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);

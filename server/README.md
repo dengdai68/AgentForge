@@ -108,3 +108,5 @@ Codex 在 Provider 确认 thread.started 之前出现明确鉴权/未登录错�
 自动化配置和分页触发历史由 automations.mjs 提供 Store commands；automation-schedule.mjs 计算下一时间，automation-scheduler.mjs 10秒检测并异步执行。Task 来源冻结、人类路由门禁、前轮事务确认见 docs/27。普通任务优先级已移除。
 
 PUT /api/runs/:id/members 经认证交给 Store 更新当前成员投影，不隐式启动执行；冻结历史保留。communication-store 的成员 running 来自该会话全部运行中投递，不依赖消息分页。
+
+任务和自动化共用可选工作流语义：未选使用固定默认协作快照。自动化配置和预览接口拒绝 timeZone 输入，使用本机当地时区；生成标题带当地日期。Runtime 诊断正文保存在受认证内容通道，事件仅保留摘要。

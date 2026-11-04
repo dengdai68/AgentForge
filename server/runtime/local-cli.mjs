@@ -104,7 +104,8 @@ export function executionContent(fields, prompt = "") {
     let raw = typeof value === "string" ? value : JSON.stringify(value, (key, item) =>
       /password|secret|token|credential|private.?key|authorization|cookie|api.?key|session.?id|signature|encrypted|prompt/i.test(key) ? "[REDACTED]" : item, 2);
     if (!raw) continue;
-    if (prompt) {
+    for (const promptPart of (Array.isArray(prompt) ? prompt : [prompt]).filter(Boolean)) {
+      const prompt = promptPart;
       raw = raw.replaceAll(prompt, "[PROMPT REDACTED]").replaceAll(JSON.stringify(prompt).slice(1, -1), "[PROMPT REDACTED]");
       for (const line of prompt.split('\n').filter(line => line.length >= 80)) raw = raw.replaceAll(line, '[PROMPT EXCERPT REDACTED]');
     }
@@ -201,6 +202,21 @@ function claudeDetails(event) {
   return { block, toolResult, text, presentation };
 }
 
+// Preserve Provider diagnostic facts, never the complete request/frame.
+export function providerDiagnostic(event, provider) {
+  const fields = ['message', 'name', 'type', 'code', 'status', 'status_code', 'httpStatusCode', 'request_id', 'requestId', 'stack', 'additionalDetails', 'details'];
+  const errorDetail = (error, depth = 0) => {
+    if (typeof error === 'string') return error;
+    if (!error || typeof error !== 'object' || depth > 3) return undefined;
+    const result = Object.fromEntries(fields.filter(key => ['string', 'number', 'boolean'].includes(typeof error[key])).map(key => [key, error[key]]));
+    if (error.cause) result.cause = errorDetail(error.cause, depth + 1);
+    if (typeof error.codexErrorInfo === 'string') result.codexErrorInfo = error.codexErrorInfo;
+    else if (error.codexErrorInfo && typeof error.codexErrorInfo === 'object') result.codexErrorInfo = Object.fromEntries(Object.entries(error.codexErrorInfo).map(([key, value]) => [key, errorDetail(value, depth + 1)]).filter(([,value]) => value !== undefined));
+    return result;
+  };
+  return compact({ provider, event: event.subtype || event.type, attempt: event.attempt, maxRetries: event.max_retries, retryDelayMs: event.retry_delay_ms, httpStatus: event.error_status ?? event.status_code, error: errorDetail(event.error), message: typeof event.message === 'string' ? event.message : undefined, requestId: event.request_id || event.requestId, willRetry: event.willRetry, ...(event.error_status === null ? {connection: 'Provider 未返回 HTTP 响应'} : {}) });
+}
+
 function claudeEvent(event, prompt = "") {
   const { block, toolResult, presentation } = claudeDetails(event);
   const providerEventType = publicEventType(event.type, "claude.event");
@@ -210,7 +226,7 @@ function claudeEvent(event, prompt = "") {
     providerEventType,
     message: runtimeMessage({ providerEventType, presentation, subtype, failure }),
     data: compact({ auditVersion: 2, subtype, sessionId: sessionIdentifier(event.session_id), presentation, toolUseId: publicIdentifier(block?.id), toolResultId: publicIdentifier(toolResult?.tool_use_id), toolName: publicIdentifier(block?.name), status: block ? "running" : toolResult ? (toolResult.is_error ? "failed" : "completed") : undefined }),
-    content: claudeTerminalFailure(event) ? null : executionContent(block ? { input: block.input } : toolResult ? { output: contentText(toolResult.content) } : event.type === "assistant" ? { text: event.message?.content?.find?.(item => item.type === "text")?.text, thinking: event.message?.content?.find?.(item => item.type === "thinking")?.thinking } : {}, prompt)
+    content: subtype === "api_retry" || claudeTerminalFailure(event) || presentation === "error" ? executionContent({text:{...providerDiagnostic(event,"Claude Code"),...(claudeTerminalFailure(event)?{message:claudeTerminalFailure(event)}:{})}},prompt) : executionContent(block ? { input: block.input } : toolResult ? { output: contentText(toolResult.content) } : event.type === "assistant" ? { text: event.message?.content?.find?.(item => item.type === "text")?.text, thinking: event.message?.content?.find?.(item => item.type === "thinking")?.thinking } : {}, prompt)
   };
 }
 
@@ -246,7 +262,7 @@ async function verifyPaths(paths, label) {
   }
 }
 
-async function executeJsonl({ runId, executionKey = runId, command, args, cwd, env, onEvent, normalizeEvent, getFinal, getTerminalFailure = () => null, isBackgroundWaiting = () => false, provider, session, canStart = () => true, apiRetryTimeoutMs = 300000, idleTimeoutMs = 600000 }) {
+async function executeJsonl({ runId, executionKey = runId, command, args, cwd, env, onEvent, normalizeEvent, getFinal, getTerminalFailure = () => null, isBackgroundWaiting = () => false, provider, session, diagnosticPrompt = "", canStart = () => true, apiRetryTimeoutMs = 300000, idleTimeoutMs = 600000 }) {
   let cancelled = false;
   let cancellationReason = null;
   let stderr = "";
@@ -301,7 +317,9 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
         diagnostic("provider.stderr", { text: line });
         stderr = `${stderr}${line}\n`.slice(-8000);
         if (provider === "Codex" && !sessionObserved && runtimeAuthenticationFailure(line)) stopForWatchdog(runtimeFailureDetail(line));
-        if (!stderrReported) {
+        if (/error|fail|retry|timeout|timed out|429|401|403|502|503|504|ECONN|ENOTFOUND/i.test(line)) {
+          await onEvent({providerEventType:"stderr",message:"Provider 诊断详情",data:{auditVersion:2,presentation:"error"},content:executionContent({text:{provider,channel:"stderr",message:line}}, diagnosticPrompt)});
+        } else if (!stderrReported) {
           stderrReported = true;
           await onEvent({ providerEventType: "stderr", message: "Provider 诊断输出已隐藏", data: { auditVersion: 2, presentation: "system" } });
         }
@@ -426,7 +444,7 @@ async function invokeClaudeCodeCli(input) {
   const backgroundTasks = new Set();
   return executeJsonl({
     runId, command: runtime.executable || "claude", args, cwd: workspacePath, env: cliEnvironment(runtime.executable || "claude", { ...connectionEnv, ...(input.historyMcp ? { MCP_TIMEOUT: process.env.MCP_TIMEOUT || "120000", MCP_CONNECT_TIMEOUT_MS: process.env.MCP_CONNECT_TIMEOUT_MS || "120000", MCP_CONNECTION_NONBLOCKING: "0", ENABLE_TOOL_SEARCH: process.env.ENABLE_TOOL_SEARCH || "false" } : {}), AGENTFORGE_TRACE_OUTPUT_DIR: `${traceDirectory}/output` }), provider: "Claude Code", apiRetryTimeoutMs, idleTimeoutMs,
-    onEvent, executionKey: input.executionKey, canStart: input.canStart, session: input.session,
+    onEvent, diagnosticPrompt: [input.systemPrompt, prompt].filter(Boolean), executionKey: input.executionKey, canStart: input.canStart, session: input.session,
     isBackgroundWaiting: () => turnComplete || backgroundTasks.size > 0,
     normalizeEvent: (event) => {
       if (event.type === "system" && event.subtype === "background_tasks_changed" && Array.isArray(event.tasks)) {
@@ -445,7 +463,7 @@ async function invokeClaudeCodeCli(input) {
       if (event.type === "stream_event" && event.event?.type === "content_block_delta") return null;
       if (event.type === "system" && event.subtype === "thinking_tokens") return null;
       if (event.type === "stream_event") return null;
-      const normalized = claudeEvent(event, [input.systemPrompt, prompt].filter(Boolean).join("\n"));
+      const normalized = claudeEvent(event, [input.systemPrompt, prompt].filter(Boolean));
       const failure = claudeTerminalFailure(event);
       if (failure) { terminalFailure = failure; recovered = false; }
       else if (event.type === "result" && event.subtype === "success" && !event.is_error) recovered = true;
@@ -519,8 +537,9 @@ async function invokeCodexCli(input) {
   const toolInputs = new Map();
   const transport = {
     runId, command: runtime.executable || "codex", args, cwd: workspacePath, env: cliEnvironment(runtime.executable || "codex", { AGENTFORGE_TRACE_OUTPUT_DIR: `${traceDirectory}/output` }), provider: "Codex",
-    onEvent, executionKey: input.executionKey, canStart: input.canStart, session: input.session, apiRetryTimeoutMs: input.apiRetryTimeoutMs, idleTimeoutMs: input.idleTimeoutMs,
+    onEvent, diagnosticPrompt: [input.systemPrompt, prompt].filter(Boolean), executionKey: input.executionKey, canStart: input.canStart, session: input.session, apiRetryTimeoutMs: input.apiRetryTimeoutMs, idleTimeoutMs: input.idleTimeoutMs,
     normalizeEvent(event) {
+      if (event.type === "stderr") return {providerEventType:"stderr",message:"Provider 诊断详情",data:{auditVersion:2,presentation:"error"},content:executionContent({text:providerDiagnostic(event,"Codex")},[input.systemPrompt,prompt].filter(Boolean))};
       if (event.type === "item.updated") return null; // completed items carry the full public body
       if (event.type === "thread.started") {
         const sessionId = sessionIdentifier(event.thread_id);
@@ -547,7 +566,7 @@ async function invokeCodexCli(input) {
         providerEventType,
         message: runtimeMessage({ providerEventType, presentation, failure: rawFailure }),
         data: compact({ auditVersion: 2, presentation, toolName: tool ? publicIdentifier(item.tool || item.type) || "本机工具" : null, toolUseId: tool && !completed ? publicIdentifier(item.id) : null, toolResultId: tool && completed ? publicIdentifier(item.id) : null, status: tool ? (item.status === "failed" || (Number.isInteger(item.exit_code) && item.exit_code !== 0) ? "failed" : completed ? "completed" : "running") : undefined }),
-        content: executionContent(tool ? { input: toolInput, output: completed ? item.aggregated_output ?? item.result ?? item.error : null } : completed && item.type === "agent_message" ? { text: item.text } : completed && item.type === "reasoning" ? { thinking: item.text } : {}, [input.systemPrompt, prompt].filter(Boolean).join("\n"))
+        content: executionContent(rawFailure ? {text:providerDiagnostic(event,"Codex")} : tool ? { input: toolInput, output: completed ? item.aggregated_output ?? item.result ?? item.error : null } : completed && item.type === "agent_message" ? { text: item.text } : completed && item.type === "reasoning" ? { thinking: item.text } : {}, [input.systemPrompt, prompt].filter(Boolean))
       };
     },
     getTerminalFailure: exit => exit.code === 0 && recovered ? null : terminalFailure,

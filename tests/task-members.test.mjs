@@ -22,7 +22,9 @@ test('membership edits retain frozen records, reject busy removal and keep the m
   assert.doesNotThrow(()=>store.getConsoleEvents(run.id,{agentId:'agent_analyst',traceId:t.id}));
   assert.throws(()=>store.submitHumanMessage(run.id,{recipientAgentId:'agent_analyst',content:'不可投递'}),/不属于/);
   store.updateRunMembers(run.id,{memberAgentIds:result.memberAgentIds});assert.equal(store.getRun(run.id).participants.filter(a=>a.id==='agent_analyst').length,1);
-  store.updateRun(run.id,{status:'failed'});assert.throws(()=>store.updateRunMembers(run.id,{memberAgentIds:ids}),/状态/);
+  store.updateRun(run.id,{status:'failed'});assert.doesNotThrow(()=>store.updateRunMembers(run.id,{memberAgentIds:ids}));
+  store.updateRun(run.id,{status:'running'});store.requestHumanAcceptance(run.id);assert.doesNotThrow(()=>store.updateRunMembers(run.id,{memberAgentIds:[...ids,newMember.id]}));
+  store.confirmRunCompletion(run.id);assert.throws(()=>store.updateRunMembers(run.id,{memberAgentIds:ids}),/状态/);
  }finally{store.close();}
 });
 test('employee MCP directory shares CLI catalog, paginates and rejects foreign identity and mutation',()=>{

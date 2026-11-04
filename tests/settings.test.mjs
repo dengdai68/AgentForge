@@ -142,7 +142,7 @@ test("team edits preserve inactive members and allow an empty manager-free roste
   const controller=source.slice(source.indexOf('function teamModal('),source.indexOf('const newTeamModal ='));
   const agents=[{id:'active',status:'active',kind:'business',name:'员工'},{id:'inactive',status:'inactive',kind:'business',name:'停用员工'}];
   const handlers={},calls=[],errors=[];let selected=['active','inactive'],picker;
-  const form={name:{value:'更新团队名'},mission:{value:'使命'},elements:{enabled:{checked:false}},closest:()=>({classList:{add(){}}}),addEventListener:(name,handler)=>{handlers[name]=handler;}};
+  const form={name:{value:'更新团队名'},mission:{value:'使命'},elements:{status:{value:'inactive'}},closest:()=>({classList:{add(){}}}),addEventListener:(name,handler)=>{handlers[name]=handler;}};
   const context={state:{agents},esc:String,openModal(){},$:selector=>selector==='#team-form'?form:{},createEmployeeMultiSelect:(host,options)=>{picker=options;return{value:()=>selected};},clearInvalid(){},setInvalid:(field,error)=>errors.push(error),api:async(path,options)=>calls.push({path,input:JSON.parse(options.body)}),closeModal(){},toast(){},refresh:async()=>{}};
   vm.runInNewContext(`${controller};teamModal({id:'team',memberAgentIds:['active','inactive']});`,context);
   assert.deepEqual(Array.from(picker.selectedIds),['active','inactive']);assert.equal(picker.items,agents);

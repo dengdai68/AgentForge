@@ -122,3 +122,5 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 自动化新增 Automation 与 AutomationTrigger 元数据集合。Task.kind=automation 冻结 automationId/automationTriggerId/automationVersion；普通任务为 manual（历史未设置视为普通）。自动化每轮独立工作目录/会话/快照，无 human participant，不允许人类消息、澄清或交接；经理交付后 awaiting_acceptance，下一轮实际创建成功的同一事务自动确认，confirmedBy=automation 并关联 confirmedByTriggerId。错误/暂停/取消不自动确认。普通任务的人类最终验收不变。任务优先级输入已废弃，明确拒绝，当前读模型不展示；旧冻结事实不重写，不要求重置真实数据。详见 [自动化](27-automations.md)。
 
 运行中成员由 Run.participants 冻结快照与 removedParticipantIds 投影；添加成员冻结当前配置，移除不删除历史，重新加入复用原快照。必须保留当前经理；经理原始员工 ID 在写入口映射为 Run 身份，映射后拒绝重复。执行中、待投递或等待回复的成员不能移除。失败、已结束及待验收 Run 不允许编辑。成员变化仅产生审计事件，不插入协作消息。待人类澄清时仅接受精确 replyToMessageId 回复，拒绝新指令。
+
+工作流选择可省略、null 或空字符串；Task 保存 workflowTemplateId=null 与固定“默认协作”单节点 delivery 快照，经理按目标协调，普通/自动化沿用各自人类边界。不从目录隐式选模板。非终结 Run（包括失败、待验收）可修改成员，但归档、完成、取消拒绝；经理和未结投递成员不可移除。员工改名同步当前 initials，已冻结成员身份不回写。

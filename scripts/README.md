@@ -138,7 +138,7 @@ NAS 冷启动可用 `AGENTFORGE_TEST_STARTUP_TIMEOUT_MS=180000` 为两项隔离�
 
 test-automations.mjs 在隔离 Electron 验证自动化弹窗、两主题宽窄/短屏、服务端两级分页、普通任务隔离、完整工作区往返及 CLI 配置往返；不调用 Provider。AGENTFORGE_AUTOMATIONS_REAL=1 node scripts/test-automations-real.mjs 使用已有 Claude 登录，在隔离 HOME/数据中执行普通任务到界面人工确认，以及真正定时触发和下一轮自动确认；不修改操作者实例。
 
-自动化真实验收遇到 Provider 延迟时，可用 AGENTFORGE_AUTOMATIONS_RESUME 指向本脚本已有的 .data/automations-real-* 目录续验已创建的自动化；使用同一冻结 Run/会话，不重建任务或复制凭据，等待上限为每轮十五分钟。
+自动化真实验收遇到 Provider 延迟时，可用 AGENTFORGE_AUTOMATIONS_RESUME 指向本脚本已有的 .data/automations-real-* 目录续验已创建的自动化；使用同一冻结 Run/会话，不重建任务或复制凭据，等待上限为每轮十五分钟。可用 AGENTFORGE_AUTOMATIONS_PROVIDER=codex 选择 Codex；默认任务和自动化均不选流程模板。若已有轮次因外部错误失败，另显式设置 AGENTFORGE_AUTOMATIONS_RETRY=1，通过客户端恢复按钮续跑原会话（每轮最多一次），并检查失败状态仍可编辑成员。不要与高并发全量测试同时运行真实模型验收。
 
 自动化真实验收可设置 AGENTFORGE_AUTOMATIONS_PROVIDER=codex；默认 claude-code。只切换隔离实例的员工 Runtime，不改变操作者配置；默认模型可通过 AGENTFORGE_AUTOMATIONS_MODEL 指定。
 

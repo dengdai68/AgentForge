@@ -493,7 +493,8 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   }
   if (pathname === "/api/automations/preview" && request.method === "POST") {
     const input = await readJson(request);
-    sendJson(response, 200, { times: previewSchedule(input.cron, input.timeZone) }); return true;
+    if (Object.keys(input).some(key => key !== "cron")) throw new Error("只接受 cron，自动使用本机时区");
+    sendJson(response, 200, { times: previewSchedule(input.cron) }); return true;
   }
   if (pathname === "/api/automations" && request.method === "GET") {
     sendJson(response, 200, store.listAutomations(Object.fromEntries(searchParams))); return true;

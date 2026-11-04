@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { previewSchedule } from './automation-schedule.mjs';
+import { previewSchedule, localTimeZone } from './automation-schedule.mjs';
 
 const clone = value => structuredClone(value);
 const active = new Set(['planning', 'running', 'review', 'awaiting_human', 'paused']);
-const fields = new Set(['title', 'objective', 'memberAgentIds', 'teamIds', 'workflowTemplateId', 'acceptanceCriteria', 'cron', 'timeZone', 'enabled']);
+const fields = new Set(['title', 'objective', 'memberAgentIds', 'teamIds', 'workflowTemplateId', 'acceptanceCriteria', 'cron', 'enabled']);
 function pageOf(items, query = {}) {
   const pageSize = Number(query.pageSize ?? 20), requested = Number(query.page ?? 1);
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100 || !Number.isInteger(requested) || requested < 1) throw new Error('分页参数无效');
@@ -43,7 +43,7 @@ export function automationCommands(state) {
       if (previous && Object.keys(input).length === 1 && input.enabled === false) return this.transaction(() => { previous.enabled=false; previous.nextTriggerAt=null; previous.updatedAt=at.toISOString(); previous.version++; this.addEvent({type:'automation.saved',message:'自动化已停用',data:{automationId}}); return view(previous); });
       const next = { ...(previous || {}), ...input };
       if (next.enabled !== undefined && typeof next.enabled !== 'boolean') throw new Error('enabled 必须是布尔值');
-      if (typeof next.workflowTemplateId !== "string" || !next.workflowTemplateId.trim()) throw new Error("请选择工作流");
+      next.timeZone = localTimeZone();
       const times = previewSchedule(next.cron, next.timeZone, at);
       const task = this.buildTask({ title: next.title, objective: next.objective, memberAgentIds: next.memberAgentIds, teamIds: input.teamIds, workflowTemplateId: next.workflowTemplateId, acceptanceCriteria: next.acceptanceCriteria });
       return this.transaction(() => {
@@ -76,7 +76,7 @@ export function automationCommands(state) {
       }
       try {
         return this.transaction(() => {
-          const task = this.createTask({ title: item.title, objective: item.objective, memberAgentIds: item.memberAgentIds, workflowTemplateId: item.workflowTemplateId, acceptanceCriteria: item.acceptanceCriteria });
+          const task = this.createTask({ title: item.title + "（" + new Intl.DateTimeFormat("en-CA", {timeZone:item.timeZone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(plannedAt || at)) + "）", objective: item.objective, memberAgentIds: item.memberAgentIds, workflowTemplateId: item.workflowTemplateId, acceptanceCriteria: item.acceptanceCriteria });
           Object.assign(state.tasks.find(value => value.id === task.id), { kind: 'automation', automationId: id, automationTriggerId: record.id, automationVersion: item.version });
           const run = this.createRun(task.id); record.taskId = task.id; record.runId = run.id;
           for (const previous of state.runs.filter(value => value.id !== run.id && value.status === 'awaiting_acceptance' && state.tasks.find(task => task.id === value.taskId)?.automationId === id)) {

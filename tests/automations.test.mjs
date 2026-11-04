@@ -9,7 +9,7 @@ import { createAutomationScheduler } from '../server/automation-scheduler.mjs';
 import { taskPrompt } from '../server/prompts.mjs';
 function setup() {
   const store=createStore({workspaceRoot:'/tmp/automation-unit-work'});
-  const input={title:'自动简报',objective:'完成简报',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'* * * * *',timeZone:'Asia/Shanghai'};
+  const input={title:'自动简报',objective:'完成简报',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'* * * * *'};
   const at=new Date('2026-11-04T00:00:00Z');
   return {store,input,at,automation:store.saveAutomation(input,null,at)};
 }
@@ -86,7 +86,7 @@ test('scheduler launches asynchronously and does not await provider',async()=>{
 test('reopened Store preserves occurrence key, configuration and next-run confirmation',()=>{
   const dir=mkdtempSync(join(tmpdir(),'af-auto-')),options={databasePath:join(dir,'state.sqlite'),workspaceRoot:join(dir,'work')};let store=createStore(options);
   try{
-    const auto=store.saveAutomation({title:'持久调度',objective:'验证',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'* * * * *',timeZone:'UTC'});
+    const auto=store.saveAutomation({title:'持久调度',objective:'验证',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'* * * * *'});
     const first=store.triggerAutomation(auto.id,{plannedAt:auto.nextTriggerAt,at:new Date(auto.nextTriggerAt)});store.requestHumanAcceptance(first.runId);store.close();store=createStore(options);
     assert.equal(store.triggerAutomation(auto.id,{plannedAt:auto.nextTriggerAt,at:new Date(auto.nextTriggerAt)}).id,first.id);
     const second=store.triggerAutomation(auto.id);assert.ok(second.runId);store.close();store=createStore(options);
@@ -100,5 +100,30 @@ test('pending traces prevent next-run confirmation; failed retries cannot overla
     assert.equal(store.triggerAutomation(automation.id).outcome,'skipped');assert.equal(store.getRun(run.id).status,'awaiting_acceptance');
     store.completeTrace(trace.id);store.updateRun(run.id,{status:'running'});store.failRun(run.id,'测试失败');
     const second=store.triggerAutomation(automation.id);assert.ok(second.runId);assert.throws(()=>store.retryFailedOrchestration(run.id),/其他轮次/);assert.equal(store.getRun(run.id).status,'failed');
+  }finally{store.close();}
+});
+
+test('optional workflows use a fixed snapshot, and automation uses local time and dated names',()=>{
+  const {store,input,at}=setup();try{
+    for(const workflowTemplateId of [undefined,null,'']){
+      const task=store.createTask({...input,workflowTemplateId});
+      assert.equal(task.workflowTemplateId,null);assert.equal(task.workflowSnapshot.name,'默认协作');assert.equal(task.workflowSnapshot.nodes[0].id,'delivery');
+      assert.equal(store.createRun(task.id).status,'running');
+    }
+    assert.throws(()=>store.createTask({...input,workflowTemplateId:'missing'}),/工作流/);
+    assert.throws(()=>store.createTask({...input,workflowTemplateId:42}),/工作流/);
+    assert.throws(()=>store.saveAutomation({...input,timeZone:'UTC'}),/字段/);
+    const automation=store.saveAutomation({...input,workflowTemplateId:null},null,at);
+    assert.equal(automation.timeZone,Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const record=store.triggerAutomation(automation.id,{at});assert.ok(record.runId,record.reason);
+    const task=store.getRunTask(record.runId);
+    const date=new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(at);
+    assert.equal(task.title,`${input.title}（${date}）`);assert.equal(task.workflowTemplateId,null);
+    const original=store.getRun(record.runId).participants.find(p=>p.id==='agent_analyst');
+    assert.ok(original);
+    const renamed=store.updateAgent('agent_analyst',{name:'新员工名字'});assert.equal(renamed.initials,'新员');
+    assert.deepEqual(store.getRun(record.runId).participants.find(p=>p.id==='agent_analyst'),original);
+    for(const template of store.listWorkflowTemplates())store.deleteWorkflowTemplate(template.id);
+    assert.equal(store.createTask({...input,workflowTemplateId:undefined}).workflowSnapshot.nodes[0].id,'delivery');
   }finally{store.close();}
 });

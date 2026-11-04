@@ -1,6 +1,6 @@
 import { createAutomationUI } from "./automations.mjs";
 import { disposeManualGraphs, disposeWorkflowGraphs, fitManualGraph, mountManualGraph, mountWorkflowGraph, zoomManualGraph } from "./manual-graphs.mjs";
-import { createCommunicationUI, formatCommunicationContent, memberMentionMarkup } from "./communication.js";
+import { createCommunicationUI, formatCommunicationContent, memberMentionMarkup, employeeDetailMarkup } from "./communication.js";
 import { applyPreferences, normalizePreferences, PREFERENCES_KEY, readPreferences, savePreferences } from "./preferences.mjs";
 import { createSettingsUI } from "./settings.mjs";
 import { createMarketplaceUI, createMcpMarketplaceUI, createEmployeeMultiSelect } from "./marketplace.mjs";
@@ -114,7 +114,7 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const esc = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 const pill = (status) => `<span class="status-pill ${esc(status)}">${statusText[status] || status}</span>`;
 const roleColor = (agent) => `color-${agent?.color || "system"}`;
-const initialsOf = (agent) => agent?.initials || (agent?.name || "?").slice(0, 1);
+const initialsOf = (agent) => agent?.name ? Array.from(agent.name).slice(0, 2).join("").toUpperCase() : agent?.initials || "?";
 const workspaceSummary = (task = {}) => task.workspaceKind === "managed" ? "系统受管目录" : "既有工作目录";
 
 // Frozen user requirements remain visible at human confirmation.
@@ -201,7 +201,7 @@ function openModal(content) {
   modalCancel?.(); modalCancel = null;
   disposeWorkflowGraphs("details");
   closeFloatingLists($("#modal-content"));
-  $("#modal-content").closest(".modal")?.classList.remove("workflow-detail-modal", "workflow-editor-modal", "team-config-modal", "employee-config-modal", "extension-detail-modal", "task-create-modal", "automation-create-modal", "confirm-dialog");
+  $("#modal-content").closest(".modal")?.classList.remove("workflow-detail-modal", "workflow-editor-modal", "team-config-modal", "employee-config-modal", "employee-detail-modal", "extension-detail-modal", "task-create-modal", "automation-create-modal", "confirm-dialog");
   $("#modal-content").innerHTML = content;
   // Shared semantic grouping; Web keeps display:contents, desktop bounds body scrolling.
   const host = $("#modal-content"), container = host.querySelector(":scope > form") || host;
@@ -224,7 +224,7 @@ function closeModal() {
   if (resetRequestActive) return;
   disposeWorkflowGraphs("details");
   closeFloatingLists($("#modal-content"));
-  $("#modal-content").closest(".modal")?.classList.remove("workflow-detail-modal", "workflow-editor-modal", "team-config-modal", "employee-config-modal", "extension-detail-modal", "task-create-modal", "automation-create-modal", "confirm-dialog");
+  $("#modal-content").closest(".modal")?.classList.remove("workflow-detail-modal", "workflow-editor-modal", "team-config-modal", "employee-config-modal", "employee-detail-modal", "extension-detail-modal", "task-create-modal", "automation-create-modal", "confirm-dialog");
   $("#modal-backdrop").classList.remove("open");
   $("#modal-backdrop").classList.remove('form-modal-open');
   $("#modal-backdrop").setAttribute("aria-hidden", "true");
@@ -901,7 +901,7 @@ function workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, art
         <div><dt>交付快照</dt><dd>${artifactCount} 项</dd></div>
         ${run.task.kind === 'automation' ? `<div><dt>任务来源</dt><dd>自动化 · 配置 v${esc(run.task.automationVersion)}</dd></div>${run.confirmedBy ? `<div><dt>完成方式</dt><dd>${run.confirmedBy === 'automation' ? '自动确认' : '手动确认'} · ${exactTime(run.confirmedAt)}</dd></div>` : run.status === 'awaiting_acceptance' ? '<div><dt>验收安排</dt><dd>下一轮开始前自动确认，也可提前确认完成。</dd></div>' : ''}` : ''}
       </dl>
-      <section class="task-member-section"><header><h5>成员 · ${agents.length}</h5>${!run.task.archivedAt && !["completed","cancelled","failed","awaiting_acceptance"].includes(run.status) ? '<button class="text-action member-console-icon" data-edit-task-members aria-label="编辑任务成员" title="添加或移除成员"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>' : ''}</header><div class="task-member-list">${agents.map(agent=>`<div class="task-member-row"><button class="text-action task-member-identity" data-task-member-detail="${esc(agent.id)}" title="${esc(agent.name)}"><span class="role-avatar ${roleColor(agent)}">${esc(initialsOf(agent))}</span><span>${esc(agent.name)}</span></button>${roleExecutionStatus(run,workspace.traces,agent.id).active?'<span class="member-running-dot" role="status" aria-label="正在运行" title="正在运行"></span>':''}<button class="text-action member-console-icon" data-task-member-console="${esc(agent.id)}" aria-label="查看 ${esc(agent.name)} 的控制台" aria-pressed="${view.tab==='console'&&state.selectedAgentId===agent.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></svg></button></div>`).join('')}</div></section>
+      <section class="task-member-section"><header><h5>成员 · ${agents.length}</h5>${!run.task.archivedAt && !["completed","cancelled"].includes(run.status) ? '<button class="text-action member-console-icon" data-edit-task-members aria-label="编辑任务成员" title="添加或移除成员"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>' : ''}</header><div class="task-member-list">${agents.map(agent=>`<div class="task-member-row"><button class="text-action task-member-identity" data-task-member-detail="${esc(agent.id)}" title="${esc(agent.name)}"><span class="role-avatar ${roleColor(agent)}">${esc(initialsOf(agent))}</span><span>${esc(agent.name)}</span></button>${roleExecutionStatus(run,workspace.traces,agent.id).active?'<span class="member-running-dot" role="status" aria-label="正在运行" title="正在运行"></span>':''}<button class="text-action member-console-icon" data-task-member-console="${esc(agent.id)}" aria-label="查看 ${esc(agent.name)} 的控制台" aria-pressed="${view.tab==='console'&&state.selectedAgentId===agent.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></svg></button></div>`).join('')}</div></section>
       <section class="workspace-context">${taskDescriptionMarkup(run.task, view)}</section>
       <section class="workspace-directory-details" id="workspace-directory-details">${workspaceDirectoryDetails(run.task)}</section>
     </aside>`;
@@ -2065,7 +2065,6 @@ const pathList = (value) => String(value || "").split("\n").map((item) => item.t
 
 function newTaskModal({ automation = false, existing = null } = {}) {
   if (!state.agents.some(agent => agent.status === "active" && agent.kind === "manager")) { toast("请先创建或启用一位项目经理。", true); return; }
-  if (!state.workflowTemplates.length) { toast("还没有工作流：请先创建工作流。", true); return; }
   openModal(`
     <h2>${automation ? existing ? "编辑自动化" : "新建自动化" : "新建任务"}</h2>
     <form id="task-form" novalidate>
@@ -2077,12 +2076,12 @@ function newTaskModal({ automation = false, existing = null } = {}) {
         <div class="form-field"><label for="task-acceptance">验收标准（每行一条）</label>
           <textarea id="task-acceptance" name="acceptanceCriteria" rows="3" placeholder="每行填写一条，可留空"></textarea><div class="field-error"></div></div>
       </details>
-      ${automation ? `<div class="automation-schedule-fields"><div class="form-grid"><div class="form-field"><label for="automation-frequency">重复规则</label><select id="automation-frequency"><option value="weekdays">每个工作日</option><option value="daily">每天</option><option value="weekly">每周一</option><option value="custom">自定义 Cron</option></select></div><div class="form-field"><label for="automation-time">执行时间</label><input id="automation-time" type="time" value="09:00"></div></div><div class="form-grid"><div class="form-field"><label for="automation-cron">Cron · 分 时 日 月 周 <b>*</b></label><input id="automation-cron" name="cron" value="${esc(existing?.cron || '0 9 * * 1-5')}" placeholder="0 9 * * 1-5"><div class="field-error"></div></div><div class="form-field"><label for="automation-zone">时区 <b>*</b></label><input id="automation-zone" name="timeZone" value="${esc(existing?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone)}" list="automation-zones"><datalist id="automation-zones"><option value="Asia/Shanghai"><option value="UTC"><option value="America/New_York"><option value="Europe/London"></datalist><div class="field-error"></div></div></div><div class="automation-preview" aria-live="polite"></div><div class="field-hint">全自动协作；下一轮开始前自动确认上一轮待验收记录。</div></div>` : ''}
+      ${automation ? `<div class="automation-schedule-fields"><div class="form-grid"><div class="form-field"><label for="automation-frequency">重复规则</label><select id="automation-frequency"><option value="weekdays">每个工作日</option><option value="daily">每天</option><option value="weekly">每周一</option><option value="custom">自定义 Cron</option></select></div><div class="form-field"><label for="automation-time">执行时间</label><input id="automation-time" type="time" value="09:00"></div></div><div class="form-field"><label for="automation-cron">Cron · 分 时 日 月 周 <b>*</b></label><div class="automation-cron-row"><input id="automation-cron" name="cron" value="${esc(existing?.cron || '0 9 * * 1-5')}" placeholder="0 9 * * 1-5"><div class="automation-preview" aria-live="polite"></div></div><div class="field-error"></div></div><div class="field-hint">全自动协作；下一轮开始前自动确认上一轮待验收记录。</div></div>` : ''}
       <div class="form-actions task-form-footer">
         <div class="form-grid task-selectors">
           <div class="form-field"><div id="task-members-picker"></div><div class="field-error"></div></div>
-          <div class="form-field"><label for="task-workflow">流程模板 <b>*</b></label>
-            <select id="task-workflow" name="workflowTemplateId">${state.workflowTemplates.map((template) => `<option value="${template.id}">${esc(template.name)}</option>`).join("")}</select></div>
+          <div class="form-field"><label for="task-workflow">流程模板（选填）</label>
+            <select id="task-workflow" name="workflowTemplateId"><option value="">默认协作</option>${state.workflowTemplates.map((template) => `<option value="${template.id}">${esc(template.name)}</option>`).join("")}</select></div>
         </div>
         <small class="task-workspace-hint">系统工作根目录 ${esc(state.settings?.workspaceRoot || "/tmp/AgentForge")}/任务ID/RunID</small>
         <div class="task-submit-actions"><button type="button" class="ghost-button" data-close-modal>取消</button>${automation && !existing ? '<button type="submit" class="ghost-button" value="disabled">保存为停用</button>' : ''}<button type="submit" class="primary-button">${automation ? existing ? "保存修改" : "创建并启用" : "创建并开始"}</button></div>
@@ -2096,7 +2095,7 @@ function newTaskModal({ automation = false, existing = null } = {}) {
   let selectedMembers = existing?.memberAgentIds || [];
   const expandMembers = item => item.selectionKind === 'team' ? item.memberAgentIds.filter(value => candidates.some(agent => agent.id === value)) : [item.id];
   const memberSelection = createEmployeeMultiSelect($('#task-members-picker'), { selectedIds: selectedMembers, id: 'task-members', label: '任务成员 *', placeholder: '添加团队或数字员工', esc, items: [...teams, ...candidates], detail: item => `<small>${esc(item.selectionKind === 'team' ? item.description : item.kind === 'manager' ? '项目经理' : item.description || '数字员工')}</small>`, expand: expandMembers, preserveGroups: true, hideUnavailable: true, available: item => candidates.filter(agent => agent.kind === 'manager' && new Set([...selectedMembers, ...expandMembers(item)]).has(agent.id)).length <= 1, reason: () => '任务只允许一位项目经理，请单独添加该团队的其他员工', onChange: values => { selectedMembers = values; } });
-  if (existing) { form.elements.title.value=existing.title; form.elements.objective.value=existing.objective; form.elements.acceptanceCriteria.value=existing.acceptanceCriteria.join("\n"); form.elements.workflowTemplateId.value=existing.workflowTemplateId; }
+  if (existing) { form.elements.title.value=existing.title; form.elements.objective.value=existing.objective; form.elements.acceptanceCriteria.value=existing.acceptanceCriteria.join("\n"); form.elements.workflowTemplateId.value=existing.workflowTemplateId || ""; }
   let previewTicket=0, previewTimer;
   if (automation) {
     const frequency=form.querySelector('#automation-frequency'),time=form.querySelector('#automation-time');
@@ -2104,8 +2103,8 @@ function newTaskModal({ automation = false, existing = null } = {}) {
     infer();
     const applyPreset=()=>{time.disabled=frequency.value==='custom';if(time.disabled)return;const [hour,minute]=(time.value||'09:00').split(':').map(Number);form.elements.cron.value=`${minute} ${hour} * * ${{weekdays:'1-5',daily:'*',weekly:'1'}[frequency.value]}`;form.elements.cron.dispatchEvent(new Event('input'));};
     frequency.addEventListener('change',applyPreset);time.addEventListener('change',applyPreset);form.elements.cron.addEventListener('change',infer);
-    const preview=async()=>{ const ticket=++previewTicket; const target=form.querySelector('.automation-preview'); try { const data=await api('/api/automations/preview',{method:'POST',body:JSON.stringify({cron:form.elements.cron.value,timeZone:form.elements.timeZone.value})}); if(ticket===previewTicket && form.isConnected)target.textContent='接下来 5 次：'+data.times.map(value=>new Intl.DateTimeFormat('zh-CN',{timeZone:form.elements.timeZone.value,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value))).join(' · '); } catch(error) { if(ticket===previewTicket && form.isConnected)target.textContent=error.message; } };
-    for(const name of ['cron','timeZone'])form.elements[name].addEventListener('input',()=>{++previewTicket;clearTimeout(previewTimer);previewTimer=setTimeout(preview,300);});
+    const preview=async()=>{ const ticket=++previewTicket; const target=form.querySelector('.automation-preview'); try { const data=await api('/api/automations/preview',{method:'POST',body:JSON.stringify({cron:form.elements.cron.value})}); if(ticket===previewTicket && form.isConnected)target.textContent='下次执行：'+data.times.slice(0,1).map(value=>new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value))).join(' · '); } catch(error) { if(ticket===previewTicket && form.isConnected)target.textContent=error.message; } };
+    for(const name of ['cron'])form.elements[name].addEventListener('input',()=>{++previewTicket;clearTimeout(previewTimer);previewTimer=setTimeout(preview,300);});
     void preview();
   }
   form.addEventListener("submit", async (event) => {
@@ -2358,7 +2357,7 @@ function teamModal(existing = null) {
   openModal(`
     <h2>${existing ? "编辑团队" : "创建团队"}</h2>
     <form id="team-form" novalidate>
-      <div class="form-field"><label for="team-name">团队名称 <b>*</b></label><div class="team-name-row"><input id="team-name" name="name" value="${esc(existing?.name || "")}" placeholder="例如：产品交付组" /><label class="inline-check"><input type="checkbox" name="enabled" ${existing?.status !== "inactive" ? "checked" : ""}>可用</label></div><div class="field-error"></div></div>
+      <div class="employee-identity-row"><div class="form-field"><label for="team-name">团队名称 <b>*</b></label><input id="team-name" name="name" value="${esc(existing?.name || "")}" placeholder="例如：产品交付组" /><div class="field-error"></div></div><fieldset class="employee-status-choice"><legend>状态</legend><label><input type="radio" name="status" value="active" ${!existing || existing.status==='active'?'checked':''}>可用</label><label><input type="radio" name="status" value="inactive" ${existing?.status==='inactive'?'checked':''}>停用</label></fieldset></div>
       <div class="form-field"><label>团队使命</label><textarea name="mission">${esc(existing?.mission || "")}</textarea></div>
       <div class="form-field"><div id="team-members-picker"></div><div class="field-error"></div></div>
       <div class="form-actions"><button type="button" class="ghost-button" data-close-modal>取消</button><button type="submit" class="primary-button">${existing ? "保存修改" : "创建团队"}</button></div>
@@ -2369,7 +2368,7 @@ function teamModal(existing = null) {
     event.preventDefault(); clearInvalid(form);
     if (!form.name.value.trim()) { setInvalid(form.name, '请填写团队名称。'); return; }
     try {
-      await api(existing ? `/api/teams/${existing.id}` : '/api/teams', { method:existing ? 'PUT' : 'POST', body:JSON.stringify({name:form.name.value,mission:form.mission.value,memberAgentIds:selection.value(),status:form.elements.enabled.checked ? "active" : "inactive"}) });
+      await api(existing ? `/api/teams/${existing.id}` : '/api/teams', { method:existing ? 'PUT' : 'POST', body:JSON.stringify({name:form.name.value,mission:form.mission.value,memberAgentIds:selection.value(),status:form.elements.status.value}) });
       closeModal(); toast('团队已保存。'); await refresh();
     } catch(error) { toast(error.message,true); }
   });
@@ -2532,7 +2531,7 @@ document.addEventListener("click", (event) => {
   if ((target = el("[data-toggle-task-description]"))) { workspaceView().descriptionExpanded = !workspaceView().descriptionExpanded; return renderWorkspace(); }
   if ((target = el("[data-edit-task-members]"))) return editTaskMembers();
   if ((target = el("[data-task-member-console]"))) { state.selectedAgentId=target.dataset.taskMemberConsole;workspaceView().tab='console';workspaceView().jumpLatest=true;return renderWorkspace(); }
-  if ((target = el("[data-task-member-detail]"))) { const member=workspaceAgents(state.workspace,state.agents).find(a=>a.id===target.dataset.taskMemberDetail);if(member)openModal(`<h2>${esc(member.name)}</h2><p>${esc(member.description || '')}</p><div class="document">${esc(member.systemPrompt || '').replaceAll('\n','<br>')}</div><div class="form-actions"><button class="ghost-button" data-close-modal>关闭</button></div>`);return; }
+  if ((target = el("[data-task-member-detail]"))) { const member=workspaceAgents(state.workspace,state.agents).find(a=>a.id===target.dataset.taskMemberDetail);if(member){openModal(`<h2>员工详细信息</h2>${employeeDetailMarkup(member,{renderAvatar:agent=>`<span class="agent-card-avatar ${esc(roleColor(agent))}">${esc(initialsOf(agent))}</span>`})}<div class="form-actions"><button class="ghost-button" data-close-modal>关闭</button></div>`);$('#modal-content').closest('.modal').classList.add('employee-detail-modal');};return; }
   if ((target = el("[data-task-workflow-details]"))) return workflowDetails(state.workspace.run.task.workflowSnapshot, { frozen: true });
   if ((target = el("[data-ws-tab]"))) { workspaceView().jumpLatest = true; workspaceView().tab = target.dataset.wsTab; renderWorkspace(); if (target.dataset.wsTab === "diff" && workspaceView().changes && !workspaceView().changesLoading) return loadWorkingChanges(state.selectedRunId); if (target.dataset.wsTab === "directory" && workspaceView().directory && !workspaceView().directoryLoading) return loadWorkingDirectory(state.selectedRunId); return; }
   if ((target = el("[data-reload-workspace]"))) return loadWorkspace();
