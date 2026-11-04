@@ -21,7 +21,7 @@ store.close();
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
 const errors=[],evidence={root,cases:[]};
 try {
-  const page=await app.firstWindow();page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));await page.waitForURL(/^http:\/\/127\.0\.0\.1:/);const origin=new URL(page.url()).origin;
+  const page=await app.firstWindow({timeout:90000});page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));await page.waitForURL(/^http:\/\/127\.0\.0\.1:/);const origin=new URL(page.url()).origin;
   await page.goto(origin+'/login');await page.locator('#username').fill('automation-qa');await page.locator('#password').fill(password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.locator('#account-name').waitFor();
   const api=(path,body,method)=>page.evaluate(async({path,body,method})=>{const response=await fetch(path,{method:method||(body?'POST':'GET'),headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:response.status,data:await response.json()};},{path,body,method});
   assert.equal((await api('/api/health')).status,200);
@@ -32,7 +32,16 @@ try {
   for(const [theme,width,height] of [['minimal',1320,1000],['warm',760,760],['minimal',800,560]]){
     await app.evaluate(({BrowserWindow},{origin,width,height})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,height),{origin,width,height});await page.waitForFunction(({width,height})=>innerWidth===width&&innerHeight===height,{width,height});
     await page.goto(origin+'/settings/appearance');await page.locator(`[name=theme][value=${theme}]`).check();
-    await page.goto(origin+'/automations');await page.locator('[data-auto-new]').click();const form=page.locator('#task-form');await form.waitFor();
+    await page.goto(origin+'/agents');await page.locator('#agents-role-filter').waitFor();
+    const employeeControls = await page.locator('.directory-filter-toolbar').evaluate(el => { const a=el.querySelector('input').getBoundingClientRect(),b=el.querySelector('select').getBoundingClientRect();return {heightA:a.height,heightB:b.height,gap:b.x-a.right,y:a.y-b.y}; });
+    assert.equal(employeeControls.heightA,employeeControls.heightB);assert.equal(employeeControls.y,0);assert.ok(employeeControls.gap<=12);
+    await page.screenshot({path:join(root,`filters-${theme}-${width}.png`)});
+    await page.goto(origin+'/automations');await page.locator('[data-auto-new]').waitFor();
+    const controls=await page.locator('#automation-search').evaluate(el=>{const a=el.querySelector('input').getBoundingClientRect(),b=el.querySelector('select').getBoundingClientRect(),table=document.querySelector('[data-auto-results] .table-wrap').getBoundingClientRect();return {heightA:a.height,heightB:b.height,gap:b.x-a.right,tableGap:table.top-el.getBoundingClientRect().bottom};});
+    assert.equal(controls.heightA,controls.heightB);assert.ok(controls.gap<=12);assert.equal(controls.tableGap,8);
+    assert.equal(await page.locator('#automation-search button').count(),1);
+    await page.screenshot({path:join(root,`list-${theme}-${width}.png`)});
+    await page.locator('[data-auto-new]').click();const form=page.locator('#task-form');await form.waitFor();
     assert.equal(await form.locator('[name=priority]').count(),0);
     assert.equal(await form.locator('[name=timeZone]').count(),0);assert.equal(await form.locator('[name=workflowTemplateId]').inputValue(),'');
     await form.locator('[name=title]').fill('自动化草稿');await form.locator('[name=objective]').fill('先保存规则，等待定时执行。');
@@ -45,10 +54,10 @@ try {
     await page.locator('.nav-item[data-view=tasks]').click();await page.locator('[data-action="new-task"]').click();assert.equal(await page.locator('.modal.automation-create-modal').count(),0);await page.locator('#task-form').getByRole('button',{name:'取消',exact:true}).click();await page.goto(origin+'/automations');await page.locator('[data-auto-new]').waitFor();
     await page.locator('[data-pagination=automations] [data-page="2"]').click();await page.locator('[data-pagination=automations]').filter({hasText:'2/2'}).waitFor();
     await page.goto(origin+`/automations/${automation.id}`);await page.locator('[data-pagination=automation-triggers]').waitFor();
-    assert.equal(await page.locator('#automation-record-filter [type=submit]').count(),0);assert.ok(await page.locator('.topbar').isHidden());assert.ok(await page.locator('.automation-detail-header [data-auto-edit]').isVisible());
-    await page.locator('#automation-record-filter [name=status]').selectOption('skipped');await page.waitForFunction(()=>!document.querySelector('[data-auto-run]'));
-    await page.locator('#automation-record-filter [name=status]').selectOption('all');await page.locator('[data-pagination=automation-triggers]').waitFor();
-    await page.locator('[data-auto-tab=config]').click();await page.locator('.automation-config-members').waitFor();assert.notEqual(await page.locator('.automation-config-member .agent-card-avatar').first().evaluate(n=>getComputedStyle(n).backgroundColor),'rgba(0, 0, 0, 0)');await page.screenshot({path:join(root,`config-${theme}-${width}.png`)});await page.locator('[data-auto-tab=records]').click();await page.locator('[data-pagination=automation-triggers]').waitFor();
+    assert.equal(await page.locator('#automation-record-filter, [data-auto-detail] [data-auto-refresh]').count(),0);assert.ok(await page.locator('.topbar').isHidden());assert.ok(await page.locator('.automation-detail-header [data-auto-edit]').isVisible());
+    assert.equal(await page.locator('.automation-reason').first().evaluate(el=>getComputedStyle(el).display),'inline');
+    await page.screenshot({path:join(root,`trigger-list-${theme}-${width}.png`)});
+    await page.locator('[data-auto-tab=config]').click();await page.locator('.automation-config-members').waitFor();assert.equal(await page.locator('.automation-config-section dt').filter({hasText:'验收标准'}).count(),0);assert.equal(await page.locator('.automation-config-member small').count(),0);assert.equal(await page.locator('.automation-config-section').first().evaluate(el=>getComputedStyle(el).borderBottomWidth),'0px');assert.notEqual(await page.locator('.automation-config-member .agent-card-avatar').first().evaluate(n=>getComputedStyle(n).backgroundColor),'rgba(0, 0, 0, 0)');await page.screenshot({path:join(root,`config-${theme}-${width}.png`)});await page.locator('[data-auto-workflow]').click();await page.locator('#workflow-node-detail').waitFor();await page.locator('[data-close-modal]').last().click();await page.locator('[data-auto-tab=records]').click();await page.locator('[data-pagination=automation-triggers]').waitFor();
     const tabStyle=await page.locator('[data-auto-tab=records]').evaluate(el=>{const s=getComputedStyle(el);return {color:s.color,border:s.borderBottomWidth,background:s.backgroundColor};});assert.equal(tabStyle.border,'2px');assert.equal(tabStyle.background,'rgba(0, 0, 0, 0)');
     await page.locator('[data-pagination=automation-triggers] [data-page="2"]').click();await page.locator('[data-auto-run]').click();await page.locator('#collaboration-panel').waitFor();
     if(await page.locator('#workspace-details').isHidden())await page.locator('[data-toggle-task-details]').click();await page.locator('[data-task-member-detail]').first().click();await page.locator('.employee-profile').waitFor();await page.screenshot({path:join(root,`employee-${theme}-${width}.png`)});await page.locator('[data-close-modal]').last().click();
@@ -58,7 +67,11 @@ try {
     await page.screenshot({path:join(root,`records-${theme}-${width}.png`)});evidence.cases.push({theme,width,height});
   }
   await page.locator('[data-auto-tab=config]').click();await page.locator('.nav-item[data-view=automations]').click();
-  await page.locator('#automation-search [name=search]').fill('分页自动化 1');await page.locator('#automation-search').getByRole('button',{name:'搜索',exact:true}).click();await page.locator('[data-auto-open]').first().click();await page.locator('#automation-record-filter').waitFor();assert.equal(await page.locator('#automation-record-filter [name=status]').inputValue(),'all');
+  await page.locator('#automation-search [name=search]').fill('无匹配结果');await page.getByText('没有匹配的自动化',{exact:true}).waitFor();
+  await page.locator('#automation-search [name=search]').fill('分页自动化 1');await page.locator('[data-auto-open]').first().waitFor();
+  assert.equal(await page.locator('[data-auto-results] tbody tr').count(),11);assert.ok(await page.locator('#automation-search [name=search]').evaluate(el=>el===document.activeElement));
+  await page.locator('#automation-search [name=status]').selectOption('enabled');await page.getByText('没有匹配的自动化',{exact:true}).waitFor();
+  await page.locator('#automation-search [name=status]').selectOption('all');await page.locator('[data-auto-open]').first().click();await page.locator('[data-auto-detail]').waitFor();assert.equal(await page.locator('#automation-record-filter').count(),0);
   const cli=async(...args)=>JSON.parse((await promisify(execFile)(process.execPath,[resolve('cli/main.mjs'),'automations',...args,'--endpoint-file',join(data,'desktop-endpoint.json'),'--json'],{env:{...process.env,HOME:home}})).stdout);
   assert.equal((await cli('list','--page','2')).data.items.length,5);assert.equal((await cli('triggers',automation.id,'--page','2')).data.items.length,5);
   await page.goto(origin+'/automations');await page.locator('[data-auto-new]').click();

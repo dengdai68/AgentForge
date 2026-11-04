@@ -1565,7 +1565,7 @@
       "path": "web/automations.mjs",
       "kind": "presentation",
       "owner": "client",
-      "purpose": "Paginated automation directory and trigger history; reuse task modal, shared workspace, tokens and navigation without client scheduling. Empty lists share the directory-empty title and description structure with peer directories.",
+      "purpose": "Paginated automation directory and trigger history; reuse task modal, shared workspace, tokens and navigation without client scheduling. Empty lists share the directory-empty title and description structure with peer directories. Debounced live search and immediate status changes retain focus; compact header, fixed trigger columns and inline configuration reuse workflow details.",
       "sourceOfTruth": [
         "docs/27-automations.md"
       ],

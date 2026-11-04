@@ -72,3 +72,5 @@ runtime-paths.mjs 复用 server/data-home.mjs 的纯路径函数，将默认任�
 自动化导航在共享 preferences 注册，并提供宿主时钟蒙版；业务由认证子服务调度，没有新增宿主接口。离线错过不补跑。
 
 群聊行内重命名由 compact.css 保持单细强调色边框作为焦点指示，不叠加宿主默认外框；隔离两主题宽窄验收见 scripts/test-issue3-ui.mjs。
+
+员工角色筛选与自动化搜索/状态在 compact.css 中统一为任务列表的32px控件高度；自动化工具栏到表格间距8px，详情页头收紧。查询仍经同一 HTTP，宿主生命周期与安装行为不变。

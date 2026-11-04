@@ -2045,34 +2045,35 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 /* Automations reuse directory, modal and workspace controls. */
 #automations-root { min-width: 0; }
 .automation-heading, .automation-actions, .automation-schedule { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.automation-heading { justify-content: space-between; margin-bottom: 12px; }
+.automation-heading { justify-content: space-between; margin-bottom: 8px; }
 .automation-heading h3 { margin: 0; overflow-wrap: anywhere; }
 .automation-heading .workspace-title { min-width: 0; flex: 1; }
-.automation-schedule { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+
 .automation-table-scroll { overflow-x: auto; }
 .automation-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .automation-table th, .automation-table td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 .automation-table th { color: var(--muted); font-weight: 500; white-space: nowrap; }
 .automation-table small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .automation-name { text-align: left; overflow-wrap: anywhere; max-width: 260px; }
-.automation-reason { max-width: 260px; overflow-wrap: anywhere; }
-.automation-config { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 16px; font-size: 13px; }
-.automation-config dt { color: var(--muted); }
-.automation-config dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.automation-trigger-table { min-width:820px; table-layout:fixed; }
+.automation-trigger-table .trigger-time { width:170px; }
+.automation-trigger-table .trigger-source { width:80px; }
+.automation-trigger-table .trigger-completion { width:90px; }
+.automation-trigger-table .trigger-action { width:100px; }
+.automation-trigger-table td { white-space:nowrap; }
+.automation-trigger-status { overflow:hidden; text-overflow:ellipsis; }
+.automation-table .automation-reason { display:inline; margin:0 0 0 8px; color:var(--muted); font-size:12px; }
 .automation-schedule-fields { padding-top: 12px; border-top: 1px solid var(--line); }
 .automation-preview { font-size: 12px; color: var(--muted); line-height: 1.7; margin-bottom: 8px; }
 #automation-search { flex-wrap: wrap; }
 #automation-search input { flex: 1; min-width: 140px; }
 #automation-search select { width: auto; }
-@media (max-width: 800px) { .automation-heading { align-items: flex-start; } .automation-heading .workspace-title { flex-basis: 100%; } .automation-config { grid-template-columns: 80px minmax(0,1fr); } }
+@media (max-width: 800px) { .automation-heading { align-items: flex-start; } .automation-heading .workspace-title { flex-basis: 100%; } }
 
 .automation-create-modal #task-objective { height: clamp(130px, 20vh, 210px); min-height: 110px; }
 .automation-create-modal .task-workspace-hint { overflow-wrap: anywhere; }
 .automation-schedule-fields { flex: none; }
 
-#automation-record-filter { justify-content: flex-start; gap: 8px; margin-top: 12px; }
-#automation-record-filter select { width: auto; }
-#automation-record-filter [data-auto-refresh] { margin-left: auto; }
 #automation-search { justify-content: flex-start; gap: 8px; }
 #automation-search [data-auto-new] { margin-left: auto; }
 
@@ -2102,23 +2103,24 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 .automation-cron-row { display:flex; align-items:center; gap:14px; min-width:0; }
 .automation-cron-row > input { flex:0 0 33%; min-width:120px; max-width:240px; font-family:ui-monospace,monospace; }
 .automation-cron-row .automation-preview { min-width:0; margin:0; white-space:nowrap; overflow:auto; font-size:12px; color:var(--muted); }
-.automation-schedule { display:flex; flex-wrap:wrap; gap:12px 24px; margin:12px 0 20px; color:var(--muted); font-size:13px; }
-.automation-schedule code { color:var(--ink); }
-.automation-record-filter { margin:14px 0; }
-.automation-record-filter select { min-width:120px; }
+.automation-schedule { display:flex; flex-wrap:wrap; gap:6px 20px; margin:0; font-size:12px; }
+.automation-schedule > span { display:inline-flex; align-items:center; gap:4px; }
+.automation-schedule-label { color:var(--muted); }
+.automation-schedule code,.automation-schedule time { padding:2px 6px; border-radius:4px; background:var(--surface-soft); color:var(--ink); }
 .automation-table td { vertical-align:middle; }
-.automation-config-layout { max-width:1000px; padding:4px 0 24px; }
-.automation-config-section { padding:20px 0; border-bottom:1px solid var(--line); }
-.automation-config-section:last-child { border-bottom:0; }
-.automation-config-section h4 { margin:0 0 12px; font-size:13px; color:var(--muted); font-weight:500; }
-.automation-config-section p { margin:6px 0; line-height:1.65; }
-.automation-config-section ul { padding-left:20px; margin:0; line-height:1.8; }
+.automation-config-layout { margin:0; padding:16px 0 24px; font-size:13px; }
+.automation-config-section { display:grid; grid-template-columns:84px minmax(0,1fr); gap:12px; margin-bottom:20px; line-height:1.7; }
+.automation-config-section dt { color:var(--muted); padding-top:2px; }
+.automation-config-section dd { margin:0; min-width:0; overflow-wrap:anywhere; }
+.automation-config-section ul { padding-left:18px; margin:0; }
+.automation-config-section .text-action { padding:0; min-height:0; font:inherit; color:var(--accent); text-align:left; }
+.automation-config-section .field-hint { margin:4px 0 0; }
 .automation-config-text { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.75; }
-.automation-config-members { display:flex; flex-wrap:wrap; gap:12px; }
-.automation-config-member { display:flex; align-items:center; gap:10px; padding:10px 14px; border:1px solid var(--line); border-radius:6px; min-width:180px; max-width:100%; }
-.automation-config-member .agent-card-avatar { width:32px; height:32px; flex:none; font-size:12px; }
-.automation-config-member strong { display:block; font-size:13px; overflow-wrap:anywhere; }
-.automation-config-member small { display:block; margin-top:3px; color:var(--muted); }
+.automation-config-members { display:flex; flex-wrap:wrap; gap:8px 20px; }
+.automation-config-member { display:inline-flex; align-items:center; gap:7px; max-width:100%; }
+.automation-config-member .agent-card-avatar { width:24px; height:24px; flex:none; font-size:10px; border-radius:5px; }
+.automation-config-member > span:last-child { overflow-wrap:anywhere; min-width:0; }
+
 .employee-detail-modal { width:min(640px,calc(100vw - 32px)); }
 .employee-profile { min-width:0; }
 .employee-profile .employee-profile-identity { display:flex; justify-content:flex-start; gap:14px; align-items:center; padding:12px 0; }
@@ -2142,9 +2144,14 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 #run-workspace .collaboration-row.needs-answer .collaboration-content { background:var(--record-warning-soft); border:1px solid var(--line); border-left:3px solid var(--record-warning); padding-block:8px; }
 .communication-roster-member { min-height:35px; }
 .main-content:has(#automations-view.active .automation-detail-header) > .topbar { display:none; }
-.automation-detail-header { border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:12px; }
+.automation-detail-header { border-bottom:1px solid var(--line); padding-bottom:8px; margin-bottom:0; }
 .automation-detail-header .automation-schedule { margin-bottom:0; }
 #agents-role-filter { min-width:140px; max-width:240px; }
 
 #run-workspace .collaboration-row > time, #run-workspace .collaboration-row > div > header { padding-inline:0.5em; }
 .communication-roster-member > button:first-child { padding-block:2px; }
+
+.directory-filter-toolbar { justify-content:flex-start; flex-wrap:wrap; gap:8px; }
+.directory-filter-toolbar > button { margin-left:auto; }
+:is(.directory-filter-toolbar,#automation-search) :is(input,select) { height:36px; min-height:36px; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--paper); color:var(--ink); font:inherit; font-size:13px; }
+#automation-search { padding:4px 0 0; margin-bottom:8px; }

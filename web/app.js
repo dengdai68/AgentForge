@@ -2379,7 +2379,7 @@ function teamModal(existing = null) {
 
 const newTeamModal = () => teamModal();
 
-const automationUI = createAutomationUI({ api, esc, pill, exactTime, toast, catalog: () => state,
+const automationUI = createAutomationUI({ api, esc, pill, exactTime, toast, catalog: () => state, showWorkflow: workflowDetails,
   edit: existing => newTaskModal({automation:true,existing}),
   navigate: id => { state.automationId=id; setView("automations"); },
   openRun: runId => { state.selectedRunId=runId; state.workspace=null; setView("workspace"); void loadWorkspace(runId); },

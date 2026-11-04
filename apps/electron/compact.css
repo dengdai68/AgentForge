@@ -541,3 +541,8 @@ html:root, html:root[data-theme] {
 
 /* Inline rename uses its accent border as the keyboard focus indicator. */
 html:root .communication-header .communication-name-input:focus-visible { outline:none; box-shadow:none; border:1px solid var(--accent); }
+
+/* Match directory filters to the task inventory controls. */
+html :is(.directory-filter-toolbar,#automation-search) :is(input,select) { height:32px; min-height:32px; padding:5px 9px; font-size:12px; border-radius:5px; }
+html #automation-search { padding:4px 0 0; margin-bottom:8px; }
+html .automation-detail-header { padding-bottom:8px; margin-bottom:0; }
