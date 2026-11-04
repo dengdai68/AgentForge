@@ -143,3 +143,9 @@ test-automations.mjs 在隔离 Electron 验证自动化弹窗、两主题宽窄/
 自动化真实验收可设置 AGENTFORGE_AUTOMATIONS_PROVIDER=codex；默认 claude-code。只切换隔离实例的员工 Runtime，不改变操作者配置；默认模型可通过 AGENTFORGE_AUTOMATIONS_MODEL 指定。
 
 node scripts/test-issue3-ui.mjs 隔离验证两主题宽窄布局、成员 App/CLI 往返及沟通控制台；显示夹具不算模型证据。AGENTFORGE_ISSUE3_REAL=1 node scripts/test-issue3-real.mjs 验证真实新成员执行、员工目录 MCP、澄清与人类验收，不覆盖安装。
+
+`test-issue3-ui.mjs` 同时验证共享原生弹窗的 Tab 圈定/焦点返回/表单 Esc 保留、Runtime 同行等高、工作目录页签刷新、CHANGE 标题工具与失败后恢复、减少动画。夹具 Git 仅在隔离任务目录初始化，不运行 Provider。
+
+test-automations.mjs 同步验证任务标题列、当地时分秒格式、App/CLI 标题回读和宽窄表格布局；未创建任务的触发显示空标题。
+
+自动化详情入口回归覆盖已创建任务的所有执行状态和窄窗口固定操作列；AGENTFORGE_AUTOMATIONS_APP 指定待安装 .app，可使用同一隔离 UI/API/CLI 验收运行打包客户端。

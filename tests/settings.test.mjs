@@ -364,7 +364,7 @@ test('CHANGE keeps its tree free of explanatory text and surfaces read errors ou
   const host = { innerHTML: '', dataset: {}, querySelector: () => tree };
   const render = vm.runInNewContext(`${source.slice(source.indexOf('function renderWorkingChanges('), source.indexOf('async function loadWorkingChanges('))}; renderWorkingChanges;`, {
     state: { selectedRunId: 'run' }, $: () => host, workspaceView: () => view,
-    rememberDiffReading: () => {}, presentationPreferences: {}, esc: String,
+    syncWorkingRefresh: () => {}, rememberDiffReading: () => {}, presentationPreferences: {}, esc: String,
     workingChangesTree: repo => `<ul>${repo.path || 'docs'}</ul>`, workingDiffMarkup: () => ''
   });
   const repo = (path, changes = [], rest = {}) => ({ path, initialized: true, changes, ...rest });
@@ -746,7 +746,7 @@ test("in-app confirm dialog resolves on buttons and cancels on modal close", asy
   const button = () => ({ handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; }, click() { this.handlers.click?.(); }, focus() {} });
   const cancelButton = button(), acceptButton = button();
   const modal = { classList: classList(), scrollTop: 5 };
-  const backdrop = { classList: classList(), attributes: {}, setAttribute(key, value) { this.attributes[key] = value; } };
+  const backdrop = { open:false, showModal(){ this.open=true; }, close(){ this.open=false; }, classList: classList(), attributes: {}, setAttribute(key, value) { this.attributes[key] = value; }, removeAttribute(key){delete this.attributes[key];} };
   const content = {
     closest: () => modal, replaceChildren() {}, innerHTML: "",
     querySelector(selector) {
@@ -758,9 +758,10 @@ test("in-app confirm dialog resolves on buttons and cancels on modal close", asy
   };
   const run = vm.runInNewContext(`${slice}\n({ confirmDialog, closeModal })`, {
     disposeWorkflowGraphs() {}, resetRequestActive: false,
+    document: { activeElement:null, body:{classList:classList()}, querySelector(){return null;} },
     closeFloatingLists() {},
     esc: (value = "") => String(value),
-    $: selector => ({ "#modal-content": content, "#modal-backdrop": backdrop })[selector],
+    $: selector => ({ "#modal-content": content, "#modal-backdrop": backdrop, "#modal-close": {} })[selector],
   });
   const declined = run.confirmDialog({ title: "删除工作流", message: "删除工作流「示例」？该操作不可恢复。", confirmLabel: "删除工作流", danger: true });
   assert.equal(backdrop.classList.contains("open"), true);

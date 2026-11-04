@@ -83,3 +83,5 @@ roles.test 覆盖有序多角色校验/原子失败/冻结/历史读取；market
 task-patrol.test.mjs 覆盖 10 秒巡检、准备阶段单飞、空闲经理恢复、人类等待/失败/终态排除、直接交接和动态继续输入。真实模型端到端验证见 scripts/test-task-collaboration-real.mjs，不以单元夹具代替。
 
 workspace-git / workspace-hooks 覆盖动态克隆后提交、并发登记、重启与 reflog 清理后固定基准、嵌套归属、缺失基准提示、链接拒绝和调用级 socket 生命周期/失败隔离。真实完整任务与宽窄 CHANGE 验收入口 scripts/test-workspace-clone-real.mjs。
+
+automations.test.mjs 验证触发标题的当地时分秒、延迟执行仍取计划时刻、午夜零点、配置改名后历史标题保留以及未生成任务返回 null；configuration-cli 验证 taskTitle 的帮助、JSON 透传与中文文本输出。

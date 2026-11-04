@@ -117,8 +117,9 @@ test('optional workflows use a fixed snapshot, and automation uses local time an
     assert.equal(automation.timeZone,Intl.DateTimeFormat().resolvedOptions().timeZone);
     const record=store.triggerAutomation(automation.id,{at});assert.ok(record.runId,record.reason);
     const task=store.getRunTask(record.runId);
-    const date=new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(at);
-    assert.equal(task.title,`${input.title}（${date}）`);assert.equal(task.workflowTemplateId,null);
+    const date=[at.getFullYear(),String(at.getMonth()+1).padStart(2,'0'),String(at.getDate()).padStart(2,'0')].join('-');
+    const time=[at.getHours(),at.getMinutes(),at.getSeconds()].map(value=>String(value).padStart(2,'0')).join(':');
+    assert.equal(task.title,`${input.title}#${date} ${time}`);assert.equal(task.workflowTemplateId,null);
     const original=store.getRun(record.runId).participants.find(p=>p.id==='agent_analyst');
     assert.ok(original);
     const renamed=store.updateAgent('agent_analyst',{name:'新员工名字'});assert.equal(renamed.initials,'新员');
@@ -126,4 +127,43 @@ test('optional workflows use a fixed snapshot, and automation uses local time an
     for(const template of store.listWorkflowTemplates())store.deleteWorkflowTemplate(template.id);
     assert.equal(store.createTask({...input,workflowTemplateId:undefined}).workflowSnapshot.nodes[0].id,'delivery');
   }finally{store.close();}
+});
+
+
+test('trigger titles retain local seconds, scheduled instant and original task identity',()=>{
+  const previousTZ=process.env.TZ;process.env.TZ='Asia/Shanghai';
+  const {store,automation}=setup();
+  try {
+    const plannedAt=automation.nextTriggerAt;
+    const first=store.triggerAutomation(automation.id,{plannedAt,at:new Date(Date.parse(plannedAt)+27000)});
+    assert.equal(first.taskTitle,'自动简报#2026-11-04 08:01:00');
+    assert.equal(store.getRunTask(first.runId).title,first.taskTitle);
+    assert.equal(store.getAutomation(automation.id).latestTrigger.taskTitle,first.taskTitle);
+    assert.equal(store.triggerAutomation(automation.id).taskTitle,null); // busy: no task
+    store.requestHumanAcceptance(first.runId);
+    const late=store.triggerAutomation(automation.id,{at:new Date('2026-11-04T15:59:59Z')});
+    assert.equal(late.taskTitle,'自动简报#2026-11-04 23:59:59');
+    store.requestHumanAcceptance(late.runId);
+    store.saveAutomation({title:'新名称'},automation.id);
+    const midnight=store.triggerAutomation(automation.id,{at:new Date('2026-11-04T16:00:01Z')});
+    assert.equal(midnight.taskTitle,'新名称#2026-11-05 00:00:01');
+    assert.equal(store.listAutomationTriggers(automation.id).items.find(item=>item.id===first.id).taskTitle,first.taskTitle);
+    store.requestHumanAcceptance(midnight.runId);store.updateAgent('agent_analyst',{status:'inactive'});
+    const failed=store.triggerAutomation(automation.id);assert.equal(failed.outcome,'failed');assert.equal(failed.taskTitle,null);
+  } finally {store.close();if(previousTZ===undefined)delete process.env.TZ;else process.env.TZ=previousTZ;}
+});
+
+
+test('created automation tasks keep detail references in every execution state',()=>{
+  for(const status of ['running','review','paused','awaiting_acceptance','completed','failed','cancelled']) {
+    const {store,automation}=setup();
+    try {
+      const first=store.triggerAutomation(automation.id);
+      if(['awaiting_acceptance','completed'].includes(status))store.requestHumanAcceptance(first.runId);
+      if(status==='completed')store.triggerAutomation(automation.id);
+      else if(!['running','awaiting_acceptance'].includes(status))store.updateRun(first.runId,{status});
+      const record=store.listAutomationTriggers(automation.id).items.find(item=>item.id===first.id);
+      assert.equal(record.status,status);assert.equal(record.taskId,first.taskId);assert.equal(record.runId,first.runId);assert.equal(record.taskTitle,first.taskTitle);
+    } finally {store.close();}
+  }
 });

@@ -97,7 +97,7 @@ html #tasks-heading h2 { position:absolute; width:1px; height:1px; overflow:hidd
 .primary-button,.small-button.primary { background:var(--desktop-action); color:#fff; border-color:var(--desktop-action); }
 .primary-button:hover,.small-button.primary:hover { background:var(--desktop-action-hover); color:#fff; border-color:var(--desktop-action-hover); transform:none; box-shadow:none; }
 .ghost-button,.small-button { background:var(--paper); color:var(--ink); }
-.ghost-button:hover,.small-button:hover { background:var(--desktop-hover); color:var(--ink); border-color:#c8c8ce; }
+.ghost-button:hover,.small-button:hover { background:var(--desktop-hover); color:var(--ink); border-color:var(--control-hover-border); }
 .danger-button,.small-button.danger { color:var(--danger-ink); background:var(--paper); border-color:var(--line); }
 .danger-button:hover,.small-button.danger:hover { color:var(--danger-ink); background:var(--danger-soft); border-color:var(--danger); }
 .small-button.amber { background:#fff8e7; border-color:#eed9a2; color:#805500; }
@@ -147,6 +147,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 /* Seven-column task inventory, with room for evidence and safe action groups. */
 .full-panel { border:0; border-radius:0; }
 .table { min-width:820px; }
+.automation-trigger-table { min-width:1100px; }
 .table .col-task { width:34%; }
 .table .col-workflow { width:13%; }
 .table .col-path { width:10%; }
@@ -244,7 +245,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 #workflow-node-detail dt { margin-top:12px; color:var(--muted); font-size:11px; }
 #workflow-node-detail dd { margin:4px 0 0; font-size:13px; line-height:1.6; }
 .form-field input,.form-field select,.form-field textarea,.instruction-form select,.instruction-form textarea { padding:8px 10px; border:1px solid var(--line); border-radius:5px; background:var(--paper); color:var(--ink); }
-.form-field input:focus,.form-field select:focus,.form-field textarea:focus,.instruction-form select:focus,.instruction-form textarea:focus { border-color:var(--desktop-focus); box-shadow:0 0 0 2px #dbeafe; outline:none; }
+.form-field input:focus,.form-field select:focus,.form-field textarea:focus,.instruction-form select:focus,.instruction-form textarea:focus { border-color:var(--desktop-focus); box-shadow:0 0 0 2px var(--control-focus-ring); outline:none; }
 .form-field.invalid input,.form-field.invalid select,.form-field.invalid textarea { border-color:var(--danger); }
 .form-actions { border-color:var(--line); }
 
@@ -331,6 +332,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 /* Settings is a bounded preference pane, not a floating marketing card. */
 .settings-layout { grid-template-columns:140px minmax(0,1fr); gap:20px; max-width:960px; }
 .settings-nav { gap:2px; }
+.settings-nav button.active { color:var(--accent); background:var(--selection-bg); font-weight:500; }
 .settings-nav button { min-height:32px; padding:7px 10px; border-radius:5px; font-size:12px; }
 .settings-section { padding:0 0 0 20px; border:0; border-left:1px solid var(--line); border-radius:0; box-shadow:none; }
 .settings-section h3 { margin:0 0 8px; font-size:15px; letter-spacing:0; }
@@ -349,14 +351,15 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 .settings-content { max-width:760px; }
 .theme-options { gap:12px; }
 .theme-option { gap:8px; padding:12px; border-radius:6px; }
-.theme-option:has(input:checked) { border-color:var(--ink); background:var(--bg); }
-.theme-preview { height:88px; border-color:var(--line); border-radius:4px; background:#faf9f7; }
-.theme-preview > i { background:#f6f5f3; }
+.theme-option:has(input:checked) { border-color:var(--accent); background:var(--accent-soft); }
+.theme-preview:not(.minimal) { --bg:#faf9fc; --desktop-sidebar-bg:#f3f2fa; }
+.theme-preview { height:88px; border-color:var(--line); border-radius:4px; background:var(--bg); }
+.theme-preview > i { background:var(--desktop-sidebar-bg); }
 .theme-preview > span { padding:10px; }
 .theme-preview b,.theme-preview.minimal b { height:5px; margin-bottom:8px; background:var(--desktop-action); }
 .theme-preview em { height:18px; margin-top:6px; border:1px solid var(--line); border-radius:3px; box-shadow:none; }
 .theme-preview.minimal { background:#fff; border-radius:4px; }
-.theme-preview.minimal > i { background:#f7f7f8; }
+.theme-preview.minimal > i { background:#f0f4fd; }
 .navigation-options fieldset { margin-bottom:14px; }
 .settings-toggle { display:grid; grid-template-columns:minmax(0,1fr) 20px; align-items:center; gap:16px; min-height:32px; padding:6px 0; font-size:12px; }
 .settings-toggle input { justify-self:end; width:15px; height:15px; }
@@ -374,6 +377,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 .runtime-inline-editor { margin-top:12px; }
 .runtime-inline-editor .form-grid { grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:12px; }
 .runtime-inline-editor .form-field { margin-bottom:0; }
+.runtime-inline-editor :is(input[name="model"],select[name="effort"]) { font-size:13px; line-height:1.5; height:37.5px; }
 .runtime-inline-editor .settings-description { margin-bottom:10px; }
 .runtime-inline-editor .form-actions { padding-top:8px; }
 [data-settings-panel="repositories"] .repository-access-boundary { margin:10px 0; padding:8px 10px; }
@@ -545,3 +549,14 @@ html:root .communication-header .communication-name-input:focus-visible { outlin
 
 html #automation-search { padding:4px 0 0; margin-bottom:8px; }
 html .automation-detail-header { padding-bottom:8px; margin-bottom:0; }
+
+/* Directory actions share their adjacent 32px search controls. */
+html .view:not(#workspace-view) .directory-toolbar > button { min-height:32px; }
+html:root .runtime-availability input[role="switch"]:focus-visible { outline-offset:2px; }
+@media(prefers-reduced-motion:reduce) {
+  html:root .modal-backdrop.open,html:root .modal { animation:none; }
+}
+@media(pointer:coarse) {
+  html:root[data-theme] :is(.primary-button,.ghost-button,.small-button,.danger-button,.diff-icon-button,.modal-close,.text-action,.settings-radio-option,.settings-toggle,.runtime-availability),
+  html:root .view:not(#workspace-view) .directory-toolbar > button { min-width:44px; min-height:44px; }
+}

@@ -523,7 +523,8 @@
       "workspaceDefault": "Task root uses server/data-home.mjs pure path helper for ~/agentforge, independently of isolated application state. CLI installation remains host-only.",
       "workspaceOpening": "Zero-argument main-frame current-Run IPC resolves the authenticated workspace summary through its own Session, validates Run identity, unchanged URL and an absolute directory, then opens with shell.openPath. No arbitrary renderer path or general filesystem bridge.",
       "applicationUpdates": "Stable-only GitHub latest discovery, explicit download, SHA-256 DMG fallback for ad-hoc installs and native MacUpdater for Developer ID builds. Auto-download and install-on-quit disabled. Native restart acquires an atomic idle lease from the owned child, blocking writes/schedulers until quit or release.",
-      "draftAssetsUpload": "The manual ad-hoc workflow may build an immutable existing tag and replace all six verified assets only on an existing draft. This mode never publishes; signed stable certificate gates remain separate."
+      "draftAssetsUpload": "The manual ad-hoc workflow may build an immutable existing tag and replace all six verified assets only on an existing draft. This mode never publishes; signed stable certificate gates remain separate.",
+      "interfaceConsistency": "Settings model/effort controls share 13px/37.5px; selection/focus and previews use current tokens. Shared native renderer dialog preserves form drafts and returns focus; reduced-motion and coarse-pointer rules retain desktop density. Workspace refresh is an icon in the file source row; diff controls live in the viewer header. No host command or CLI contract change."
     },
     {
       "id": "server.communication-store",
@@ -1130,7 +1131,8 @@
       "communicationRecovery": "Failed replies expose console/retry actions; selected console icons use accent blue. Description/path typography matches and directory loading uses accessible visual indicators.",
       "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
       "directoryTreePresentation": "Current files and CHANGE left trees contain entries and operational controls only; no explanatory, empty-directory, missing-baseline or no-change paragraphs. Actual read errors appear outside the tree; diff baseline remains in the preview header.",
-      "clarificationSpacing": "Pending human clarification cards retain 12px inline padding in shared and compact layouts so timestamps, content and actions clear the status accent."
+      "clarificationSpacing": "Pending human clarification cards retain 12px inline padding in shared and compact layouts so timestamps, content and actions clear the status accent.",
+      "interfaceConsistency": "工作目录页签行移除下分隔线，当前文件/CHANGE 共用右侧无边框刷新图标；CHANGE 移除更改计数工具栏，对比布局/范围移入文件预览标题右侧，与当前文件保持同一标题结构。刷新忙碌/失败恢复及原文件选择语义不变。共享弹窗改用原生 dialog 维护键盘模态与焦点返回，表单仍仅显式关闭；统一 Runtime 同行字段、设置选中态、主题预览和语义焦点 tokens，移除弹窗硬编码阴影并支持减少动画。桌面维持紧凑尺寸，粗指针操作使用 44px 点击区。仅界面/交互变化，无 App/CLI/HTTP/Store 契约变化。"
     },
     {
       "id": "web.manual-graphs",
@@ -1452,6 +1454,7 @@
     },
     {
       "id": "server.automations",
+      "triggerTitles": "Tasks use name#yyyy-MM-dd HH:mm:ss in the captured local timezone (planned instant for schedules, trigger instant for manual). Trigger projections expose actual taskTitle or null; App and CLI show the same value without rewriting historical tasks.",
       "path": "server/automations.mjs",
       "kind": "domain-store",
       "owner": "server",
@@ -1562,6 +1565,7 @@
     },
     {
       "id": "web.automations",
+      "detailEntry": "Created Task/Run references always retain details independently of execution state; the action column stays pinned right on narrow windows. No task means no details entry.",
       "path": "web/automations.mjs",
       "kind": "presentation",
       "owner": "client",

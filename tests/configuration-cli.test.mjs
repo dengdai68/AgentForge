@@ -747,6 +747,7 @@ test('automation CLI exposes discovery, trigger IDs, status paging and readable 
     assert.equal(result.code, 0);
     assert.match(result.stdout, new RegExp(`automations ${operation} ID`));
     assert.match(result.stdout, /ID：必填/);
+    assert.match(result.stdout, /taskTitle/);
     if (operation === 'triggers') {
       assert.match(result.stdout, /--page N \| --all/);
       assert.match(result.stdout, /awaiting_acceptance/);
@@ -763,6 +764,12 @@ test('automation CLI exposes discovery, trigger IDs, status paging and readable 
   }});
   assert.equal(result.items.length,2); assert.equal(result.page,null); assert.equal(result.hasMore,false);
   assert.match(formatOutput(['automations','list'],result),/--all/);
+  const title='每日检查#2026-11-05 08:09:07';
+  const triggers=await execute(['automations','triggers','auto_one','--session-file',f.sessionFile],{fetcher:async()=>new Response(JSON.stringify({items:[{id:'trigger_one',taskTitle:title,taskId:'task_one',status:'running'},{id:'trigger_skip',taskTitle:null,status:'skipped'}],page:1,totalPages:1,total:2,pageSize:20}))});
+  assert.equal(triggers.items[0].taskTitle,title);assert.equal(triggers.items[1].taskTitle,null);
+  const readable=formatOutput(['automations','triggers','auto_one'],triggers);
+  assert.match(readable,/任务标题/);assert.ok(readable.includes(title));
+
 });
 
 test('task members CLI reads compact current roster and validates full replacements',async()=>{

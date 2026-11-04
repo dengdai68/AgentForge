@@ -198,6 +198,8 @@ function toast(message, isError = false) {
   toastTimer = setTimeout(() => { box.className = "toast"; }, 3600);
 }
 function openModal(content) {
+  const backdrop = $("#modal-backdrop");
+  if (!backdrop.open) modalReturnFocus = document.activeElement;
   modalCancel?.(); modalCancel = null;
   disposeWorkflowGraphs("details");
   closeFloatingLists($("#modal-content"));
@@ -214,7 +216,14 @@ function openModal(content) {
     children.forEach((child) => body.append(child));
     container.insertBefore(body, actions);
   }
+  const title = host.querySelector('h2, .employee-profile-identity h3');
+  if (title) { title.id = 'shared-modal-title'; backdrop.setAttribute('aria-labelledby', title.id); }
+  else { backdrop.removeAttribute('aria-labelledby'); backdrop.setAttribute('aria-label', '详情'); }
+  const formOpen = backdrop.classList.contains('form-modal-open');
+  $("#modal-close").title = formOpen ? '关闭' : '关闭（Esc）';
   $("#modal-backdrop").classList.add("open");
+  if (!backdrop.open) backdrop.showModal();
+  document.body.classList.add('modal-open');
   $("#modal-backdrop").setAttribute("aria-hidden", "false");
   $("#modal-backdrop").scrollTop = 0;
   $("#modal-content").closest(".modal").scrollTop = 0;
@@ -229,12 +238,18 @@ function closeModal() {
   $("#modal-backdrop").classList.remove('form-modal-open');
   $("#modal-backdrop").setAttribute("aria-hidden", "true");
   $("#modal-content").replaceChildren();
+  $("#modal-backdrop").close();
+  document.body.classList.remove('modal-open');
+  const target = modalReturnFocus;
+  modalReturnFocus = null;
+  if (target?.isConnected && target.getClientRects().length) target.focus({ preventScroll: true });
+  else document.querySelector('.nav-item.active')?.focus({ preventScroll: true });
   const cancel = modalCancel; modalCancel = null;
   cancel?.();
 }
 // Promise-style in-app confirmation; short content only, no scrolling body.
 // Escape, backdrop click and the close button all resolve as cancelled.
-let modalCancel = null;
+let modalCancel = null, modalReturnFocus = null;
 function confirmDialog({ title, message, confirmLabel = "确认", danger = false }) {
   return new Promise((resolve) => {
     openModal(`<h2>${esc(title)}</h2><p class="modal-intro confirm-dialog-message">${esc(message)}</p><div class="confirm-dialog-actions"><button class="ghost-button" type="button" data-confirm-dialog-cancel>取消</button><button class="${danger ? "small-button danger" : "primary-button"}" type="button" data-confirm-dialog-accept>${esc(confirmLabel)}</button></div>`);
@@ -1033,7 +1048,7 @@ function renderWorkspace() {
         </div>
       </div>
     </div>
-    ${["directory", "diff"].includes(tab) ? `<nav class="file-source-switch" aria-label="文件来源"><button class="text-action" data-ws-tab="directory" aria-pressed="${tab === "directory"}">当前文件</button><button class="text-action" data-ws-tab="diff" aria-pressed="${tab === "diff"}">CHANGE</button></nav>` : ""}
+    ${["directory", "diff"].includes(tab) ? `<nav class="file-source-switch" aria-label="文件来源"><button class="text-action" data-ws-tab="directory" aria-pressed="${tab === "directory"}">当前文件</button><button class="text-action" data-ws-tab="diff" aria-pressed="${tab === "diff"}">CHANGE</button>${workingRefreshMarkup(view)}</nav>` : ""}
     <section id="working-directory-panel" class="working-directory-panel" role="tabpanel" aria-labelledby="directory-mode" ${tab !== "directory" ? "hidden" : ""}></section>
     <section id="working-diff-panel" class="working-diff-panel" role="tabpanel" aria-labelledby="directory-mode" ${tab !== "diff" ? "hidden" : ""}></section>
     <section class="collaboration-panel" id="collaboration-panel" role="tabpanel" aria-labelledby="collaboration-mode" ${tab !== "collaboration" ? "hidden" : ""}></section>
@@ -1558,11 +1573,26 @@ function directoryPageMarkup(path,view,theme) {
   return `${workingFileTree(entries,view,theme)}${page?.loading?'<span class="directory-loading" role="status" aria-label="正在读取目录"></span>':page?.error?`<button class="text-action" data-load-directory="${esc(path)}">重试</button>`:''}${page?.nextOffset!=null?`<button class="text-action" data-load-more-directory="${esc(path)}" ${page.loading?'disabled':''}>加载更多</button>`:''}`;
 }
 
+function workingRefreshMarkup(view) {
+  const changes = view.tab === 'diff', busy = changes ? view.changesLoading : view.directoryLoading;
+  return `<button type="button" class="diff-icon-button workspace-refresh" ${changes ? 'data-refresh-changes' : 'data-refresh-directory'} aria-label="${changes ? '刷新更改' : '刷新当前文件'}" title="${changes ? '刷新更改' : '刷新当前文件'}" ${busy ? 'disabled aria-busy="true"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7M20 7l-2.3-2.3"/></svg></button>`;
+}
+
+function syncWorkingRefresh(runId) {
+  if (state.selectedRunId !== runId) return;
+  const view = workspaceView(runId), button = $('.file-source-switch .workspace-refresh');
+  if (!button) return;
+  const busy = view.tab === 'diff' ? view.changesLoading : view.directoryLoading;
+  button.disabled = Boolean(busy);
+  button.setAttribute('aria-busy', String(Boolean(busy)));
+}
+
 function renderWorkingDirectory(runId) {
   if (state.selectedRunId !== runId) return;
   const host = $("#working-directory-panel"), view = workspaceView(runId);
   if (!host) return;
   rememberDirectoryReading(view);
+  syncWorkingRefresh(runId);
   const preview = view.filePreview;
   // The directory theme is a local display preference scoped strictly to this
   // panel: icons plus the selected file's content colors, nothing else.
@@ -1577,7 +1607,7 @@ function renderWorkingDirectory(runId) {
     else content = `<pre class="artifact-preview code-preview hljs"><code>${preview.highlightedHtml || esc(preview.content)}</code></pre>`;
   }
   host.innerHTML = `${view.directoryError ? `<p role="alert">${esc(view.directoryError)}</p>` : ""}${Object.entries(view.directoryPages || {}).filter(([,page])=>page.error).map(([path,page])=>`<p role="alert">${esc(path)}：${esc(page.error)}</p>`).join("")}
-    <div class="artifact-layout"><div class="artifact-files"><section class="artifact-root">${directoryPageMarkup('',view,theme)}</section></div><div class="artifact-viewer document"><div class="artifact-viewer-head"><div class="working-file-identity"><strong>${esc(view.selectedPath || "文件预览")}</strong><small>当前工作文件 ${preview?.modifiedAt ? "· " + esc(preview.modifiedAt) : ""}</small></div><div class="directory-actions"><button class="ghost-button" data-download-working-file ${!view.selectedPath || view.downloadingPath ? "disabled" : ""} ${view.downloadingPath ? 'aria-busy="true"' : ""}>${view.downloadingPath ? "下载中…" : "下载"}</button><button class="ghost-button" data-refresh-directory ${view.directoryLoading ? 'disabled aria-busy="true"' : ""}>刷新</button></div></div>${content}</div></div>`;
+    <div class="artifact-layout"><div class="artifact-files"><section class="artifact-root">${directoryPageMarkup('',view,theme)}</section></div><div class="artifact-viewer document"><div class="artifact-viewer-head"><div class="working-file-identity"><strong>${esc(view.selectedPath || "文件预览")}</strong><small>当前工作文件 ${preview?.modifiedAt ? "· " + esc(preview.modifiedAt) : ""}</small></div><div class="directory-actions"><button class="ghost-button" data-download-working-file ${!view.selectedPath || view.downloadingPath ? "disabled" : ""} ${view.downloadingPath ? 'aria-busy="true"' : ""}>${view.downloadingPath ? "下载中…" : "下载"}</button></div></div>${content}</div></div>`;
   host.querySelector(".artifact-files").scrollTop = view.directoryScroll.tree || 0;
   const reader = host.querySelector(".markdown-preview, .artifact-preview");
   if (reader) reader.scrollTop = view.directoryScroll[view.selectedPath] || 0;
@@ -1698,8 +1728,8 @@ function renderWorkingChanges(runId) {
   host.dataset.directoryTheme = theme;
   const rawRepositories = view.changes?.repositories || [];
   const repositories = rawRepositories;
-  const count = repositories.reduce((sum, repo) => sum + repo.changes.length, 0);
-  host.innerHTML = `<div class="directory-toolbar"><div><strong>更改 · ${count}</strong></div><div class="diff-view-controls"><div role="group" aria-label="CHANGE 布局"><button class="diff-icon-button" data-diff-layout="unified" aria-pressed="${view.diffLayout !== 'split'}" aria-label="行内" title="行内"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h8"/></svg></button><button class="diff-icon-button" data-diff-layout="split" aria-pressed="${view.diffLayout === 'split'}" aria-label="左右对比" title="左右对比"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M6 9h3M15 9h3M6 14h3M15 14h3"/></svg></button></div><div role="group" aria-label="CHANGE 范围"><button class="diff-icon-button" data-diff-scope="changes" aria-pressed="${!view.diffFull}" aria-label="仅差异" title="仅差异"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h6M7 4v6M4 17h6M14 7h6M14 17h6"/><path d="M14 12h6" opacity=".4"/></svg></button><button class="diff-icon-button" data-diff-scope="full" aria-pressed="${Boolean(view.diffFull)}" aria-label="完整文件" title="完整文件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 12h8M8 16h8"/></svg></button></div><button class="diff-icon-button diff-refresh-button" data-refresh-changes aria-label="刷新" title="刷新" ${view.changesLoading ? 'disabled aria-busy="true"' : ""}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7M20 7l-2.3-2.3"/></svg></button></div></div>${view.changesError ? `<p role="alert">${esc(view.changesError)}</p>` : ""}${repositories.filter(repo=>repo.error).map(repo=>`<p role="alert">${esc(repo.path || "工作目录")}：${esc(repo.error)}</p>`).join("")}<div class="artifact-layout"><div class="artifact-files source-control-files"><section class="artifact-root">${workingChangesTree({changes:repositories.flatMap(repo=>repo.changes)},view,theme)}</section></div><div class="artifact-viewer document"><div class="artifact-viewer-head"><strong>${esc(view.selectedDiffPath || "修改内容")}</strong><small>${view.diffPreview?.submodule ? "HEAD → 当前子模块提交" : `${esc(view.diffPreview?.baseLabel || "比较版本")} → 当前文件`}</small></div>${workingDiffMarkup(view.diffPreview, view.diffLayout)}</div></div>`;
+  syncWorkingRefresh(runId);
+  host.innerHTML = `${view.changesError ? `<p role="alert">${esc(view.changesError)}</p>` : ""}${repositories.filter(repo=>repo.error).map(repo=>`<p role="alert">${esc(repo.path || "工作目录")}：${esc(repo.error)}</p>`).join("")}<div class="artifact-layout"><div class="artifact-files source-control-files"><section class="artifact-root">${workingChangesTree({changes:repositories.flatMap(repo=>repo.changes)},view,theme)}</section></div><div class="artifact-viewer document"><div class="artifact-viewer-head"><div class="working-file-identity"><strong>${esc(view.selectedDiffPath || "修改内容")}</strong><small>${view.diffPreview?.submodule ? "HEAD → 当前子模块提交" : `${esc(view.diffPreview?.baseLabel || "比较版本")} → 当前文件`}</small></div><div class="diff-view-controls"><div role="group" aria-label="CHANGE 布局"><button class="diff-icon-button" data-diff-layout="unified" aria-pressed="${view.diffLayout !== 'split'}" aria-label="行内" title="行内"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h8"/></svg></button><button class="diff-icon-button" data-diff-layout="split" aria-pressed="${view.diffLayout === 'split'}" aria-label="左右对比" title="左右对比"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M6 9h3M15 9h3M6 14h3M15 14h3"/></svg></button></div><div role="group" aria-label="CHANGE 范围"><button class="diff-icon-button" data-diff-scope="changes" aria-pressed="${!view.diffFull}" aria-label="仅差异" title="仅差异"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h6M7 4v6M4 17h6M14 7h6M14 17h6"/><path d="M14 12h6" opacity=".4"/></svg></button><button class="diff-icon-button" data-diff-scope="full" aria-pressed="${Boolean(view.diffFull)}" aria-label="完整文件" title="完整文件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 12h8M8 16h8"/></svg></button></div></div></div>${workingDiffMarkup(view.diffPreview, view.diffLayout)}</div></div>`;
   host.querySelector(".artifact-files").scrollTop = treeScroll;
 }
 
@@ -2644,6 +2674,10 @@ document.addEventListener("input", (event) => {
   createFloatingList(event.target,list,{onClose:()=>list.classList.remove('show')}).open();
 });
 
+$("#modal-backdrop").addEventListener('cancel', event => {
+  event.preventDefault();
+  if (!event.currentTarget.classList.contains('form-modal-open')) closeModal();
+});
 document.addEventListener("keydown", (event) => {
   if (event.target.id === "instruction-text" && !event.isComposing && event.keyCode !== 229) {
     const list = $("#mention-list");

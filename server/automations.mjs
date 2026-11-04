@@ -10,13 +10,20 @@ function pageOf(items, query = {}) {
   const total = items.length, totalPages = Math.max(1, Math.ceil(total / pageSize)), page = Math.min(requested, totalPages);
   return { items: clone(items.slice((page - 1) * pageSize, page * pageSize)), page, pageSize, total, totalPages };
 }
+function automationTaskTitle(name, timestamp, timeZone) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', numberingSystem: 'latn'
+  }).formatToParts(new Date(timestamp)).map(({type, value}) => [type, value]));
+  return `${name}#${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
 export function automationCommands(state) {
   state.automations ||= []; state.automationTriggers ||= [];
   const get = id => { const item = state.automations.find(item => item.id === id); if (!item) throw new Error('自动化不存在'); return item; };
   const recordView = item => {
     const run = state.runs.find(run => run.id === item.runId);
     const {configuration, ...summary} = item;
-    return { ...summary, status: run?.status || item.outcome, completedAt: run?.completedAt || null, completion: run?.confirmedBy ? run.confirmedBy === 'automation' ? 'automatic' : 'manual' : null };
+    return { ...summary, taskTitle: state.tasks.find(task => task.id === item.taskId)?.title || null, status: run?.status || item.outcome, completedAt: run?.completedAt || null, completion: run?.confirmedBy ? run.confirmedBy === 'automation' ? 'automatic' : 'manual' : null };
   };
   const view = item => ({ ...clone(item), latestTrigger: state.automationTriggers.filter(record => record.automationId === item.id).sort((a,b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)).slice(0,1).map(recordView)[0] || null });
   return {
@@ -76,7 +83,7 @@ export function automationCommands(state) {
       }
       try {
         return this.transaction(() => {
-          const task = this.createTask({ title: item.title + "（" + new Intl.DateTimeFormat("en-CA", {timeZone:item.timeZone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(plannedAt || at)) + "）", objective: item.objective, memberAgentIds: item.memberAgentIds, workflowTemplateId: item.workflowTemplateId, acceptanceCriteria: item.acceptanceCriteria });
+          const task = this.createTask({ title: automationTaskTitle(item.title, record.plannedAt, item.timeZone), objective: item.objective, memberAgentIds: item.memberAgentIds, workflowTemplateId: item.workflowTemplateId, acceptanceCriteria: item.acceptanceCriteria });
           Object.assign(state.tasks.find(value => value.id === task.id), { kind: 'automation', automationId: id, automationTriggerId: record.id, automationVersion: item.version });
           const run = this.createRun(task.id); record.taskId = task.id; record.runId = run.id;
           for (const previous of state.runs.filter(value => value.id !== run.id && value.status === 'awaiting_acceptance' && state.tasks.find(task => task.id === value.taskId)?.automationId === id)) {

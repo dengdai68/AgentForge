@@ -124,3 +124,5 @@ automations list/get/create/update/delete/trigger/triggers 与 App 使用同一�
 普通任务和自动化的 workflowTemplateId 都可省略、null 或空字符串，使用固定默认协作提示；显式无效 ID 拒绝。CLI schema/help 与 App 选填项一致；任务摘要默认工作流为 `{id:null,name:"默认协作"}`。tasks members 允许所有非终结状态（含失败与待验收），归档、完成、取消仍拒绝；经理与有未结投递的成员仍不可移除。改名同步头像文字，历史冻结身份不改写。
 
 `agents list --role ID_OR_NAME` 按当前绑定角色精确 ID 或唯一名称筛选；同名歧义拒绝并要求 ID，不存在的角色明确失败。与 --search 组合后分页/--all，和 App 角色下拉一致。沿用受认证 /api/agents、/api/roles 的目录读模型，不新增写入字段或权限。角色卡片移除 ID、创建时间与绑定人数仅属呈现调整，CLI ID 仍用于关联。
+
+自动化任务标题统一为 `自动化名称#yyyy-MM-dd HH:mm:ss`（当地时区、24 小时制；定时取计划时刻，手动取触发时刻）。触发列表首列展示真实任务标题；HTTP/CLI 的触发回执、列表和 latestTrigger 返回 taskTitle，未生成任务为 null；不重写历史任务名称。

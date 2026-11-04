@@ -89,7 +89,7 @@ assert.doesNotMatch(terminalHelp.stdout, /典型交付流程|核心概念|JSON �
 console.log('PASS bundled AI CLI offline schema without a global Node/PATH installation');
 // Signing a malformed archive does not prove its entries match the frozen
 // source. Read critical resources with the bundled Node/ASAR adapter first.
-const resourcePaths = ['LICENSE', 'NOTICE', 'web/icons/application.png', 'web/icons/application-ui.png', 'web/icons/application-dock.png', 'web/icons/trayTemplate.png', 'web/icons/trayTemplate@2x.png', 'web/login.html', 'web/login.js', 'web/settings.mjs', 'web/floating-list.mjs', 'web/app.js', 'web/communication.js', 'web/marketplace.mjs', 'web/styles.css', 'apps/electron/main.mjs', 'apps/electron/compact.css', 'server/index.mjs', 'cli/main.mjs'];
+const resourcePaths = ['LICENSE', 'NOTICE', 'web/icons/application.png', 'web/icons/application-ui.png', 'web/icons/application-dock.png', 'web/icons/trayTemplate.png', 'web/icons/trayTemplate@2x.png', 'web/login.html', 'web/login.js', 'web/settings.mjs', 'web/floating-list.mjs', 'web/app.js', 'web/automations.mjs', 'server/automations.mjs', 'web/communication.js', 'web/marketplace.mjs', 'web/styles.css', 'apps/electron/main.mjs', 'apps/electron/compact.css', 'server/index.mjs', 'cli/main.mjs'];
 const resourceProof = await execute(executable, ['-e', `const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');console.log(JSON.stringify(${JSON.stringify(resourcePaths)}.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(path.join(${JSON.stringify(join(appBundle, 'Contents/Resources/app.asar'))},file))).digest('hex')])));`], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30000 });
 for (const [file, hash] of JSON.parse(resourceProof.stdout)) assert.equal(hash, createHash('sha256').update(await readFile(resolve(file))).digest('hex'), `packaged resource differs from frozen source: ${file}`);
 console.log('PASS packaged application resources match the frozen source');
@@ -398,7 +398,7 @@ async function runPackagedTask(page) {
       }
       await page.locator('[data-select-working-file="docs/packaged/report.md"]').waitFor();
       currentFolders = (await page.locator('#working-directory-panel .explorer-folder > summary').allTextContents()).map(text=>text.replaceAll('›','').trim()).filter(text=>text!=='empty');
-      assert.deepEqual(await page.locator('.file-source-switch button').allTextContents(), ['当前文件', 'CHANGE']);
+      assert.deepEqual(await page.locator('.file-source-switch [data-ws-tab]').allTextContents(), ['当前文件', 'CHANGE']);
       assert.equal(await page.locator('[data-ws-tab="artifacts"], #artifact-snapshots-panel').count(), 0);
       const titleBox = await page.locator('.workspace-title h3').boundingBox(), backBox = await page.getByRole('button', { name: '返回任务列表', exact: true }).boundingBox();
       assert.ok(titleBox.x - backBox.x - backBox.width >= 10, 'back icon and title have deliberate spacing');
@@ -536,11 +536,14 @@ async function runPackagedTask(page) {
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(800, 560));
   const reader = await page.locator("#working-directory-panel .markdown-preview").boundingBox();
   assert.ok(reader && reader.height >= 100, "short-window file reader retains usable height");
-  assert.equal(await page.locator("[data-refresh-directory]").evaluate((button) => getComputedStyle(button).whiteSpace), "nowrap");
-  const downloadBox = await page.locator('[data-download-working-file]').boundingBox(), refreshBox = await page.locator('[data-refresh-directory]').boundingBox();
-  assert.ok(downloadBox && refreshBox && downloadBox.x + downloadBox.width <= refreshBox.x && Math.abs(downloadBox.y - refreshBox.y) < 2, 'download stays beside refresh in a short narrow window');
-  const toolbarBox = await page.locator('#working-directory-panel .directory-toolbar').boundingBox();
-  assert.ok(Math.abs(toolbarBox.x + toolbarBox.width - refreshBox.x - refreshBox.width) < 2, 'download and refresh stay at the toolbar right edge');
+  assert.equal(await page.locator('[data-refresh-directory]').innerText(),'');
+  assert.equal(await page.locator('[data-refresh-directory]').getAttribute('aria-label'),'刷新当前文件');
+  assert.equal(await page.locator('.file-source-switch [data-refresh-directory]').count(),1);
+  assert.equal(await page.locator('#working-directory-panel .artifact-viewer-head [data-download-working-file]').count(),1);
+  assert.equal(await page.locator('#working-directory-panel > .directory-toolbar').count(),0);
+  const refreshBox=await page.locator('[data-refresh-directory]').boundingBox(),toolbarBox=await page.locator('.file-source-switch').boundingBox();
+  assert.ok(refreshBox && toolbarBox && Math.abs(toolbarBox.x+toolbarBox.width-refreshBox.x-refreshBox.width)<=20,'refresh stays at the tab row right edge');
+  assert.equal(await page.locator('.file-source-switch').evaluate(el=>getComputedStyle(el).borderBottomWidth),'0px');
   await page.screenshot({ path: join(evidenceRoot, "packaged-file-short.png"), animations: "disabled" });
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1320, 860));
   await page.getByRole('button', { name: '返回任务列表', exact: true }).click();

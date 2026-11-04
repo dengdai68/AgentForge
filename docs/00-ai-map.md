@@ -188,3 +188,9 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 群聊追问由 communication-store 按每条明确 @ 消息入队，复用同成员 FIFO 与完成幂等，不再按人类根消息抑制已参与员工。prompts 同步忙碌排队与结束语义。communication.test 覆盖 A→B→A、忙碌/失败队首及重复回调。员工详情共用展开 Markdown 提示词，文件工具进入预览标题，test-issue3-ui 检查两主题宽窄布局。
 
 主目录控件统一：compact.css 让任务、自动化、团队、工作流、员工、角色、插件/MCP 市场共用32px搜索/筛选高度；styles.css 将角色页纳入44px目录工具栏。test-directory-headers 对比任务控件高度及员工/角色顶部、搜索和卡片坐标。无 CLI/API 变化。
+
+界面规范对齐：工作目录页签行移除下分隔线，当前文件/CHANGE 共用右侧无边框刷新图标；CHANGE 移除更改计数工具栏，对比布局/范围移入文件预览标题右侧，与当前文件保持同一标题结构。刷新忙碌/失败恢复及原文件选择语义不变。共享弹窗改用原生 dialog 维护键盘模态与焦点返回，表单仍仅显式关闭；统一 Runtime 同行字段、设置选中态、主题预览和语义焦点 tokens，移除弹窗硬编码阴影并支持减少动画。桌面维持紧凑尺寸，粗指针操作使用 44px 点击区。仅界面/交互变化，无 App/CLI/HTTP/Store 契约变化。 现行尺寸及已处理冲突记录在 `.interface-design/system.md`；隔离验证扩展 `scripts/test-issue3-ui.mjs`。
+
+自动化任务标题统一为 `自动化名称#yyyy-MM-dd HH:mm:ss`（当地时区、24 小时制；定时取计划时刻，手动取触发时刻）。触发列表首列展示真实任务标题；HTTP/CLI 的触发回执、列表和 latestTrigger 返回 taskTitle，未生成任务为 null；不重写历史任务名称。
+
+自动化触发记录仅按是否存在已创建的 Task/Run 提供「查看详情」，运行、暂停、待验收、完成、失败或取消均保留；未生成任务的跳过/创建回滚记录无入口。操作列固定在表格右侧，窄窗口无需横向滚动寻找详情。

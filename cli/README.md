@@ -78,3 +78,5 @@ automations 新增 list/get/create/update/delete/trigger/triggers；列表与触
 tasks/automations create 的 workflowTemplateId 可省略、null 或空字符串；默认协作不会隐式选取目录模板。automations 输入移除 timeZone，按本机当地时间执行。tasks members 支持失败与待验收等非终结状态，仍保护经理和未结投递成员。
 
 员工列表支持 --role ID_OR_NAME，与搜索组合后分页；精确 ID 优先，名称需唯一。App 采用同一角色目录与 roleIds 绑定关系。
+
+自动化任务标题统一为 `自动化名称#yyyy-MM-dd HH:mm:ss`（当地时区、24 小时制；定时取计划时刻，手动取触发时刻）。触发列表首列展示真实任务标题；HTTP/CLI 的触发回执、列表和 latestTrigger 返回 taskTitle，未生成任务为 null；不重写历史任务名称。
