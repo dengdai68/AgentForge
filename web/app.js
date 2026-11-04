@@ -552,7 +552,10 @@ function workflowDetails(template, { frozen = false } = {}) {
 /* ---------- 数字员工 ---------- */
 function renderAgents() {
   const query = ($("#agents-search").value || "").trim().toLowerCase();
-  const filtered = state.agents.filter(agent => `${agent.name} ${agent.description || ""} ${(agent.capabilities || []).join(" ")}`.toLowerCase().includes(query));
+  const roleSelect = $("#agents-role-filter"), selectedRole = roleSelect.value;
+  roleSelect.innerHTML = '<option value="">全部角色</option>' + state.roles.map(role=>`<option value="${esc(role.id)}">${esc(role.name)}</option>`).join('');
+  roleSelect.value = state.roles.some(role=>role.id===selectedRole) ? selectedRole : '';
+  const filtered = state.agents.filter(agent => (!roleSelect.value || agent.roleIds?.includes(roleSelect.value)) && `${agent.name} ${agent.description || ""} ${(agent.capabilities || []).join(" ")}`.toLowerCase().includes(query));
   const page = paginate(filtered, state.listPages.agents); state.listPages.agents = page.page;
   $("#agents-grid").innerHTML = page.items.map((agent) => `
     <div class="agent-card employee-card">
@@ -566,7 +569,7 @@ function renderAgents() {
       <div class="agent-runtime employee-runtime-summary"><span>${providerLabel(agent)}${agent.runtime?.model ? " · " + esc(agent.runtime.model) : " · CLI 默认模型"}${agent.runtime?.effort ? " · 思考 " + esc(agent.runtime.effort) : ""}${agent.runtime?.profile ? " · profile: " + esc(agent.runtime.profile) : ""}</span><span>插件 ${agent.runtime?.extensionSelection?.pluginIds?.length || 0} · MCP ${agent.runtime?.extensionSelection?.mcpIds?.length || 0}</span></div>
       ${agent.roleIds?.length ? `<div class="agent-runtime"><span>角色：${agent.roleIds.map(id=>esc(state.roles.find(role=>role.id===id)?.name || "（角色不存在）")).join("、")}</span></div>` : ""}
       <div class="directory-card-actions"><button class="small-button primary" data-chat-agent="${agent.id}">对话</button><button class="small-button" data-edit-agent="${agent.id}">编辑</button><button class="small-button danger" data-delete-agent="${agent.id}">删除</button></div>
-    </div>`).join("") || (query ? `<div class="directory-empty" role="status"><strong>没有匹配的数字员工</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有数字员工</strong>点击右上角「创建数字员工」添加。</div>`);
+    </div>`).join("") || (query || roleSelect.value ? `<div class="directory-empty" role="status"><strong>没有匹配的数字员工</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有数字员工</strong>点击右上角「创建数字员工」添加。</div>`);
   renderListPager("agents", page);
 }
 
@@ -575,7 +578,6 @@ function renderRoles() {
   const query = ($("#roles-search").value || "").trim().toLowerCase();
   const filtered = state.roles.filter(role => `${role.name} ${role.prompt || ""}`.toLowerCase().includes(query));
   const page = paginate(filtered, state.listPages.roles); state.listPages.roles = page.page;
-  const bindingCount = (roleId) => state.agents.filter(agent => agent.roleIds?.includes(roleId)).length;
   $("#roles-grid").innerHTML = page.items.map((role) => `
     <div class="agent-card">
       <div class="agent-card-top">
@@ -583,7 +585,6 @@ function renderRoles() {
         <div class="agent-card-identity"><h3>${esc(role.name)}</h3></div>
       </div>
       <p>${esc(role.prompt.length > 200 ? role.prompt.slice(0, 200) + "…" : role.prompt)}</p>
-      <div class="agent-footer"><span>${bindingCount(role.id) ? `${bindingCount(role.id)} 位员工绑定` : "未被员工绑定"} · ${timeAgo(role.createdAt)} 创建</span><span class="path-mono">${esc(role.id)}</span></div>
       <div class="directory-card-actions"><button class="small-button" data-edit-role="${role.id}">编辑</button><button class="small-button danger" data-delete-role="${role.id}">删除</button></div>
     </div>`).join("");
   $("#roles-grid").hidden = !page.items.length;
@@ -944,6 +945,8 @@ function renderWorkspace() {
   }
   const { run, artifacts, messages, events, traces = [] } = workspace;
   const view = workspaceView(run.id);
+  view.detailsByTab ||= {};
+  view.detailsOpen = view.detailsByTab[view.tab] ?? view.tab === "collaboration";
   const oldStream = box.querySelector("#trace-stream");
   if (box.dataset.runId === run.id) {
     rememberDirectoryReading(view);
@@ -2405,6 +2408,7 @@ function render() {
   views[state.currentView]?.();
 }
 
+$("#agents-role-filter").addEventListener("change", () => { state.listPages.agents = 1; renderAgents(); });
 $("#agents-search").addEventListener("input", () => {
   state.listPages.agents = 1;
   renderAgents();
@@ -2527,7 +2531,7 @@ document.addEventListener("click", (event) => {
   }
   if ((target = el("[data-unarchive-task]"))) return api(`/api/tasks/${target.dataset.unarchiveTask}/unarchive`, { method: "POST", body: "{}" }).then(async () => { toast("任务已恢复到任务中心。"); await refresh(); }).catch((error) => toast(error.message, true));
   if ((target = el("[data-delete-task]"))) return openDeleteTaskModal(target.dataset.deleteTask);
-  if ((target = el("[data-toggle-task-details]"))) { workspaceView().detailsOpen = !workspaceView().detailsOpen; return renderWorkspace(); }
+  if ((target = el("[data-toggle-task-details]"))) { workspaceView().detailsByTab ||= {}; workspaceView().detailsByTab[workspaceView().tab] = !workspaceView().detailsOpen; return renderWorkspace(); }
   if ((target = el("[data-toggle-task-description]"))) { workspaceView().descriptionExpanded = !workspaceView().descriptionExpanded; return renderWorkspace(); }
   if ((target = el("[data-edit-task-members]"))) return editTaskMembers();
   if ((target = el("[data-task-member-console]"))) { state.selectedAgentId=target.dataset.taskMemberConsole;workspaceView().tab='console';workspaceView().jumpLatest=true;return renderWorkspace(); }

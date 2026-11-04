@@ -180,3 +180,5 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 自动化空态：web/automations.mjs 复用 directory-empty 标题＋说明结构，与其他目录页同高；搜索无匹配与尚未创建分别说明。
 
 当前任务/自动化默认流程为 Store 固定协作快照；可选模板协议见 docs/03、21、27。Provider 详细诊断在 local-cli 的 execution content，资料展示共享 web/communication.js 的 employeeDetailMarkup。
+
+员工目录角色筛选入口为 web/app.js 与 cli/main.mjs，共用认证目录及 roleIds；任务详情 Tab 展开与自动化页头由 renderer 管理。员工澄清原投递等待/答复续接仍以 Store askQuestion/answerQuestion 为准，dispatch-routing 测试覆盖 A→B→A。

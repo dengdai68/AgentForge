@@ -779,3 +779,17 @@ test('task members CLI reads compact current roster and validates full replaceme
  assert.deepEqual((await invoke(['--file','-'],{memberAgentIds:['m','b']})).memberAgentIds,['m','b']);
  assert.equal(calls.at(-1).path,'/api/runs/r/members');assert.equal(calls.at(-1).method,'PUT');
 });
+
+test('employee role filter resolves ID or unique name before search and pagination', async()=>{
+ const f=await fixture(),roles=[{id:'role_a',name:'分析'},{id:'role_b',name:'开发'}];
+ const agents=Array.from({length:45},(_,i)=>({id:'agent_'+i,name:'员工 '+i,roleIds:i<22?['role_a','role_b']:['role_b']}));
+ const invoke=args=>execute(['agents','list',...args,'--session-file',f.sessionFile],{fetcher:async url=>new Response(JSON.stringify(url.endsWith('/roles')?{roles}:{agents}))});
+ assert.equal((await invoke(['--role','分析','--page','2'])).items.length,2);
+ assert.equal((await invoke(['--role','role_a','--all'])).total,22);
+ assert.equal((await invoke(['--role','role_a','--search','21'])).total,1);
+ assert.equal((await invoke(['--role','role_a','--search','44'])).total,0);
+ await assert.rejects(invoke(['--role','不存在']),e=>e.code==='NOT_FOUND');
+ roles.push({id:'role_c',name:'分析'});await assert.rejects(invoke(['--role','分析']),e=>e.code==='AMBIGUOUS_REFERENCE');
+ assert.equal((await invoke(['--role','role_a'])).total,22);
+ assert.match((await captured(['agents','list','--help'])).stdout,/--role/);
+});

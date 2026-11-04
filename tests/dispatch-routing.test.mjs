@@ -877,3 +877,18 @@ test('retrying a failed consulted employee preserves the suspended parent and re
     assert.equal(store.claimDispatch(run.id).id,parent.id);
   }finally{store.close();}
 });
+
+test('employee consultation waits for B and queues the original A delivery with the linked answer',()=>{
+ const store=createFixtureStore();try{
+  const run=store.createRun(store.listTasks()[0].id);
+  const a=store.enqueueDispatch(run.id,{recipientAgentId:'agent_analyst',workflowNodeId:'requirements',purpose:'node'});store.claimDispatch(run.id);
+  const question=store.askQuestion(a.id,{audience:'agent',recipientAgentId:'agent_engineer',question:'请澄清接口字段'});
+  assert.equal(store.getDispatch(a.id).status,'waiting');assert.equal(store.getRun(run.id).status,'running');
+  const b=store.claimDispatch(run.id);assert.equal(b.recipientAgentId,'agent_engineer');assert.equal(b.parentDispatchId,a.id);
+  assert.throws(()=>store.answerQuestion(run.id,question.id,'不属于我的问题',{type:'agent',id:'agent_tester'}),/待回答问题/);
+  const answer=store.answerQuestion(run.id,question.id,'字段为 name',{type:'agent',id:'agent_engineer',name:'B'});store.completeDispatch(b.id);
+  assert.equal(answer.replyToMessageId,question.id);assert.equal(answer.recipient.id,'agent_analyst');
+  assert.equal(store.getDispatch(a.id).status,'queued');assert.ok(store.getDispatch(a.id).messageIds.includes(answer.id));
+  assert.equal(store.claimDispatch(run.id).id,a.id);
+ }finally{store.close();}
+});

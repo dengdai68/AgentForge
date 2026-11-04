@@ -122,3 +122,5 @@ automations list/get/create/update/delete/trigger/triggers 与 App 使用同一�
 `tasks members TASK_ID [--run RUN_ID]` 查询当前成员；附 `--file FILE.json`（或 `-`）完整替换 `{ "memberAgentIds": [...] }`，使用同一认证 PUT /api/runs/:id/members。经理可用其目录 ID 或当前 Run ID，但不能重复；不能移除经理或有未结投递的成员。历史快照保留。teams create/update 均接受 status=active|inactive，创建默认 active，与 App 名称旁“可用／停用”单选一致。tasks message 在存在待人类澄清时拒绝，须 tasks reply 精确回复。
 
 普通任务和自动化的 workflowTemplateId 都可省略、null 或空字符串，使用固定默认协作提示；显式无效 ID 拒绝。CLI schema/help 与 App 选填项一致；任务摘要默认工作流为 `{id:null,name:"默认协作"}`。tasks members 允许所有非终结状态（含失败与待验收），归档、完成、取消仍拒绝；经理与有未结投递的成员仍不可移除。改名同步头像文字，历史冻结身份不改写。
+
+`agents list --role ID_OR_NAME` 按当前绑定角色精确 ID 或唯一名称筛选；同名歧义拒绝并要求 ID，不存在的角色明确失败。与 --search 组合后分页/--all，和 App 角色下拉一致。沿用受认证 /api/agents、/api/roles 的目录读模型，不新增写入字段或权限。角色卡片移除 ID、创建时间与绑定人数仅属呈现调整，CLI ID 仍用于关联。

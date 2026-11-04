@@ -10,7 +10,7 @@ import { collaborationRecords } from '../client/console-projections.mjs';
 function parse(argv) {
   const args = [], flags = {};
   const switches = new Set(['help', 'yes', 'all', 'password-stdin', 'json', 'archived', 'start']);
-  const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'run', 'workflow']);
+  const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'run', 'workflow', 'role']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { args.push(arg); continue; }
@@ -43,6 +43,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     else if (args.length !== 2) throw usage('此命令不接受额外参数');
     if (['create', 'update', 'import', 'auto-update'].includes(operation)) allowed.push('file');
     if (operation === 'list') allowed.push('page', 'all', 'search');
+    if (group === 'agents' && operation === 'list') allowed.push('role');
     if (['delete', 'terminate', 'test'].includes(operation)) allowed.push('yes');
     if (group === 'automations' && ['list','triggers'].includes(operation)) allowed.push('status', 'page', 'all');
     if (group === 'tasks') {
@@ -94,7 +95,14 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
   };
   if (operation === 'list') {
     const result = await readList();
-    const items = result[resource.key].filter(item => !flags.search || `${item.name || item.provider || ''} ${item.description || ''} ${item.mission || ''} ${item.prompt || ''} ${(item.capabilities || []).join(' ')}`.toLocaleLowerCase().includes(flags.search.trim().toLocaleLowerCase()));
+    let roleId;
+    if (group === 'agents' && flags.role) {
+      const {roles} = await client.request('/api/roles');
+      const exact = roles.find(role=>role.id===flags.role), matches = roles.filter(role=>role.name===flags.role);
+      if (!exact && matches.length !== 1) throw new CliError(matches.length ? 'AMBIGUOUS_REFERENCE' : 'NOT_FOUND', matches.length ? '角色名称不唯一，请使用 ID' : '角色不存在', '用 roles list 查询角色 ID。', 4);
+      roleId = exact?.id || matches[0].id;
+    }
+    const items = result[resource.key].filter(item => (!roleId || item.roleIds?.includes(roleId)) && (!flags.search || `${item.name || item.provider || ''} ${item.description || ''} ${item.mission || ''} ${item.prompt || ''} ${(item.capabilities || []).join(' ')}`.toLocaleLowerCase().includes(flags.search.trim().toLocaleLowerCase())));
     const selected = flags.all ? items : items.slice((page - 1) * 20, page * 20);
     return { items: selected, total: items.length, page: flags.all ? null : page, pageSize: flags.all ? null : 20, hasMore: !flags.all && page * 20 < items.length };
   }

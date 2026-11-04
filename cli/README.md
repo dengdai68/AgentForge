@@ -76,3 +76,5 @@ automations 新增 list/get/create/update/delete/trigger/triggers；列表与触
 任务成员查询/修改使用 tasks members TASK_ID，写入附 --file，完整成员列表含经理；App 编辑与 CLI 共用 Store 的状态、忙碌成员、唯一经理校验。团队创建支持 status，默认 active。
 
 tasks/automations create 的 workflowTemplateId 可省略、null 或空字符串；默认协作不会隐式选取目录模板。automations 输入移除 timeZone，按本机当地时间执行。tasks members 支持失败与待验收等非终结状态，仍保护经理和未结投递成员。
+
+员工列表支持 --role ID_OR_NAME，与搜索组合后分页；精确 ID 优先，名称需唯一。App 采用同一角色目录与 roleIds 绑定关系。

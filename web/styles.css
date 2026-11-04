@@ -2134,3 +2134,17 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 .employee-profile-prompt summary { cursor:pointer; padding:10px 12px; color:var(--muted); font-size:12px; }
 .employee-profile-prompt pre { margin:0; padding:12px; border-top:1px solid var(--line); white-space:pre-wrap; overflow-wrap:anywhere; font-family:inherit; font-size:13px; line-height:1.75; max-height:300px; overflow:auto; }
 .communication-member-detail { width:min(640px,calc(100vw - 32px)); }
+
+/* Task detail preferences belong to each workspace tab. */
+.task-member-section > header { margin-bottom:8px; }
+#run-workspace .collaboration-row .collaboration-content { padding-inline:0.5em; }
+#run-workspace .collaboration-row.needs-answer { padding-inline:0; background:transparent; box-shadow:none; }
+#run-workspace .collaboration-row.needs-answer .collaboration-content { background:var(--record-warning-soft); border:1px solid var(--line); border-left:3px solid var(--record-warning); padding-block:8px; }
+.communication-roster-member { min-height:35px; }
+.main-content:has(#automations-view.active .automation-detail-header) > .topbar { display:none; }
+.automation-detail-header { border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:12px; }
+.automation-detail-header .automation-schedule { margin-bottom:0; }
+#agents-role-filter { min-width:140px; max-width:240px; }
+
+#run-workspace .collaboration-row > time, #run-workspace .collaboration-row > div > header { padding-inline:0.5em; }
+.communication-roster-member > button:first-child { padding-block:2px; }
