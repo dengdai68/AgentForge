@@ -87,7 +87,7 @@ try {
   let roles = (await api('/api/roles', null, 'GET')).roles;
   assert.equal(roles.length, 1);
   const role = roles[0];
-  assert.deepEqual(Object.keys(role).sort(), ['createdAt', 'id', 'name', 'prompt'].sort(), 'role holds only name and prompt plus system metadata');
+  assert.deepEqual(Object.keys(role).sort(), ['createdAt', 'id', 'name', 'prompt', 'extensionSelection'].sort(), 'role exposes configuration without internal resolved paths');
   for (const theme of ['minimal', 'warm']) {
     await page.goto(origin + '/settings/appearance');
     await page.locator(`[name="theme"][value="${theme}"]`).check();
@@ -108,7 +108,7 @@ try {
   // Cards carry a full-width title plus the role ID; duplicate names stay
   // distinguishable in the employee selector by that ID.
   const card = page.locator('#roles-grid .agent-card', { hasText: 'UI_ROLE_MARK_V2' });
-  assert.ok((await card.textContent()).includes(role.id), 'role card shows its ID');
+  assert.ok(!(await card.textContent()).includes(role.id), 'role card omits internal ID');
   const geometry = await card.evaluate(node => {
     const identity = node.querySelector('.agent-card-identity').getBoundingClientRect();
     const title = node.querySelector('h3').getBoundingClientRect();
@@ -154,6 +154,12 @@ try {
     pickerPlugins.push((await api('/api/runtime/marketplace',{path:source})).plugins[0]);
     const mcp=await api('/api/runtime/mcp-marketplace',{name:'多选框验证 MCP '+index,description:'布局验证，不执行',content:JSON.stringify({mcpServers:{['picker_'+index]:{command:'node',args:['--version']}}})});pickerMcps.push(mcp.entry || mcp);
   }
+  const inherited={pluginIds:[pickerPlugins[0].id],mcpIds:[pickerMcps[0].id]};
+  assert.equal((await api('/api/roles/'+role.id,{extensionSelection:inherited},'PUT')).status,200);
+  await page.goto(origin+'/roles');await page.locator('[data-edit-role="'+role.id+'"]').click();
+  await page.locator('#role-market-selection [data-selection-state]').filter({hasText:'绑定此角色'}).waitFor();
+  assert.equal(await page.locator('#role-market-selection .extension-chip').count(),2);
+  await page.locator('#role-form [type=submit]').click();await page.locator('#role-form').waitFor({state:'detached'});
   await page.goto(origin+'/mcp-marketplace');await page.locator('[data-market-list] .installed-extension-card').first().waitFor();
   assert.equal(await page.locator('[data-market-list] .extension-card-meta').count(),0,'MCP cards do not display internal IDs');
   const mcpText=await page.locator('[data-market-list]').innerText();for(const item of pickerMcps){assert.ok(mcpText.includes(item.name));assert.ok(!mcpText.includes(item.id.slice(0,8)));}
@@ -187,9 +193,9 @@ try {
     await assertPromptRows('#agent-form [name=systemPrompt]');
     const geometry=await page.locator('#agent-form .extension-picker').evaluateAll(pickers=>pickers.map(picker=>{
       const control=picker.querySelector('.extension-picker-control'),r=control.getBoundingClientRect(),style=getComputedStyle(control),inner=getComputedStyle(picker.querySelector('input')),chips=[...picker.querySelectorAll('.extension-chip')];
-      return {innerBorder:inner.borderWidth,innerShadow:inner.boxShadow,count:chips.length,inside:chips.every(chip=>{const c=chip.getBoundingClientRect();return c.left>=r.left && c.right<=r.right+1 && c.top>=r.top && c.bottom<=r.bottom+1;}),border:style.border,background:style.backgroundColor,radius:style.borderRadius,outside:picker.querySelectorAll(':scope > .extension-picked').length};
+      return {height:r.height,innerBorder:inner.borderWidth,innerShadow:inner.boxShadow,count:chips.length,inside:chips.every(chip=>{const c=chip.getBoundingClientRect();return c.top>=r.top && c.bottom<=r.bottom+1;}),border:style.border,background:style.backgroundColor,radius:style.borderRadius,outside:picker.querySelectorAll(':scope > .extension-picked').length};
     }));
-    assert.equal(geometry.length,3);for(const result of geometry){assert.equal(result.innerBorder,'0px');assert.equal(result.innerShadow,'none');assert.equal(result.count,2);assert.equal(result.inside,true);assert.equal(result.outside,0);assert.equal(result.border,geometry[0].border);assert.equal(result.background,geometry[0].background);assert.equal(result.radius,geometry[0].radius);}
+    assert.equal(geometry.length,3);for(const result of geometry){assert.equal(result.innerBorder,'0px');assert.equal(result.innerShadow,'none');assert.equal(result.count,2);assert.equal(result.inside,true);assert.equal(result.height,38);assert.equal(result.outside,0);assert.equal(result.border,geometry[0].border);assert.equal(result.background,geometry[0].background);assert.equal(result.radius,geometry[0].radius);}
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.screenshot({path:join(root,`inline-select-${theme}-${width}.png`),animations:'disabled'});
   }
@@ -281,7 +287,9 @@ try {
     const input=page.locator('#'+inputId);await input.click();await input.fill(item.name);
     const picker=input.locator('xpath=ancestor::*[contains(@class,"extension-picker-search")]');
     const control=await picker.locator('.extension-picker-control').boundingBox();
-    await page.mouse.move(control.x+control.width/2,control.y+control.height-2);await page.mouse.move(control.x+control.width/2,control.y+control.height+2);
+    await picker.locator('[role=listbox]').waitFor({state:'visible'});
+    const options=await picker.locator('[role=listbox]').boundingBox(),below=options.y>=control.y+control.height;
+    await page.mouse.move(control.x+control.width/2,below?control.y+control.height-2:control.y+2);await page.mouse.move(control.x+control.width/2,below?control.y+control.height+2:control.y-2);
     assert.equal(await input.getAttribute('aria-expanded'),'true','the 4px gap remains inside the picker hover region');
     await picker.locator(`[data-add-extension="${item.id}"]`).click();
     assert.equal(await picker.locator('.extension-chip').count(),1);
@@ -298,6 +306,13 @@ try {
   await cli(['agents','update',employee.id,'--file','-'],JSON.stringify({roleIds:remaining}));
   assert.deepEqual((await api('/api/agents',null,'GET')).agents.find(item=>item.id===employee.id).roleIds,remaining);
   await cli(['agents','update',employee.id,'--file','-'],JSON.stringify({roleIds:[]}));
+  const cliRole=(await cli(['roles','create','--file','-'],JSON.stringify({name:'CLI 扩展角色',prompt:'只用于验收',extensionSelection:inherited}))).role;
+  assert.deepEqual((await cli(['roles','get',cliRole.id])).extensionSelection,inherited);
+  await cli(['agents','update',employee.id,'--file','-'],JSON.stringify({roleIds:[cliRole.id]}));
+  assert.deepEqual((await cli(['agents','get',employee.id])).inheritedExtensionSelection,inherited);
+  await cli(['roles','update',cliRole.id,'--file','-'],JSON.stringify({extensionSelection:{pluginIds:[],mcpIds:[]}}));
+  assert.deepEqual((await cli(['agents','get',employee.id])).inheritedExtensionSelection,{pluginIds:[],mcpIds:[]});
+  await cli(['agents','update',employee.id,'--file','-'],JSON.stringify({roleIds:[]}));await cli(['roles','delete',cliRole.id,'--yes']);
   console.log('PASS roles UI acceptance and authenticated CLI arrays; evidence: ' + root);
 } finally {
   await app.close();

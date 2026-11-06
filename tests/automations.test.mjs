@@ -96,8 +96,8 @@ test('reopened Store preserves occurrence key, configuration and next-run confir
 test('pending traces prevent next-run confirmation; failed retries cannot overlap another cycle',()=>{
   const {store,automation}=setup();try{
     const first=store.triggerAutomation(automation.id);const run=store.getRun(first.runId);
-    const trace=store.createTrace(run.id,{agentId:run.manager.id,workflowNodeId:'content_brief',type:'manager'});store.requestHumanAcceptance(run.id);
-    assert.equal(store.triggerAutomation(automation.id).outcome,'skipped');assert.equal(store.getRun(run.id).status,'awaiting_acceptance');
+    const trace=store.createTrace(run.id,{agentId:run.manager.id,workflowNodeId:'content_brief',type:'manager'});assert.throws(()=>store.requestHumanAcceptance(run.id),/仍有成员/);
+    assert.equal(store.triggerAutomation(automation.id).outcome,'skipped');assert.equal(store.getRun(run.id).status,'running');
     store.completeTrace(trace.id);store.updateRun(run.id,{status:'running'});store.failRun(run.id,'测试失败');
     const second=store.triggerAutomation(automation.id);assert.ok(second.runId);assert.throws(()=>store.retryFailedOrchestration(run.id),/其他轮次/);assert.equal(store.getRun(run.id).status,'failed');
   }finally{store.close();}
@@ -166,4 +166,19 @@ test('created automation tasks keep detail references in every execution state',
       assert.equal(record.status,status);assert.equal(record.taskId,first.taskId);assert.equal(record.runId,first.runId);assert.equal(record.taskTitle,first.taskTitle);
     } finally {store.close();}
   }
+});
+
+test('disabled automation deletion atomically removes every trigger/task/run and preserves unrelated tasks',()=>{
+ const {store,input,automation}=setup();try{
+  const manual=store.createTask({title:'保留',objective:'普通任务',memberAgentIds:input.memberAgentIds});
+  const first=store.triggerAutomation(automation.id);store.requestHumanAcceptance(first.runId);
+  const second=store.triggerAutomation(automation.id);store.saveAutomation({enabled:false},automation.id);
+  assert.throws(()=>store.deleteAutomation(automation.id),/活跃/);
+  assert.ok(store.getAutomation(automation.id));assert.ok(store.getRun(first.runId));
+  store.cancelRun(second.runId,'删除自动化');
+  const removed=store.deleteAutomation(automation.id);assert.equal(removed.taskIds.length,2);
+  assert.throws(()=>store.getAutomation(automation.id),/不存在/);
+  const state=store.snapshot();for(const key of ['runs','traces','messages','dispatches','decisions','artifacts'])assert.equal(state[key].filter(item=>removed.runIds.includes(item.runId || item.id)).length,0,key);
+  assert.equal(state.automationTriggers.length,0);assert.ok(store.getTask(manual.id));
+ }finally{store.close();}
 });

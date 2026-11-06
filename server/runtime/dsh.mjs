@@ -85,7 +85,7 @@ async function launch(input, { content = () => null, cancelledError = message =>
     const id = ++serial; pending.set(id, { method, resolve, reject });
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
   });
-  const unregister = registerExecution(key, { terminate(message) { cancelled = cancelledError(message); abort(cancelled); } });
+  const unregister = registerExecution(key, { terminate(message) { cancelled = cancelledError(message); abort(cancelled); } }, input.runId || key);
   child.on('error', error => { diagnostic('provider.spawn_error', { error }); void diagnoseLaunch({ command, cwd: input.workspacePath || directory, searchPath: env.PATH, provider: 'DeepSeek Harness' }).then(value => diagnostic('provider.launch_diagnostic', value)).catch(() => {}); abort(error); });
   child.stdin.on('error', error => { if (!closed) abort(error); });
   child.once('close', (code, signal) => { if (!stopping && !graceful) abort(new Error(`DeepSeek Harness 进程提前退出 (${code ?? signal})${stderr ? ': ' + stderr.slice(-2000) : ''}`)); });

@@ -406,12 +406,11 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     if (typeof key !== 'string' || !/^chat_[A-Za-z0-9_-]+$/.test(key)) throw new Error('沟通 ID 不合法');
     return assertInside(runRoot, join(runRoot, 'communications', key));
   };
-  async function communicationDirectory(key, parts = []) {
-    communicationPath(key);
+  async function privateDirectory(parts) {
     await mkdir(runRoot, { recursive: true, mode: 0o700 });
     if ((await lstat(runRoot)).isSymbolicLink()) throw new Error('沟通目录不允许符号链接');
     let current = runRoot;
-    for (const part of ['communications', key, ...parts]) {
+    for (const part of parts) {
       if (typeof part !== 'string' || !part || part === '.' || part === '..' || /[/\\\0]/.test(part)) throw new Error('沟通文件路径无效');
       current = assertInside(runRoot, join(current, part));
       await mkdir(current, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
@@ -420,6 +419,7 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     }
     return current;
   }
+  const communicationDirectory = (key, parts = []) => { communicationPath(key); return privateDirectory(['communications', key, ...parts]); };
   const attachmentName = name => {
     if (typeof name !== 'string' || !name.trim() || ['.', '..'].includes(name) || /[/\\\0]/.test(name) || Buffer.byteLength(name) > 240) throw new Error('附件文件名无效：不能包含路径，最多 240 字节');
     return name;
@@ -471,6 +471,28 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
   return {
     root: runRoot,
     communicationPath,
+    runAttachmentPath(runId, record) {
+      attachmentName(record.name);
+      if (!/^attachment_[a-f0-9-]{36}$/.test(record.id) || record.path !== `attachments/${record.id}/${record.name}`) throw new Error('附件路径无效');
+      return join(pathForRun(runId), record.path);
+    },
+    async writeRunAttachment(runId, name, content) {
+      pathForRun(runId); attachmentName(name);
+      if (!Buffer.isBuffer(content) || content.length > DEFAULT_MAX_FILE_BYTES) throw new Error('附件最大 20 MiB');
+      const id = `attachment_${randomUUID()}`, directory = await privateDirectory(['runs', runId, 'attachments', id]);
+      await writeFile(join(directory, name), content, {mode:0o600, flag:'wx'});
+      return {id, name, path:`attachments/${id}/${name}`, bytes:content.length, sha256:createHash('sha256').update(content).digest('hex')};
+    },
+    async readRunAttachment(runId, record) {
+      this.runAttachmentPath(runId, record);
+      const result = await readArtifactFile(runRoot, `runs/${runId}/${record.path}`, DEFAULT_MAX_FILE_BYTES);
+      if (result.bytes !== record.bytes || createHash('sha256').update(result.content).digest('hex') !== record.sha256) throw new Error('附件完整性校验失败');
+      return result.content;
+    },
+    async discardRunAttachment(runId, record) {
+      await this.readRunAttachment(runId, record);
+      await rm(join(pathForRun(runId), 'attachments', record.id), {recursive:true});
+    },
     async writeCommunicationAttachment(key, name, content) {
       attachmentName(name);
       if (!Buffer.isBuffer(content) || content.length > DEFAULT_MAX_FILE_BYTES) throw new Error('附件最大 20 MiB');

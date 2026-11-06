@@ -584,7 +584,7 @@ try {
       await page.locator('.task-acceptance summary').click();
       await criteria.waitFor();
       await criteria.fill(Array.from({ length: 21 }, (_, index) => `验收标准 ${index + 1}`).join("\n"));
-      await page.getByRole("button", { name: "创建并开始", exact: true }).click();
+      await page.getByRole("button", { name: "保存并开始", exact: true }).click();
       await page.getByText("验收标准最多 20 条。", { exact: true }).waitFor();
       await verifyModalActions();
       await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(800, 560));

@@ -79,3 +79,11 @@ Codex 在 Provider 确认 thread.started 之前出现明确鉴权/未登录错�
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
 
 Provider 重试和错误的详细正文通过 execution content 保存：错误类别/信息、HTTP 状态、请求 ID、重试次数/上限/延迟与可用 stderr 错误行。只提取允许的诊断字段，不序列化请求或整个 Provider frame；系统与用户提示分别脱敏，凭据过滤继续生效。持久事件仅保留摘要，控制台按 contentRef 展开。Provider 未提供的信息及旧记录不能补造。
+
+同一任务不同成员可以并行调用 Provider，每个成员保留独立原生会话与串行输入。Runtime 注册键为 Run/员工、停止分组为 Run；暂停/终止向组内全部调用发送停止。模型共享任务工作目录，不提供自动 worktree 或 Git 合并。文件快照记录本轮观察到的内容，不证明并行修改的唯一作者。真实并发验收入口为 `AGENTFORGE_TASK_PARALLEL_REAL=1 node scripts/test-task-parallel-real.mjs`，使用隔离 Electron/HOME/数据与实际 Claude。
+
+插件/MCP 当前目录由 Store 数据库管理，Runtime 继续负责不可变文件与绑定/执行完整性。软删除解除所有员工的当前配置，不撤销已经冻结的调用；后续任务/沟通按新的当前选择运行。列表索引不会替代执行前校验。
+
+任务附件在调用前由 Run Files 校验字节数、摘要与目录链，taskPrompt 的当前消息携带真实绝对路径及文件名，不将二进制嵌入提示词或数据库。附件读取失败明确使当前投递失败，保留原员工重试；不假定仅凭扩展名已读取图片。执行读取采用 Store 精简上下文，不复制全量审计和重复员工配置。
+
+角色插件/MCP作为员工执行配置来源之一，派生时与直接选择按ID去重；Provider兼容和命名空间在保存时校验，冻结任务及已排队沟通不回写。扩展文件不迁入数据库。

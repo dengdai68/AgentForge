@@ -99,16 +99,17 @@
 .extension-picker { min-width:0; }.extension-picker > label { display:block; margin-bottom:7px; font-size:12px; }
 .extension-picker-search { position:relative; }
 .floating-list[popover] { position:fixed; inset:auto; margin:0; border:0; background:transparent; overflow:visible; box-sizing:border-box; color:inherit; font:inherit; }
-.extension-picker-control { display:flex; align-items:center; flex-wrap:wrap; gap:5px; min-height:38px; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--paper); cursor:text; }
+.extension-picker-control { display:flex; align-items:center; flex-wrap:nowrap; gap:5px; height:38px; min-height:38px; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--paper); cursor:text; }
 .extension-picker-control:focus-within { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-line); }
 /* The chip control owns focus; override generic form skins in both hosts. */
 :is(html:root,html:root[data-theme]) .extension-picker .extension-picker-control > input,:is(html:root,html:root[data-theme]) .extension-picker .extension-picker-control > input:focus { flex:1 1 100px; width:100px; min-width:70px; min-height:26px; padding:2px 0; margin:0; border:0; border-radius:0; background:transparent; box-shadow:none; outline:none; font:inherit; }
 .extension-picker-options { position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:10; max-height:190px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:4px; background:var(--paper); box-shadow:var(--shadow); }
 .extension-picker-options button { display:block; text-align:left; width:100%; padding:8px; border:0; border-radius:4px; background:transparent; color:var(--ink); font-size:12px; }
 .extension-picker-options button:hover,.extension-picker-options button:focus-visible { background:var(--selection-bg); }.extension-picker-options small { display:block; color:var(--muted); margin-top:3px; overflow-wrap:anywhere; }
-.extension-picker-options button:disabled { opacity:.5; cursor:not-allowed; }.extension-picked { display:contents; }
+.extension-picker-options button:disabled { opacity:.5; cursor:not-allowed; }.extension-picked { display:flex; flex:0 1 auto; min-width:0; gap:5px; overflow-x:auto; scrollbar-width:none; }
 .extension-chip { display:inline-flex; flex:0 1 auto; min-width:0; align-items:center; gap:6px; max-width:100%; overflow-wrap:anywhere; padding:4px 7px; border:1px solid var(--line); border-radius:5px; background:var(--surface-soft); font-size:12px; }
-.extension-chip-name { min-width:0; overflow-wrap:anywhere; }
+.extension-chip-name { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.extension-picked .extension-chip { flex:none; max-width:220px; padding:0 7px; height:26px; white-space:nowrap; }
 .extension-chip button { flex:none; min-width:20px; min-height:22px; cursor:pointer; border:0; background:transparent; color:var(--muted); padding:0 2px; font-size:15px; }
 @media(max-width:700px) { .employee-properties-row,#employee-market-selection { grid-template-columns:minmax(0,1fr); }.employee-identity-row { grid-template-columns:minmax(0,1fr) 135px; gap:10px; }.installed-extension-row { grid-template-columns:minmax(0,1fr) auto; }.installed-extension-row > span { display:none; } }
 * { box-sizing:border-box; }
@@ -1354,7 +1355,6 @@ button { cursor:pointer; }
 .communication-message-attachments,.communication-draft-attachments { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .communication-message.from-human .communication-message-attachments { justify-content:flex-end; }
 .communication-draft-attachments:empty,[data-chat-upload-status]:empty { display:none; }
-.communication-composer-actions > button[data-chat-attach] { display:inline-flex; align-items:center; gap:5px; }
 .communication-composer-actions > span { flex:1; min-width:0; }
 .console-open .communication-composer-actions > span { display:none; }
 .communication-trace-stream:focus-visible { outline:2px solid var(--record-info); outline-offset:-2px; }
@@ -1385,8 +1385,9 @@ button { cursor:pointer; }
 .communication-composer { position:relative;padding:14px 28px 20px;border-top:1px solid var(--line); }
 .communication-composer label { font-size:12px;display:block;margin-bottom:7px; }
 .communication-composer textarea { width:100%;resize:vertical;min-height:80px;max-height:220px;padding:12px;font-size:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg); }
-.communication-composer > div:last-child { display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px; }
-.communication-composer > div > span { font-size:11px;color:#697160; }
+.communication-composer-actions { display:flex;align-items:center;gap:8px;margin-top:8px; }
+.communication-composer-actions > [type=submit] { margin-left:auto; }
+.communication-composer-actions > span { font-size:11px;color:var(--muted); }
 .communication-empty { margin:auto;padding:40px;text-align:center;color:#697160;line-height:1.8; }
 .communication-mentions { position:absolute;bottom:100%;left:28px;width:min(300px,calc(100% - 56px));max-height:220px;overflow:auto;background:var(--paper);box-shadow:var(--shadow-hover);border:1px solid var(--line);border-radius:12px;padding:4px;z-index:5; }
 .communication-mentions button { display:flex;flex-direction:column;gap:3px;width:100%;border:0;border-radius:8px;background:transparent;padding:8px 10px;text-align:left;font-size:13px;line-height:1.4;overflow-wrap:anywhere; }
@@ -2057,8 +2058,8 @@ html .runtime-model-row .model-refresh:hover { background:var(--selection-bg); }
 .automation-table th { color: var(--muted); font-weight: 500; white-space: nowrap; }
 .automation-table small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .automation-name { text-align: left; overflow-wrap: anywhere; max-width: 260px; }
-.automation-trigger-table { min-width:1100px; table-layout:fixed; }
-.automation-trigger-table .trigger-title { width:280px; }
+.automation-trigger-table { min-width:820px; table-layout:fixed; }
+.automation-trigger-table .trigger-title { width:28%; }
 .automation-trigger-title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .automation-trigger-table .trigger-time { width:170px; }
 .automation-trigger-table .trigger-source { width:80px; }
@@ -2186,3 +2187,67 @@ body.modal-open { overflow:hidden; }
 @media(pointer:coarse) {
   :is(.primary-button,.ghost-button,.small-button,.danger-button,.diff-icon-button,.modal-close,.text-action,.settings-radio-option,.settings-toggle,.runtime-availability) { min-width:44px; min-height:44px; }
 }
+
+/* Communication media shares attachment ownership and the existing surface scale. */
+.communication-message-attachments { flex-direction:column; align-items:flex-start; }
+.communication-message.from-human .communication-message-attachments { align-items:flex-end; }
+.communication-attachment-list { display:flex; align-items:flex-start; flex-wrap:wrap; gap:8px; max-width:100%; }
+.communication-attachment-list > .communication-attachment { flex:0 1 auto; }
+.communication-attachment-list > .communication-attachment > svg { flex:none; width:16px; height:16px; }
+.communication-message.from-human .communication-attachment-list { justify-content:flex-end; }
+.communication-image-item { flex:none; margin:0; width:200px; max-width:100%; }
+.communication-image { display:block; position:relative; width:100%; padding:0; overflow:hidden; border:0; border-radius:6px; background:transparent; color:var(--muted); cursor:zoom-in; }
+.communication-image img { display:block; width:100%; height:160px; object-fit:contain; }
+.communication-image-error { display:none; align-items:center; justify-content:center; min-height:96px; padding:12px; font-size:12px; }
+.communication-image[data-image-error] img { display:none; }
+.communication-image[data-image-error] .communication-image-error { display:flex; }
+/* Shared draft composer: images and documents share one row above the text. */
+.message-composer-card { min-width:0; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); }
+.message-composer-input { min-width:0; }
+.message-composer-card:focus-within { border-color:var(--accent); box-shadow:0 0 0 2px var(--control-focus-ring); }
+:is(#run-workspace .instruction-form,.communication-composer) .message-composer-input textarea { display:block; width:100%; min-height:64px; max-height:180px; margin:0; padding:8px 0; border:0; border-radius:0; background:transparent; color:var(--ink); font-size:13px; line-height:1.5; box-shadow:none; outline:none; }
+.message-composer-input > .communication-draft-attachments { display:flex; align-items:flex-start; flex-wrap:wrap; gap:8px; max-height:176px; margin:0; overflow:auto; padding:0 0 8px; }
+.message-composer-input > .communication-draft-attachments:empty { display:none; }
+.communication-draft-image { position:relative; flex:none; width:96px; }
+.communication-draft-image .communication-image { border:0; background:transparent; }
+.communication-draft-image .communication-image img { height:48px; }
+.message-composer-card .communication-draft-image .communication-image:focus-visible,.communication-attachment-list .communication-image-item .communication-image:focus-visible,#run-workspace .communication-image:focus-visible { outline:2px solid var(--muted); outline-offset:-2px; }
+.communication-draft-image .communication-image-error { min-height:48px; padding:8px; }
+.composer-remove { display:inline-flex; flex:none; align-items:center; justify-content:center; width:24px; height:24px; padding:4px; border:0; border-radius:4px; background:transparent; color:var(--muted); cursor:pointer; }
+.composer-remove svg { width:16px; height:16px; }
+.communication-draft-image .composer-remove { position:absolute; top:4px; right:4px; background:var(--paper); }
+.composer-remove:hover { color:var(--danger-ink); background:var(--surface-soft); }
+.communication-draft-attachments { gap:8px; }
+.communication-draft-attachments .pending { height:48px; box-sizing:border-box; max-width:min(320px,100%); gap:12px; padding:8px 12px; border:1px solid var(--line); background:transparent; }
+.composer-file-info { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.composer-file-info > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.composer-file-info small { font-size:10px; line-height:1.4; }
+.communication-draft-attachments .pending > svg { width:16px; height:16px; flex:none; color:var(--muted); }
+.communication-composer-actions .composer-icon-button { display:inline-flex; flex:none; align-items:center; justify-content:center; width:32px; height:32px; min-height:32px; padding:6px; border:0; border-radius:5px; background:transparent; color:var(--muted); cursor:pointer; }
+.composer-icon-button svg { width:20px; height:20px; }
+.communication-composer-actions .composer-icon-button:hover { color:var(--accent); background:var(--surface-soft); }
+.communication-composer-actions .composer-icon-button:active { background:var(--accent-soft); }
+.composer-icon-button:disabled,.composer-remove:disabled { opacity:.5; cursor:not-allowed; }
+@media(pointer:coarse) { .communication-composer-actions .composer-icon-button,.composer-remove { min-width:44px; min-height:44px; } }
+.communication-image-viewer { position:fixed; inset:0; margin:0; padding:0; width:100vw; height:100dvh; max-width:none; max-height:none; border:0; background:var(--paper); color:var(--ink); }
+.communication-image-viewer[open] { display:flex; flex-direction:column; }
+.communication-image-viewer::backdrop { background:var(--paper); }
+.communication-image-viewer header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex:none; min-height:56px; padding:8px 16px; border-bottom:1px solid var(--line); }
+.communication-image-viewer header strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:500; }
+.communication-image-actions { display:flex; align-items:center; gap:16px; flex:none; }
+.communication-image-actions a { font-size:13px; text-decoration:none; }
+.communication-image-viewer [data-close-image] { flex:none; width:40px; height:40px; padding:0; font-size:24px; }
+.communication-image-stage { display:flex; flex:1; min-height:0; align-items:center; justify-content:center; padding:16px; background:var(--surface-soft); }
+.communication-image-stage img { max-width:100%; max-height:100%; object-fit:contain; }
+.communication-image-stage img[hidden] { display:none; }
+.automation-config-objective { padding:12px 16px; border-radius:6px; background:var(--surface-soft); }
+
+/* Task collaboration shares the communication attachment presentation. */
+#run-workspace .instruction-form > .message-composer-card,
+#run-workspace .instruction-form > .mention-wrap,
+#run-workspace .instruction-form > .communication-draft-attachments,
+#run-workspace .instruction-form > .communication-composer-actions { grid-column:1/-1; min-width:0; }
+#run-workspace .instruction-form .communication-composer-actions { display:flex; align-items:center; gap:8px; margin-top:8px; }
+#run-workspace .instruction-form > .communication-draft-attachments { margin-top:0; }
+#run-workspace .instruction-form .communication-composer-actions > [type=submit] { margin-left:auto; }
+.collaboration-content > .communication-attachment-list { margin:8px 0; }

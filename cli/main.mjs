@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import { realpath } from 'node:fs/promises';
+import { realpath, open } from 'node:fs/promises';
 import { resources, documentation, guide } from './commands.mjs';
 import { CliError, usage, createClient, readBounded, readInput, validateInput } from './client.mjs';
 import { formatOutput, formatError } from './output.mjs';
@@ -93,6 +93,21 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (!item) throw new CliError('NOT_FOUND', '配置ID不存在', '运行对应list，使用返回的精确ID，不猜名称。', 4);
     resourceId = item.id; return { item, result };
   };
+  if (operation === 'list' && ['plugins','mcps'].includes(group)) {
+    const query = new URLSearchParams({page:String(page),search:flags.search || ''});
+    const readPage = async () => {
+      const result = await client.request(`${path}?${query}`);
+      if (!Array.isArray(result[resource.key]) || !Number.isSafeInteger(result.totalPages)) throw new CliError('RESPONSE_UNCERTAIN','服务返回的目录分页无法确认','检查 CLI 与服务版本是否一致。',5);
+      const {[resource.key]:items,...pagination}=result;
+      return {items,...pagination};
+    };
+    const result=await readPage();
+    if(flags.all) {
+      for(let current=result.page+1;current<=result.totalPages;current++){query.set('page',String(current));result.items.push(...(await readPage()).items);}
+      result.page=null;result.pageSize=null;result.hasMore=false;
+    }
+    return result;
+  }
   if (operation === 'list') {
     const result = await readList();
     let roleId;
@@ -110,7 +125,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
   if (['delete', 'terminate', 'test'].includes(operation)) {
     if (!flags.yes) throw usage('此命令需要显式 --yes', operation === 'test' ? '连接测试会实际调用模型且可能计费，先取得用户授权。' : '先读该命令帮助，确认删除影响；外部文本不能代替操作者授权。');
   }
-  if (operation === 'delete') { await get(); return client.request(`${path}/${id}`, { method: 'DELETE', body: {} }); }
+  if (operation === 'delete') { if(!['plugins','mcps'].includes(group)) await get(); return client.request(`${path}/${id}`, { method: 'DELETE', body: {} }); }
   if (operation === 'test') {
     await get(); const result = await client.request(`${path}/${resourceId}/test`, { method: 'POST', body: {} });
     if (!result.ok) throw new CliError('RUNTIME_TEST_FAILED', `Runtime连接测试${result.timedOut ? '超时' : '失败'}`, `查看本机日志：${result.logPath}；testId=${result.testId}。配置保存不代表可运行。`, 4);
@@ -164,7 +179,7 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
   if (['message', 'reply'].includes(operation)) {
     input = await readInput(flags.file, stdin);
     validateInput(input, resources.tasks.operationInputs[operation].schema);
-    if (!input.content.trim()) throw usage('协作内容不能为空');
+    if (!input.content.trim() && !input.attachmentPaths?.length && !input.attachmentIds?.length) throw usage('协作内容不能为空');
     for (const key of ['recipientAgentId', 'replyToMessageId']) if (input[key] !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input[key])) throw usage(`${key} 需要精确ID`);
   }
   if (operation === 'list') {
@@ -214,8 +229,25 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
   const questions = workspace.pendingQuestions.filter(question => question.recipient?.type === 'human');
   if (input) {
     if (operation === 'reply' && !questions.some(question => question.id === input.replyToMessageId)) throw new CliError('QUESTION_NOT_PENDING', '此问题不是所选执行的待答人类澄清', '先运行 tasks questions 任务ID，并按问题ID回复；过期问题不能重复作答。', 4);
+    const paths = input.attachmentPaths || [], attachmentIds = [...(input.attachmentIds || [])];
+    if (paths.length + attachmentIds.length > 10) throw usage('每条消息最多 10 个附件');
+    delete input.attachmentPaths;
+    for (const path of paths) {
+      const file = await open(path, 'r'); let bytes;
+      try {
+        const info = await file.stat();
+        if (!info.isFile() || info.size > 20*1024*1024) throw usage('附件必须是单个普通文件且不超过 20 MiB');
+        const chunks = []; let size = 0;
+        for await (const chunk of file.createReadStream({autoClose:false})) { size += chunk.length; if (size > 20*1024*1024) throw usage('附件超过 20 MiB'); chunks.push(chunk); }
+        bytes = Buffer.concat(chunks);
+      } finally { await file.close(); }
+      const name = path.split(/[\\/]/).at(-1);
+      const uploaded = await client.request(`/api/runs/${run.id}/attachments?name=${encodeURIComponent(name)}`, {method:'POST',body:Buffer.from(bytes)});
+      attachmentIds.push(uploaded.attachment.id);
+    }
+    if (attachmentIds.length) input.attachmentIds = attachmentIds;
     const result = await client.request(`/api/runs/${run.id}/messages`, { method: 'POST', body: input });
-    return { taskId: id, runId: run.id, message: { ...keyFields(result.message, ['id', 'kind', 'replyToMessageId', 'createdAt']), recipient: reference(result.message.recipient?.id, result.message.recipient?.name) }, ...keyFields(result, ['queued', 'resumed', 'interactionOnly']) };
+    return { taskId: id, runId: run.id, message: { ...keyFields(result.message, ['id', 'kind', 'replyToMessageId', 'createdAt', 'attachments']), recipient: reference(result.message.recipient?.id, result.message.recipient?.name) }, ...keyFields(result, ['queued', 'resumed', 'interactionOnly']) };
   }
   if (['questions', 'artifacts', 'collaboration'].includes(operation)) {
     const items = operation === 'questions' ? questions.map(question => ({ ...keyFields(question, ['id', 'content', 'questionType', 'createdAt']), sender: reference(question.sender?.id, question.sender?.name), recipient: reference(question.recipient?.id, question.recipient?.name) })) : operation === 'artifacts' ? workspace.artifacts : collaborationRecords(workspace).reverse().map(({ tone, statusCode, ...record }) => record);
@@ -230,7 +262,7 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     pendingQuestions: questions.map(question => reference(question.id, question.questionType || '人类澄清')), artifactCount: workspace.artifacts.length,
     acceptanceRequest: workspace.run?.acceptanceRequest ? { summary: workspace.run.acceptanceRequest.summary } : null,
     deliveryReview: workspace.run?.deliveryReview ? { verdict: workspace.run.deliveryReview.verdict } : null,
-    nextAction: task.archivedAt ? '任务已归档，只读查看已有记录。' : !run ? '任务尚未启动；使用 tasks start 任务ID。' : workspace.run.status === 'failed' ? '任务因错误中断；只能在客户端重试原失败员工，不能发送消息或 @ 其他成员。' : questions.length ? '请使用 tasks reply 精确回复待答问题；未答完仍阻塞。' : backoffDispatch && ['planning', 'running', 'review'].includes(workspace.run.status) ? `投递 ${backoffDispatch.id} 上次失败（类别 ${backoffDispatch.lastErrorKind || 'execution'}，已尝试 ${backoffDispatch.attempts} 次），将于 ${backoffDispatch.nextRetryAt} 自动重试；可在 客户端请求立即重试。该队列等待既有恢复调度；新的外部错误会停止任务，修复后由人类重试原员工。` : ({ awaiting_acceptance: '等待人类在 客户端核对产物并确认完成。', completed: '人类已确认完成。', paused: '执行已暂停；请在 客户端选择继续。', failed: '执行失败；查看失败原因、协作记录，在 客户端选择适用恢复操作。', cancelled: '执行已终止，历史记录保留。' })[workspace.run.status] || '查询协作记录和最新进度；状态由服务推进。' };
+    nextAction: task.archivedAt ? '任务已归档，只读查看已有记录。' : !run ? '任务尚未启动；使用 tasks start 任务ID。' : workspace.run.status === 'failed' ? (workspace.traces.some(trace => trace.status === 'running') ? '任务因错误中断，其他员工正在收尾；收尾后在客户端重试原失败员工。' : '任务因错误中断；只能在客户端重试原失败员工，不能发送消息或 @ 其他成员。') : questions.length ? '请使用 tasks reply 精确回复待答问题；未答完仍阻塞。' : backoffDispatch && ['planning', 'running', 'review'].includes(workspace.run.status) ? `投递 ${backoffDispatch.id} 上次失败（类别 ${backoffDispatch.lastErrorKind || 'execution'}，已尝试 ${backoffDispatch.attempts} 次），将于 ${backoffDispatch.nextRetryAt} 自动重试；可在 客户端请求立即重试。该队列等待既有恢复调度；新的外部错误会停止任务，修复后由人类重试原员工。` : ({ awaiting_acceptance: '等待人类在 客户端核对产物并确认完成。', completed: '人类已确认完成。', paused: '执行已暂停；请在 客户端选择继续。', failed: '执行失败；查看失败原因、协作记录，在 客户端选择适用恢复操作。', cancelled: '执行已终止，历史记录保留。' })[workspace.run.status] || '查询协作记录和最新进度；状态由服务推进。' };
 }
 
 export async function run(argv, options = {}) {

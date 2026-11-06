@@ -32,7 +32,7 @@ Runtime 恢复结算：local-cli 仅在原生明确成功完成且进程正常�
 
 独立客户端入口：npm start/dev → apps/electron/main.mjs → 自有 server/index.mjs → web/ 与 client/。全部相对依赖、CLI、Runtime、测试在本仓库；抽取来源、保留边界与发布身份见 docs/23-desktop-extraction.md。服务只由客户端 IPC 启动，直接运行拒绝；无独立 Web 部署。renderer 始终用客户端样式，所有 UI 验收只操作 Electron。
 
-普通沟通：communication.mjs 的输出 schema 仅要求 reply；communication-store 只完成当前成员答复，不生成候选转交或子投递，原生会话/消息/历史保留。经理决定被在途投递顺延时，orchestrator 记录说明并向经理入队复核投递，不再静默丢弃；Run 进入验收或确认完成时，Store 取消未执行的平台协调跟进投递并记录审计，归档不再被残留复核投递阻塞。
+普通沟通：communication.mjs 的输出 schema 仅要求 reply；communication-store 只完成当前成员答复，不生成候选转交或子投递，原生会话/消息/历史保留。经理安排独立员工不被其他在途投递阻塞，同一成员的消息排队；Run 进入验收或确认完成时，Store 取消未执行的平台协调跟进投递并记录审计，归档不再被残留复核投递阻塞。
 
 工作目录：run-files 不再读写 .agentforge-workspace.json 或限定 docs；目录按 path/offset 分页读取，界面按需展开、继续加载和同层重试。CHANGE 将所有业务路径按真实层级合并，工作根与绑定子仓库比较任务初始提交。Workflow artifactPaths 仅为规范相对交付位置，可为空；Store/CLI/提示词同步，不再改写到 docs。执行快照覆盖全部业务路径但保留大小/敏感文件限制，历史冻结文件不迁移。
 
@@ -155,7 +155,7 @@ ai-minions 兼容：plugin-compatibility 的 v3 计划处理已知源模型别�
 
 组件错误隔离：marketplace 导入独立捕获 Markdown/Hook 定义错误，原始 source 完整保留、有效执行树排除错误文件并生成按方言的原生清单；返回 warnings，web 安装警告弹框/详情与 CLI 共用。路径/完整性错误仍阻断批次。多角色由 Store 校验 roleIds 并冻结 roleSnapshots，prompts 按顺序注入，员工表单以框内多选标签添加/移除，不展示排序；真实兼容矩阵同时验证坏组件不影响三个 Runtime 和整组角色生效。
 
-员工框内多选：web/marketplace.mjs 的 createEmployeeMultiSelect 同时服务角色、插件与 MCP；app.js 只组合角色目录和保存值，styles.css 统一输入边框内的标签/搜索/换行与悬停桥。移除角色排序箭头/序号，绑定及 Runtime/CLI 协议不变；test-roles-ui 覆盖两主题宽窄、框内几何对齐、键盘及保存回读。
+员工框内多选：web/marketplace.mjs 的 createEmployeeMultiSelect 同时服务角色、插件与 MCP；app.js 只组合角色目录和保存值，styles.css 统一输入边框内的标签/搜索/横向滚动与悬停桥。移除角色排序箭头/序号，绑定及 Runtime/CLI 协议不变；test-roles-ui 覆盖两主题宽窄、框内几何对齐、键盘及保存回读。
 
 员工配置简化：app.js/CLI 只展示并接受 business/manager，不再接收 repository。Store 新 Task 的仓库来源/绑定为空，工作根统一；旧任务冻结仓库仍由 Run Files/Orchestrator 原逻辑执行。沟通真实续接验证见 test-communication-direct-real，完整新任务验收见 test-dsh-real。
 
@@ -196,3 +196,19 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 自动化任务标题统一为 `自动化名称#yyyy-MM-dd HH:mm:ss`（当地时区、24 小时制；定时取计划时刻，手动取触发时刻）。触发列表首列展示真实任务标题；HTTP/CLI 的触发回执、列表和 latestTrigger 返回 taskTitle，未生成任务为 null；不重写历史任务名称。
 
 自动化触发记录仅按是否存在已创建的 Task/Run 提供「查看详情」，运行、暂停、待验收、完成、失败或取消均保留；未生成任务的跳过/创建回滚记录无入口。操作列固定在表格右侧，窄窗口无需横向滚动寻找详情。
+
+同任务并行：`store.mjs` 按员工领取队列、批量派工原子创建定向消息，`orchestrator.mjs` 单次准备后并行调度不同员工，新增消息唤醒调度器；`runtime/registry.mjs` 按 Run/员工注册、按 Run 停止全部调用。`prompts.mjs` 给经理提供 assignments、wait 与全量待执行状态。App/CLI 展示全部运行 Trace。验证：`tests/task-parallel.test.mjs`、`scripts/test-task-parallel-real.mjs`。
+
+沟通图片/文件与自动化密度：`web/communication.js`、`web/automations.mjs`、`web/styles.css`；位图 preview 在 `server/index.mjs`，契约 docs/17，隔离验收 `scripts/test-communication-media.mjs`。
+
+任务草稿：`web/app.js newTaskModal` 将保存和开始分开；`client/console-projections.mjs` 的 backlog 标签为草稿；Store/HTTP 沿用 createTask 与 createRun，CLI 默认 create 与 --start 等价。隔离 UI/CLI 与真实启动验收见 `scripts/test-task-drafts.mjs`。
+
+扩展数据库目录：store.registerExtensions/queryExtensions/removeExtension → persistence.extension_catalog；HTTP 导入/编辑与 plugin-updates 原子登记，web/marketplace 和 CLI 服务端分页。契约 docs/15、docs/07；测试 extension-catalog 与 scripts/test-market-catalog。
+
+长任务与协作附件：store.getRunExecutionContext 与单条读取供 orchestrator/工作目录使用；Run Files 保存任务附件，HTTP 复用受认证二进制路由，web/app + communication 复用图片与文件组件，CLI message/reply 接受 attachmentPaths。契约 docs/03、13、14、21、22；test-task-attachments 含真实 Claude 验收模式。
+
+附件输入呈现：`web/communication.js` 的 `attachmentControls/draftAttachments` 由沟通与 `web/app.js` 协作输入区共用；`web/styles.css` 的 `.message-composer-input/.communication-draft-attachments/.composer-icon-button` 维护统一边界、缩略图与图标状态。
+
+输入卡片预览区的图片和文件统一48px高，图片保持比例；共享实现位于 `web/styles.css`，协作与沟通一致。
+
+角色扩展：store/communication-store 冻结合并，runtime/marketplace 解析，index/App/CLI同步选择契约；tests/extension-catalog.test.mjs 覆盖合并去重、解绑与冻结历史。自动化级联删除：automations/index/run-files；tests/automations.test.mjs、scripts/test-automations.mjs。固定高度多选及统一表单滚动：web/marketplace.mjs、web/app.js、web/styles.css。

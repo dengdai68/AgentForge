@@ -34,7 +34,7 @@ export function createPluginUpdates({getStore,marketplace,probe=remotePluginRevi
   };
   async function perform(store,signal){
     const result={checkedSources:0,updatedPlugins:0,updates:[],warnings:[],errors:[]};
-    const plugins=(await marketplace.catalog()).plugins.filter(item=>!store.isExtensionRemoved('plugin',item.id));
+    const plugins=store.listExtensions('plugin');
     const revisions=new Map();
     for(const group of pluginUpdateSources(plugins)){
       if(signal.aborted || !canRun() || getStore()!==store)break;
@@ -58,7 +58,8 @@ export function createPluginUpdates({getStore,marketplace,probe=remotePluginRevi
         const users=store.listAgents().filter(item=>item.runtime?.extensionSelection?.pluginIds?.some(id=>byId.has(id)));
         const bindings=await Promise.all(users.map(async item=>({agentId:item.id,previousRuntime:item.runtime,runtime:{profileId:item.runtime.profileId,...await marketplace.resolve({...item.runtime.extensionSelection,pluginIds:item.runtime.extensionSelection.pluginIds.map(id=>byId.get(id)||id)},item.runtime.provider)}})));
         if(signal.aborted || !canRun() || getStore()!==store)throw new Error('插件更新已取消');
-        const receipt=store.replacePluginExtensions(replacements,bindings);committed=true;
+        const roleBindings=await marketplace.resolveRoleReplacements(store.listRoles(),replacements);
+        const receipt=store.transaction(()=>{store.registerExtensions(candidates.plugins);return store.replacePluginExtensions(replacements,bindings,roleBindings);});committed=true;
         result.updatedPlugins+=receipt.plugins.length;result.updates.push(...receipt.plugins);
         diagnostic('plugins.updated',{source:group.url,...receipt});
       }catch(error){

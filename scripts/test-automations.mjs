@@ -62,7 +62,7 @@ try {
     const tabStyle=await page.locator('[data-auto-tab=records]').evaluate(el=>{const s=getComputedStyle(el);return {color:s.color,border:s.borderBottomWidth,background:s.backgroundColor};});assert.equal(tabStyle.border,'2px');assert.equal(tabStyle.background,'rgba(0, 0, 0, 0)');
     await page.locator('[data-pagination=automation-triggers] [data-page="2"]').click();
     const taskTitle=storeTitle;
-    assert.equal(await page.locator('.automation-trigger-table').evaluate(el=>getComputedStyle(el).minWidth),'1100px');
+    assert.equal(await page.locator('.automation-trigger-table').evaluate(el=>getComputedStyle(el).minWidth),'820px');
     await page.locator('.automation-trigger-title').filter({hasText:taskTitle}).waitFor();
     assert.equal(await page.locator('.automation-trigger-title').filter({hasText:taskTitle}).getAttribute('title'),taskTitle);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
@@ -95,6 +95,8 @@ try {
   await page.goto(origin+'/automations');await page.locator('[data-auto-new]').click();
   const createForm=page.locator('#task-form');await createForm.locator('[name=title]').fill('App 新建自动化');await createForm.locator('[name=objective]').fill('保存输入与选择，不执行模型');
   for(const [id,name] of [['system_project_manager','项目经理'],['agent_analyst','内容编辑']]){await createForm.locator('#task-members').fill(name);await createForm.locator(`[data-add-extension="${id}"]`).click();}
+  const layout=await createForm.evaluate(form=>{const control=form.querySelector('.extension-picker-control');return {height:control.getBoundingClientRect().height,selectorsScroll:!!form.querySelector('.modal-scroll .task-selectors'),footerSelectors:!!form.querySelector('.form-actions .task-selectors')};});
+  assert.ok(Math.abs(layout.height-38)<0.5);assert.equal(layout.selectorsScroll,true);assert.equal(layout.footerSelectors,false);
   await createForm.locator('#task-members').press('Escape');await createForm.getByRole('button',{name:'保存为停用',exact:true}).click();await page.locator('#modal-backdrop.open').waitFor({state:'hidden'});
   const saved=await cli('list','--search','App 新建自动化');assert.equal(saved.data.items.length,1);assert.equal(saved.data.items[0].enabled,false);assert.equal((await cli('get',saved.data.items[0].id)).data.automation.workflowTemplateId,null);await cli('delete',saved.data.items[0].id,'--yes');
   const file=join(root,'create.json');
@@ -103,5 +105,9 @@ try {
  await writeFile(file,JSON.stringify({...input,title:'CLI 创建自动化',workflowTemplateId:null}));const created=await cli('create','--file',file);assert.ok(created.ok);
   await page.goto(origin+`/automations/${created.data.automation.id}`);await page.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#task-form [name=title]').fill('App 编辑自动化');await page.getByRole('button',{name:'保存修改',exact:true}).click();await page.locator('.automation-heading h3').filter({hasText:'App 编辑自动化'}).waitFor();assert.equal((await cli('get',created.data.automation.id)).data.automation.title,'App 编辑自动化');
   await writeFile(file,JSON.stringify({enabled:false}));assert.ok((await cli('update',created.data.automation.id,'--file',file)).ok);assert.ok((await cli('delete',created.data.automation.id,'--yes')).ok);
+  const preserved=(await api('/api/tasks')).data.tasks.filter(item=>item.kind!=='automation').map(item=>item.id).sort();
+  const removed=await cli('delete',automation.id,'--yes');assert.ok(removed.ok);assert.ok(removed.data.runIds.includes(first.runId));
+  assert.equal((await api('/api/automations/'+automation.id)).status,400);
+  assert.deepEqual((await api('/api/tasks')).data.tasks.map(item=>item.id).sort(),preserved,'ordinary tasks survive cascade');
   assert.deepEqual(errors,[]);evidence.passed=true;console.log('PASS '+root);
 }finally{evidence.errors=errors;await writeFile(join(root,'evidence.json'),JSON.stringify(evidence,null,2));await app.close();}

@@ -33,7 +33,7 @@
 
 Task 冻结配置。Run 每员工独立绑定原生会话；节点变化、咨询、澄清后继续和普通重试仍续接同一成员。经理采用自己的自定义工作法。
 
-调用模式为 manager、node、instruction、consultation、inquiry，以及代码保留的 delivery_review。完整工作流只给经理；其他员工只得到本次工作。经理必须明确 managerDecision.nextNodeId/nextAgentId，旧 Task.nodeAssignments 不覆盖选择。后续 @ 员工沿用真实业务 Dispatch 职责，不按静态映射猜测。
+调用模式为 manager、node、instruction、consultation、inquiry，以及代码保留的 delivery_review。完整工作流只给经理；其他员工只得到本次工作。经理必须明确单人 managerDecision.nextNodeId/nextAgentId、批量 assignments 或 wait，旧 Task.nodeAssignments 不覆盖选择。后续 @ 员工沿用真实业务 Dispatch 职责，不按静态映射猜测。
 
 经理依据真实 Trace/Dispatch 协调，不以“已派工”文字代替投递事实，不增加业务验收或收尾复核。普通文字可交接；协调动作使用可选 JSON。最终由人类确认完成。
 
@@ -53,7 +53,7 @@ Task 冻结配置。Run 每员工独立绑定原生会话；节点变化、咨�
 
 自动执行的来源是已有 Dispatch（经理派工、人类新指令、咨询答复）或其允许的重试；定时巡检不制造新业务任务。确定性/未知 Runtime 错误停止自动重试；明确临时服务故障最多共三次尝试，详见 docs/08。
 
-managerDecision 仅接受 nextNodeId、nextAgentId、rationale；consultation 是顶层同级字段，不能嵌入其中。混合协议不会因 nextNodeId:null 被误解为提交验收，平台返回真实协调错误请经理修正，不代猜业务意图。
+managerDecision 接受单人 nextNodeId/nextAgentId、批量 assignments 或 wait:true，各形式可带 rationale，不能混用；consultation 是顶层同级字段，不能嵌入其中。混合协议不会因 nextNodeId:null 被误解为提交验收，平台返回真实协调错误请经理修正，不代猜业务意图。
 
 新指令不打断已发出的调用。人类问题须精确 replyToMessageId 回复；存在未回答问题时 Store 阻止领取任何后续执行。咨询通过真实消息返回原员工，不合并双方会话。
 
@@ -108,3 +108,11 @@ DeepSeek Harness 根据原生 system/message 中的完整应用指令匹配保�
 任务系统规则建议 clone 独立成一次工具调用，后续再修改和提交，为内置仓库登记 Hook 提供清晰边界。沟通提示词与协调协议不变。
 
 Task.kind=automation 时替换人类验收/澄清指令：只列经理/员工，只允许 agent consultation，缺少事实由经理协调，不能继续时 automationFailure 明确错误中断。经理以 null nextNodeId/nextAgentId 提交交付，下一触发自动确认；普通任务提示词保持原有规则。Store 和 Orchestrator 同时阻止人类路由，不能只靠提示词。
+
+## 同任务员工并行
+
+同一 Run 内不同员工可并行，同一员工（含经理）的 claimed 投递/原生会话串行。经理可返回 managerDecision.assignments 数组，每项包含 nextNodeId、nextAgentId、instruction；一次派工须全部验证通过才记录定向协作消息和队列，拒绝重复员工、自指派和混合决策。单人 nextNodeId/nextAgentId/rationale 仍是同一协议的单人形式。等待其他员工结果使用 managerDecision.wait=true，须存在其他未完成工作；不增加人工开关、不由平台判断业务依赖。经理可在其他员工执行期间处理已返回结果、追加派工，只有没有其他业务投递/执行时才能请求验收。
+
+队列只阻塞同一员工，不让忙碌成员阻塞其他人；经理及员工在执行期间收到的新消息排队，完成后及时唤醒。失败立即标记整项任务并停止领取新投递，已领取的其他员工允许收尾并保存结果/排队交接；人类待所有在途调用收尾后重试原失败投递，多处失败逐一恢复，未解除前不启动其他排队工作。暂停/终止覆盖全部成员进程；重启回收全部在途调用，失败 Run 保持失败且不自动重试。人类澄清停止新投递，在途调用同样收尾。共享目录和任务累计 CHANGE 保持不变，不自动隔离或合并 Git，不以文件快照推断并行员工的独占修改归属。App/CLI 使用同一执行与查询协议，无并行开关或新增配置字段。
+
+任务当前输入的 Message 投影包含 attachments（文件名、字节、摘要及调用前验证的绝对 path），普通指令与澄清回答一致；不把图片或文件正文复制进系统提示词。用于巡检的最近消息仍为保存的引用，真正被投递的附件由编排层解析和校验。

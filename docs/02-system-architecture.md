@@ -96,3 +96,11 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 自动化调度与普通任务执行共用 Store → Orchestrator → Runtime。单独10秒调度器只检测/领取并异步执行，不等待模型；Store 事务原子创建 Task/Run、确认前轮并记录触发去重键，重启恢复现有 Run。引入 cron-parser 5.4.0 计算时区/DST，无新服务；依赖决策和离线策略见 [自动化](27-automations.md)。
 
 Orchestrator 每轮按 removedParticipantIds 过滤当前派工名单；已有执行保留原提示，忙碌成员不可移除。
+
+同任务并行复用现有 Dispatch、成员原生会话和 Node 异步调用，不引入队列服务/依赖。每个 Store/Run 单飞覆盖准备与调度，Worker 按成员独立运行，完成或新输入唤醒领取；同员工 FIFO，经理可处理部分返回结果并继续派工。Store 原子验证批量 assignments；平台只判断投递/执行是否未结束，不判断业务依赖或验收质量。一个成员报错立即停止新领取，在途成员收尾；重试期间只允许原投递及其咨询链，其他失败逐一恢复后再放行队列。
+
+沟通媒体展示由 renderer 管理；HTTP 附件 preview 分支负责认证、归属、完整性与位图类型校验，Run Files 继续保存原字节，Store 不新增媒体状态。具体端点见 docs/17-communication.md。
+
+插件/MCP 当前目录归 Store/SQLite；Runtime 只准备不可变文件并返回摘要。HTTP 在同一 Store 事务中登记目录、替换绑定与软删除旧版本。列表用数据库分页，详情/实际绑定按条读取 Runtime 文件；自动更新从数据库取活跃目录。见 docs/15 与 docs/07。
+
+长任务调度按需读取：getRunExecutionContext 只投影最近18个 Trace 状态、未结束投递、基线所需文件摘要、最近30条巡检消息和待答问题/决策；源消息和输入游标单独查询，不展开 UI 工作区或全量运行事件。工作目录/Artifact HTTP 查询同样使用 getRunTask/getRunArtifact。原生上下文压缩告警不等同于应用编排 RangeError；不同 runId 的日志按运行归属排查。

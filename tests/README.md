@@ -87,3 +87,9 @@ task-patrol.test.mjs 覆盖 10 秒巡检、准备阶段单飞、空闲经理恢�
 workspace-git / workspace-hooks 覆盖动态克隆后提交、并发登记、重启与 reflog 清理后固定基准、嵌套归属、缺失基准提示、链接拒绝和调用级 socket 生命周期/失败隔离。真实完整任务与宽窄 CHANGE 验收入口 scripts/test-workspace-clone-real.mjs。
 
 automations.test.mjs 验证触发标题的当地时分秒、延迟执行仍取计划时刻、午夜零点、配置改名后历史标题保留以及未生成任务返回 null；configuration-cli 验证 taskTitle 的帮助、JSON 透传与中文文本输出。
+
+`task-parallel.test.mjs` 覆盖批量原子性/幂等、同员工串行与跨员工并行、失败收尾与逐个重试、咨询链、重启回收、人类澄清、验收防抢跑和全组暂停/终止。受控 Provider 屏障验证 A/B 同时执行与 C 先于 B 结束；真实模型证据由 scripts/test-task-parallel-real.mjs 单独产生。CLI 对应 configuration-cli.test.mjs 同时核对文本/JSON 全量进度与失败收尾。
+
+插件/MCP 数据库目录由 extension-catalog.test.mjs 覆盖服务端分页、字面搜索、软删除、事务回滚、重启与私密正文不落目录表；marketplace/plugin-updates/configuration-cli 测试覆盖员工解绑、更新与 CLI 分页契约。隔离 UI/API/CLI 验收使用 scripts/test-market-catalog.mjs 与 scripts/test-marketplace-edit.mjs。
+
+task-attachments.test.mjs 覆盖附件原字节、归属、澄清续接、重启、摘要篡改/路径/大小拒绝，以及长任务执行读取不重复展开员工提示词和审计。

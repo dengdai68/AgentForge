@@ -839,14 +839,16 @@ test("recording a manager conclusion never rewrites pass or checks workflow cove
   assert.equal(store.getRunWorkspace(run.id).artifacts.length, 0);
 });
 
-test("the manager can request human acceptance without platform completion conditions", () => {
+test("the manager can request human acceptance after execution ends without business completion conditions", () => {
   const store = createStore(), run = store.createRun(fixtureTaskInput(store).id);
   const trace = store.createTrace(run.id, { workflowNodeId: "requirements", agentId: "agent_analyst" });
   store.acceptNodeResult(run.id, "requirements", trace.id, result({ summary: "员工报告尚有问题，由经理决定下一步" }));
+  assert.throws(() => store.requestHumanAcceptance(run.id, { summary: "经理决定交人类验收" }), /仍有成员/);
+  store.completeTrace(trace.id);
   store.requestHumanAcceptance(run.id, { summary: "经理决定交人类验收" });
   assert.equal(store.getRun(run.id).status, "awaiting_acceptance");
   assert.equal(store.confirmRunCompletion(run.id).status, "completed");
-  assert.equal(store.getRunWorkspace(run.id).traces[0].status, "running");
+  assert.equal(store.getRunWorkspace(run.id).traces[0].status, "completed");
 });
 
 test("Store records employee decisions without business validation", () => {
@@ -1265,7 +1267,8 @@ test("task properties render safe recorded facts independently of the active tab
     const markup = details(workspace, { agents: [{ id: "a" }], currentFocusNode: { title: "核验交付" }, view: { tab, disclosures: { brief: true } }, artifactCount: 2 });
     assert.match(markup, /^<aside[^>]+aria-label="任务详情"/);
     assert.doesNotMatch(markup, /A&amp;B|<dt>团队<\/dt>/);
-    assert.match(markup, /核验交付/);
+    assert.match(markup, /当前执行/);
+    assert.match(markup, /暂无执行成员/);
     assert.match(markup, /<dd>2 项<\/dd>/);
     assert.doesNotMatch(markup, /quality-risk|Defect/);
     assert.match(markup, /任务描述/);
@@ -1287,7 +1290,7 @@ test("task properties render safe recorded facts independently of the active tab
   assert.match(expanded, /aria-expanded="true" aria-controls="task-description-content">收起/);
   const legacy = details({ run: { id: "legacy", task: { objective: "旧任务", workspacePath: "/tmp/legacy", workflowSnapshot: {} } } }, { agents: [], view: { disclosures: {} }, artifactCount: 0 });
   assert.doesNotMatch(legacy, /当前团队|<dt>团队<\/dt>/);
-  assert.match(legacy, /暂无指定重心/);
+  assert.match(legacy, /暂无执行成员/);
   assert.match(legacy, /<dd>0 项<\/dd>/);
   assert.doesNotMatch(legacy, /data-workspace-disclosure="brief" open|undefined/);
 });
@@ -1790,7 +1793,7 @@ test("collaboration is chronological without pinned acceptance duplicates and un
     if (!elements.has(id)) elements.set(id, { innerHTML: "", addEventListener() {} });
     return elements.get(id);
   };
-  const render = new Function("$", "state", "workspaceView", "collaborationRecords", "collaborationMessageMarkup", "exactTime", "esc", "sendInstruction", "refreshCollaborationBodies", `${renderSource}; return renderCollaboration;`)(select, { workspace }, () => view, collaborationRecords, text => `<p>${esc(text)}</p>`, String, esc, () => {}, () => {});
+  const render = new Function("$", "state", "workspaceView", "collaborationRecords", "collaborationMessageMarkup", "exactTime", "esc", "sendInstruction", "refreshCollaborationBodies", "messageAttachments", "bindTaskAttachments", "draftAttachments", "attachmentControls", `${renderSource}; return renderCollaboration;`)(select, { workspace }, () => view, collaborationRecords, text => `<p>${esc(text)}</p>`, String, esc, () => {}, () => {}, () => "", () => {}, () => "", () => "");
   workspace.run.task.archivedAt = null;
   workspace.messages = [
     { id: 'manager-final', kind: 'manager_decision', sender: { type: 'agent', name: '经理' }, recipient: { type: 'team', name: '团队' }, content: '最终交接结论', createdAt: '2026-10-19T00:00:00Z' },
@@ -1832,10 +1835,10 @@ test("clarification submission preserves another Run or a newly edited draft, in
     const refreshed = [], requests = [], notices = [];
     let resolveRequest, rejectRequest;
     const pending = new Promise((resolve, reject) => { resolveRequest = resolve; rejectRequest = reject; });
-    const submit = new Function("state", "workspaceView", "FormData", "api", "toast", "loadWorkspace", "workspaceAgents", `${submitSource}; return sendInstruction;`)(
+    const submit = new Function("state", "workspaceView", "FormData", "api", "toast", "loadWorkspace", "workspaceAgents", "renderCollaboration", `${submitSource}; return sendInstruction;`)(
       state, (id = state.selectedRunId) => views[id], class { get(key) { return key === "replyToMessageId" ? "question-1" : "原草稿"; } },
       (url) => { requests.push(url); return pending; }, (message) => notices.push(message),
-      async (id) => refreshed.push(id), () => [],
+      async (id) => refreshed.push(id), () => [], () => {},
     );
     const sending = submit({ preventDefault() {}, currentTarget: {} });
     if (scenario === "switch-run") state.selectedRunId = "run-b";
@@ -1863,10 +1866,10 @@ test("task composer sends unmentioned messages to the manager, preserves explici
     const calls = [], notices = [];
     const state = { selectedRunId: "run-1", workspace: { run: { task: { archivedAt: null } } }, agents: [] };
     const view = { draft: content };
-    const submit = new Function("state", "workspaceView", "FormData", "api", "toast", "loadWorkspace", "workspaceAgents", `${submitSource}; return sendInstruction;`)(
+    const submit = new Function("state", "workspaceView", "FormData", "api", "toast", "loadWorkspace", "workspaceAgents", "renderCollaboration", `${submitSource}; return sendInstruction;`)(
       state, () => view, class { get(key) { return key === "content" ? content : replyToMessageId; } },
       async (_path, options) => { calls.push(JSON.parse(options.body)); return {}; },
-      (message) => notices.push(message), async () => {}, () => [{ id: "manager", name: "经理" }, { id: "developer", name: "研发" }],
+      (message) => notices.push(message), async () => {}, () => [{ id: "manager", name: "经理" }, { id: "developer", name: "研发" }], () => {},
     );
     await submit({ preventDefault() {}, currentTarget: {} });
     if (notice) { assert.deepEqual(calls, []); assert.deepEqual(notices, [notice]); }

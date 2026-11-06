@@ -134,7 +134,7 @@ export function createAuth({ databasePath, origins = [], bootstrapToken = "", no
       if (!hosts.has(request.headers.host)) { json(response, 403, { error: "host_not_allowed" }); return true; }
       const path = url.pathname;
       const write = !["GET", "HEAD"].includes(request.method);
-      const attachmentUpload = request.method === 'POST' && /^\/api\/communications\/chat_[A-Za-z0-9_-]+\/attachments$/.test(path) && /^application\/octet-stream(?:;|$)/i.test(request.headers['content-type'] || '');
+      const attachmentUpload = request.method === 'POST' && /^\/api\/(?:communications\/chat_|runs\/run_)[A-Za-z0-9_-]+\/attachments$/.test(path) && /^application\/octet-stream(?:;|$)/i.test(request.headers['content-type'] || '');
       if (write && (!originSet.has(request.headers.origin) || new URL(request.headers.origin).host !== request.headers.host || (!/^application\/json(?:;|$)/i.test(request.headers["content-type"] || "") && !attachmentUpload))) {
         json(response, 403, { error: "same_origin_json_required" }); return true;
       }

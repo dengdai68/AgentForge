@@ -113,38 +113,28 @@ function managerDispatch(store, runId, dedupeKey, messageIds = [], sourceMessage
   return store.enqueueDispatch(runId, { recipientAgentId: run.manager.id, workflowNodeId: task.workflowSnapshot.nodes[0].id, purpose: "manager", dedupeKey, messageIds, sourceMessageId, coordinationFollowup: true, deferredRevisit: dedupeKey.startsWith("redispatch:") });
 }
 
-// Queue ordering for concurrent coordination messages. A deferred revisit is
-// the redispatch that exists to re-evaluate a deferred decision: it must never
-// block the handoff it revisits, or the deferral would be self-sustaining.
-export function dispatchBlocksHandoff(item, now = Date.now()) {
-  if (["done", "cancelled"].includes(item.status)) return false;
-  if (item.deferredRevisit) return false;
-  return !(item.status === "queued" && item.lastError && item.nextRetryAt && Date.parse(item.nextRetryAt) > now);
-}
-
-// Post-decision scheduling for an accepted managerDecision. Returns what was
-// scheduled ("blocked" when the decision must wait). Never rewrites or cancels
-// failed dispatches, frozen history or older deliveries.
+// Apply a manager decision atomically without blocking independent recipients.
 export function scheduleManagerFollowup(store, runId, delivery, decision, sourceMessageId = null) {
-  if (!decision || typeof decision !== 'object' || Array.isArray(decision) || Object.keys(decision).some(key => !['nextNodeId', 'nextAgentId', 'rationale'].includes(key))) {
-    throw new Error('managerDecision 仅接受 nextNodeId、nextAgentId、rationale；咨询必须使用顶层 consultation，不能嵌入 managerDecision');
+  if (!decision || typeof decision !== 'object' || Array.isArray(decision)) throw new Error('managerDecision 必须是协调对象');
+  if (Object.hasOwn(decision, 'assignments')) {
+    if (Object.keys(decision).some(key => !['assignments', 'rationale'].includes(key))) throw new Error('assignments 不能与其他协调决定混用');
+    const deliveries = store.enqueueManagerAssignments(runId, delivery, decision.assignments);
+    return { scheduled: 'assignments', dispatchIds: deliveries.map(item => item.id) };
   }
-  const run = store.getRun(runId), task = store.getRunTask(runId);
+  if (Object.hasOwn(decision, 'wait')) {
+    if (decision.wait !== true || Object.keys(decision).some(key => !['wait', 'rationale'].includes(key))) throw new Error('等待决定仅接受 wait=true、rationale');
+    if (!store.listDispatches(runId).some(item => item.id !== delivery.id && !['done', 'cancelled'].includes(item.status))) throw new Error('没有未完成工作可等待，请明确派工或提交验收');
+    return { scheduled: 'waiting' };
+  }
+  if (Object.keys(decision).some(key => !['nextNodeId', 'nextAgentId', 'rationale'].includes(key))) throw new Error('managerDecision 仅接受 nextNodeId、nextAgentId、rationale，或 assignments / wait；咨询必须使用顶层 consultation');
   const next = decision.nextNodeId;
   if (next !== null) {
-    // Non-terminal handoff: real pending work keeps priority; a failed
-    // dispatch in retry backoff never blocks it.
-    if (store.listDispatches(runId).some((item) => dispatchBlocksHandoff(item))) {
-      // A deferred decision must never be dropped silently: record the fact
-      // and queue a manager re-evaluation behind the pending work.
-      const note = store.addMessage({ runId, traceId: delivery.traceIds?.at(-1) || null, sender: { type: "system", id: "agentforge", name: "AgentForge" }, recipientAgentId: run.manager.id, kind: "coordination_notice", content: `上一项安排（节点 ${decision.nextNodeId} → 成员 ${decision.nextAgentId}）因当时仍有未结束投递而暂未建立派工；请在当前队列清空后基于最新状态重新决定下一步，不要假设该安排已执行。` });
-      managerDispatch(store, runId, "redispatch:" + delivery.id, [note.id], note.id);
-      return { scheduled: "blocked", requeued: true };
-    }
     const recipientId = decision.nextAgentId;
     if (recipientId === delivery.recipientAgentId) throw new Error("不能 @ 自己");
-    store.setCurrentFocus(runId, next, decision.rationale || "项目经理安排下一次协作");
-    store.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: next, purpose: "node", dedupeKey: "handoff:" + delivery.id, sourceMessageId });
+    store.transaction(() => {
+      store.setCurrentFocus(runId, next, decision.rationale || "项目经理安排下一次协作");
+      store.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: next, purpose: "node", dedupeKey: "handoff:" + delivery.id, sourceMessageId });
+    });
     return { scheduled: "handoff" };
   }
   store.requestHumanAcceptance(runId, { traceId: delivery.traceIds?.at(-1) || null, summary: decision.rationale || "项目经理已提交人类验收。" });
@@ -188,11 +178,11 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
   if (["manager", "delivery_review"].includes(delivery.purpose)) {
     if (output.deliveryReview) store.recordDeliveryReview(runId, trace.id, output.deliveryReview);
     const decision = output.managerDecision || (output.deliveryReview?.verdict === "pass" ? { nextNodeId: null, rationale: content } : null);
-    if (!(decision && Object.hasOwn(decision, "nextNodeId")) && (output.deliveryReview?.verdict === "rework" || output.consultation)) {
+    if (!decision && (output.deliveryReview?.verdict === "rework" || output.consultation)) {
       managerDispatch(store, runId, "followup:" + delivery.id, [], resultMessage?.id);
     } else {
       try {
-        if (!decision || !Object.hasOwn(decision, "nextNodeId")) throw new Error('本轮缺少 managerDecision，正文报告不能建立派工或提交验收。请返回 managerDecision（nextNodeId、nextAgentId、rationale）；提交人类验收时前两项为 null，需要咨询则使用顶层 consultation');
+        if (!decision) throw new Error('本轮缺少 managerDecision，正文报告不能建立派工或提交验收。请返回 managerDecision（单人 nextNodeId/nextAgentId、批量 assignments 或 wait:true）；提交人类验收时前两项为 null，需要咨询则使用顶层 consultation');
         scheduleManagerFollowup(store, runId, { ...delivery, traceIds: [trace.id] }, decision, resultMessage?.id);
       } catch (error) {
         store.addEvent({ type: "run.routing_incomplete", runId, actor: sender, message: error.message, data: { traceId: trace.id } });
@@ -200,7 +190,7 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
     }
   } else if (!["consultation", "inquiry"].includes(delivery.purpose) || output.consultation) {
     store.addEvent({ type: "trace.accepted", runId, actor: sender, message: "已记录员工交接。", data: { traceId: trace.id, workflowNodeId: delivery.workflowNodeId, artifactCount: artifacts.length } });
-    const source = store.getRunWorkspace(runId).messages.find(message => message.id === delivery.sourceMessageId);
+    const source = store.getRunMessage(runId, delivery.sourceMessageId);
     if (source?.sender?.type === "agent" && source.sender.id !== agent.id) {
       store.enqueueDispatch(runId, { recipientAgentId: source.sender.id, workflowNodeId: delivery.workflowNodeId, purpose: source.sender.id === run.manager.id ? "manager" : "instruction", messageIds: resultMessage ? [resultMessage.id] : [], sourceMessageId: resultMessage?.id, dedupeKey: "delivery:" + delivery.id, coordinationFollowup: source.sender.id === run.manager.id });
     }
@@ -216,7 +206,7 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
   try {
     const directory = await files.prepareTrace(runId, trace.id);
     const finalPath = await files.writeInternalTraceFile(runId, trace.id, "provider-final.json", "");
-    const workspace = store.getRunWorkspace(runId);
+    const workspace = store.getRunExecutionContext(runId);
     const before = ["node", "instruction"].includes(delivery.purpose)
       ? acceptedWorkspaceBaseline(runBaseline, workspace.artifacts)
       : await files.snapshotWorkspace(task.workspacePath, { excludeRunFiles: true }).catch(() => new Map());
@@ -227,7 +217,11 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
     const cwd = task.repositoryMode === "agent" ? (task.repositoryBindings[agent.id] ? resolve(task.workspacePath, task.repositoryBindings[agent.id].path) : task.workspacePath) : task.workspacePath;
     const session = store.prepareMemberSession(delivery.id, trace.id, cwd);
     const messages = store.memberInputMessages(delivery.id);
-    const inputThroughMessageId = store.getRunWorkspace(runId).messages.at(-1)?.id || null;
+    for (const message of messages) for (const attachment of message.attachments || []) {
+      await files.readRunAttachment(runId, attachment);
+      attachment.path = files.runAttachmentPath(runId, attachment);
+    }
+    const inputThroughMessageId = store.latestRunMessageId(runId);
     let input, inputAcknowledged = false;
     const acknowledgeInput = () => {
       if (!inputAcknowledged) {
@@ -252,7 +246,7 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
       catch (error) { diagnostic("task.prompt_snapshot_failed", { error, runId, traceId: trace.id }); }
     };
     // The runtime returns text; coordination fields are interpreted when present.
-    const runtimeResult = await invokeRuntime(store, agent, { ...input, onPrompt, traceId: trace.id, session, canStart: () => store.canExecuteDispatch(delivery.id), runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, finalPath, runId, onEvent }, files);
+    const runtimeResult = await invokeRuntime(store, agent, { ...input, onPrompt, traceId: trace.id, session, executionKey: `${runId}:${agent.id}`, canStart: () => store.canExecuteDispatch(delivery.id), runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, finalPath, runId, onEvent }, files);
     const output = parseEmployeeResponse(runtimeResult.finalText);
     const artifacts = await capture(files, runId, trace.id, task.workspacePath, before, output, effectiveNode, delivery.purpose);
     store.transaction(() => { acceptDelivery(store, delivery, trace, output, artifacts); acknowledgeInput(); });
@@ -278,17 +272,19 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
   }
 }
 
-// In-process guard complements the persisted single-claim invariant. No polling
-// may create a second invocation while file preparation is still in progress.
+// One dispatcher owns Run preparation; each employee has its own in-flight call.
 const executions = new WeakMap();
 export function isRunExecuting(store, runId) { return Boolean(executions.get(store)?.has(runId)); }
 export function executeRun(store, runId, options = {}) {
   let active = executions.get(store); if (!active) { active = new Map(); executions.set(store, active); }
-  if (active.has(runId)) return active.get(runId);
-  const promise = withDiagnosticContext({ source: "task", runId }, () => drainRun(store, runId, options)).finally(() => active.delete(runId));
-  active.set(runId, promise); return promise;
+  const existing = active.get(runId);
+  if (existing) { existing.wake?.(); return existing.promise; }
+  const control = {};
+  active.set(runId, control);
+  control.promise = withDiagnosticContext({ source: "task", runId }, () => drainRun(store, runId, options, control)).finally(() => active.delete(runId));
+  return control.promise;
 }
-async function drainRun(store, runId, { runFilesRoot = process.env.AGENTFORGE_RUN_FILES_ROOT || join(desktopServiceDataRoot(), "agentforge-runs"), resolveGitCredential = null } = {}) {
+async function drainRun(store, runId, { runFilesRoot = process.env.AGENTFORGE_RUN_FILES_ROOT || join(desktopServiceDataRoot(), "agentforge-runs"), resolveGitCredential = null } = {}, control = {}) {
   const files = createRunFiles({ root: runFilesRoot, resolveGitCredential });
   try {
     let run = store.getRun(runId);
@@ -304,10 +300,9 @@ async function drainRun(store, runId, { runFilesRoot = process.env.AGENTFORGE_RU
       }
       return;
     }
-    const workspace = store.getRunWorkspace(runId);
     let runBaseline;
     try {
-      runBaseline = await files.loadOrCreateWorkspaceBaseline(runId, store.getRunTask(runId).workspacePath, { allowCreate: workspace.traces.length === 0 });
+      runBaseline = await files.loadOrCreateWorkspaceBaseline(runId, store.getRunTask(runId).workspacePath, { allowCreate: !store.hasRunTraces(runId) });
     } catch (error) {
       diagnostic("task.workspace_baseline_failed", { error, runId });
       runBaseline = await files.snapshotWorkspace(store.getRunTask(runId).workspacePath, { excludeRunFiles: true }).catch(() => new Map());
@@ -315,19 +310,32 @@ async function drainRun(store, runId, { runFilesRoot = process.env.AGENTFORGE_RU
     store.initializeDispatches(runId);
     run = store.getRun(runId);
     if (run.status === "planning") { store.updateRun(runId, { status: "running" }); store.setTaskStatus(run.taskId, "running"); }
-    for (let turn = 0; turn < 80; turn += 1) {
+    const workers = new Set();
+    let turns = 0, cancellationError = null;
+    while (true) {
       store.syncWaiting(runId);
-      run = store.getRun(runId);
-      if (store.getRunTask(runId).archivedAt) return;
-      const delivery = store.claimDispatch(runId);
-      if (!delivery) return;
-      await withDiagnosticContext({ source: "task", runId, taskId: run.taskId, dispatchId: delivery.id, workflowNodeId: delivery.workflowNodeId, agentId: delivery.recipientAgentId, attempt: delivery.attempts }, async () => {
-        diagnostic("task.dispatch_started");
-        await invokeDispatch(store, files, delivery, runBaseline);
-        diagnostic("task.dispatch_settled");
-      });
+      if (!store.getRunTask(runId).archivedAt) {
+        let delivery;
+        while (turns < 80 && (delivery = store.claimDispatch(runId))) {
+          turns++;
+          const claimed = delivery;
+          const work = withDiagnosticContext({ source: "task", runId, taskId: run.taskId, dispatchId: claimed.id, workflowNodeId: claimed.workflowNodeId, agentId: claimed.recipientAgentId, attempt: claimed.attempts }, async () => {
+            diagnostic("task.dispatch_started");
+            await invokeDispatch(store, files, claimed, runBaseline);
+            diagnostic("task.dispatch_settled");
+          }).catch(error => {
+            if (store.getRun(runId).status === 'cancelled') cancellationError ||= error;
+            diagnostic('task.worker_settled_error', { runId, error });
+          }).finally(() => workers.delete(work));
+          workers.add(work);
+        }
+      }
+      if (!workers.size) break;
+      await Promise.race([...workers, new Promise(resolve => { control.wake = resolve; })]);
+      control.wake = null;
     }
-    store.addEvent({ type: "run.manager_patrol_queued", runId, message: "本轮投递达到上限，剩余队列由巡检继续。", data: {} });
+    if (cancellationError) throw cancellationError;
+    if (turns >= 80) store.addEvent({ type: "run.manager_patrol_queued", runId, message: "本轮投递达到上限，剩余队列由巡检继续。", data: {} });
   } catch (error) {
     if (store.getRun(runId).status === "cancelled") throw error;
     diagnostic("task.orchestration_error", { runId, error });
@@ -335,7 +343,7 @@ async function drainRun(store, runId, { runFilesRoot = process.env.AGENTFORGE_RU
   }
 }
 export function requestHumanIntervention(store, runId, messageId) {
-  const message = store.getRunWorkspace(runId).messages.find((item) => item.id === messageId);
+  const message = store.getRunMessage(runId, messageId);
   if (!message) throw new Error("人工消息不存在");
   const run = store.getRun(runId), task = store.getRunTask(runId), recipientId = message.recipient.type === "agent" ? message.recipient.id : run.manager.id;
   const ownNode = store.memberResponsibility(runId, recipientId);
@@ -344,7 +352,7 @@ export function requestHumanIntervention(store, runId, messageId) {
   return store.getRun(runId);
 }
 export function terminateRun(store, runId, reason) {
-  if (["completed", "cancelled", "failed"].includes(store.getRun(runId).status)) return stopInquiries(store, runId);
+  if (["completed", "cancelled"].includes(store.getRun(runId).status)) return stopInquiries(store, runId);
   const run = store.cancelRun(runId, reason); terminateExecution(runId, reason); return run;
 }
 export function stopInquiries(store, runId) {

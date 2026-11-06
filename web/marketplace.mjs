@@ -1,4 +1,4 @@
-import { paginate, paginationMarkup } from './pagination.mjs';
+import { paginationMarkup } from './pagination.mjs';
 import { createFloatingList } from './floating-list.mjs';
 
 export function extensionAvatarColor(id) {
@@ -14,11 +14,12 @@ const warningMarkup=(warnings,esc)=>warnings?.length?`<section role="alert" clas
 const components = (plugin,esc,key) => `<section class="plugin-detail-section">${plugin.components?.[key]?.length ? plugin.components[key].map(item=>`<div class="plugin-detail-component"><strong>${esc(item.name || item.event)}</strong>${item.providers?`<small class="component-runtimes">${esc(item.providers.map(providerLabel).join(' / '))}</small>`:''}${item.description?`<p>${esc(item.description)}</p>`:''}${item.path?`<code>${esc(item.path)}</code>`:''}${item.matchers?`<pre>${esc(JSON.stringify(item.matchers,null,2))}</pre>`:''}</div>`).join(''):'<p class="empty-state">未包含此类组件</p>'}</section>`;
 
 function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
-  let root=null,items=[],query='',pageNumber=1,loaded=false,readError='';
+  let root=null,items=[],query='',pageNumber=1,loaded=false,readError='',ticket=0,searchTimer;
+  let pagination={page:1,totalPages:1,total:0};
   const plugin=kind==='plugin', path=plugin?'/api/runtime/marketplace':'/api/runtime/mcp-marketplace', label=plugin?'插件':'MCP';
   function rows() {
     if(!root?.isConnected) return;
-    const page=paginate(items.filter(item=>`${item.name} ${item.description || ''}`.toLowerCase().includes(query.trim().toLowerCase())),pageNumber);pageNumber=page.page;
+    const page={...pagination,items};
     const list=root.querySelector('[data-market-list]'),empty=root.querySelector('[data-market-empty]');
     if(!loaded){list.hidden=true;list.innerHTML='';empty.hidden=false;empty.setAttribute('role',readError?'alert':'status');empty.textContent=readError || '正在读取已安装项…';root.querySelector('[data-market-pager]').innerHTML='';return;}
     list.hidden=!page.items.length;empty.hidden=Boolean(page.items.length);empty.setAttribute('role','status');
@@ -28,10 +29,10 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
   }
   async function load() {
     if(!root?.isConnected)return;
-    const target=root;
+    const target=root,request=++ticket;
     loaded=false;readError='';rows();
-    try {const result=await api(path);if(root!==target || !target.isConnected)return;items=plugin?result.plugins:result.entries;loaded=true;rows();}
-    catch(error) {if(root===target){readError=error.message;rows();}}
+    try {const result=await api(`${path}?${new URLSearchParams({search:query,page:String(pageNumber)})}`);if(request!==ticket || root!==target || !target.isConnected)return;items=plugin?result.plugins:result.entries;pagination=result;pageNumber=result.page;loaded=true;rows();}
+    catch(error) {if(request===ticket && root===target){readError=error.message;rows();}}
   }
   async function detail(id,errorMessage='') {
     if(!root?.isConnected)return;
@@ -43,7 +44,7 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
     document.querySelector('[data-delete-extension]').onclick=async event=>{
       const view=root;
       event.currentTarget.disabled=true;
-      const accepted=await confirmDialog({title:`删除${label}`,message:`从已安装列表删除「${entry?.name || label}」？正在被员工使用时不能删除；历史任务所需文件保留。${plugin?'独立安装的 MCP 不受影响。':''}`,confirmLabel:`删除${label}`,danger:true});
+      const accepted=await confirmDialog({title:`删除${label}`,message:`从已安装列表删除「${entry?.name || label}」？将同时从所有数字员工的当前配置中移除；历史任务所需文件和记录保留。${plugin?'独立安装的 MCP 不受影响。':''}`,confirmLabel:`删除${label}`,danger:true});
       if(root!==view || !view.isConnected)return;
       if(!accepted){if(!document.querySelector('#modal-content').childElementCount){await detail(id);document.querySelector('[data-delete-extension]')?.focus();}return;}
       try {await api(`${path}/${encodeURIComponent(id)}`,{method:'DELETE',body:'{}'});toast(`${label}已删除。`);await load();}
@@ -83,12 +84,12 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
   return {
     mount(target){if(root===target)return;root=target;
       root.innerHTML=`<div class="page-heading"><div><h2>${label}市场</h2><p>已安装${label} · 按员工独立选择使用</p></div></div><div class="directory-toolbar"><input type="search" aria-label="搜索${label}" placeholder="搜索"><button class="primary-button" ${plugin?'data-install-plugin':'data-add-mcp'}>手动安装${label}</button></div><p class="field-hint">在线市场浏览暂未开放，可通过手动安装添加。</p><div data-market-list hidden aria-live="polite"></div><div class="directory-empty market-directory-empty" data-market-empty role="status">正在读取已安装项…</div><div data-market-pager></div>`;
-      root.querySelector('input').value=query;root.querySelector('input').oninput=event=>{query=event.target.value;pageNumber=1;rows();};
-      root.querySelector('[data-market-pager]').onclick=event=>{const button=event.target.closest('[data-page]');if(button){pageNumber=Number(button.dataset.page);rows();}};
+      root.querySelector('input').value=query;root.querySelector('input').oninput=event=>{query=event.target.value;pageNumber=1;++ticket;clearTimeout(searchTimer);searchTimer=setTimeout(()=>void load(),200);};
+      root.querySelector('[data-market-pager]').onclick=event=>{const button=event.target.closest('[data-page]');if(button){pageNumber=Number(button.dataset.page);void load();}};
       root.querySelector(plugin?'[data-install-plugin]':'[data-add-mcp]').onclick=plugin?installPlugin:installMcp;
       root.querySelector('[data-market-list]').onclick=event=>{const button=event.target.closest('[data-extension-detail]');if(button)void detail(button.dataset.extensionDetail);};void load();
     },
-    unmount(){root=null;}
+    unmount(){root=null;++ticket;clearTimeout(searchTimer);}
   };
 }
 export const createMcpMarketplaceUI = options => marketUI(options,'mcp');
@@ -106,7 +107,7 @@ export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items
     const covered=new Set(values());
     const found=catalog.filter(item=>!selected.has(item.id) && !(preserveGroups && expand(item).length===1 && expand(item)[0]===item.id && covered.has(item.id)) && (!hideUnavailable || available(item)) && `${item.name} ${item.description || ''} ${item.id}`.toLowerCase().includes(input.value.trim().toLowerCase())).slice(0,20);
     list.innerHTML=found.map(item=>`<button type="button" role="option" aria-selected="false" data-add-extension="${esc(item.id)}" ${available(item)?'':`disabled title="${esc(reason(item))}"`}><strong>${esc(item.name)}</strong>${detail(item)}${available(item)?'':`<small>${esc(reason(item))}</small>`}</button>`).join('') || `<p class="field-hint">${esc(emptyMessage())}</p>`;
-    chips.innerHTML=[...selected].map(id=>{const item=catalog.find(item=>item.id===id),incompatible=item && !available(item),name=item ? item.name+(preserveGroups && item.selectionKind==='team'?' · '+expand(item).length+' 人':'') : '未安装版本 '+id.slice(0,8);return `<span class="extension-chip" title="${esc(id)}" data-incompatible="${Boolean(incompatible)}"><span class="extension-chip-name">${esc(name)}</span>${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" ${lockedIds.includes(id)?`disabled title="${esc(lockReason(id))}"`:""} aria-label="移除${esc(name)}">×</button></span>`;}).join('');
+    chips.innerHTML=[...selected].map(id=>{const item=catalog.find(item=>item.id===id),incompatible=item && !available(item),name=item ? item.name+(preserveGroups && item.selectionKind==='team'?' · '+expand(item).length+' 人':'') : '未安装版本 '+id.slice(0,8);return `<span class="extension-chip" title="${esc(name)} · ${esc(id)}" data-incompatible="${Boolean(incompatible)}"><span class="extension-chip-name">${esc(name)}</span>${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" ${lockedIds.includes(id)?`disabled title="${esc(lockReason(id))}"`:""} aria-label="移除${esc(name)}">×</button></span>`;}).join('');
     input.placeholder=selected.size?'继续添加…':placeholder;
   };
   const open=()=>{paint();floating.open();input.setAttribute('aria-expanded','true');};
@@ -127,6 +128,14 @@ export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items
   return {refresh(items=catalog){catalog=items;paint();},value(){return values();},setValue(nextValues){selected.clear();nextValues.forEach(value=>selected.add(value));paint();onChange(values());}};
 }
 
+async function selectionCatalog(api, path, key, target) {
+  const items=[];
+  for(let page=1;target.isConnected;page++) {
+    const result=await api(`${path}?page=${page}`);items.push(...result[key]);
+    if(!result.hasMore)break;
+  }
+  return items;
+}
 export function createMarketplaceUI(options) {
   const {api,esc}=options;
   return {...marketUI(options,'plugin'),select(target,runtime,provider){
@@ -135,11 +144,11 @@ export function createMarketplaceUI(options) {
     const pickers=Object.fromEntries(['plugin','mcp'].map(kind=>[kind,createEmployeeMultiSelect(target.querySelector(`[data-picker="${kind}"]`),{
       id:`employee-${kind}-search`,label:kind==='plugin'?'插件':'MCP',placeholder:`搜索并添加${kind==='plugin'?'插件':'MCP'}`,esc,
       selectedIds:runtime.extensionSelection?.[kind==='plugin'?'pluginIds':'mcpIds'] || [],
-      available:item=>item.providers.includes(currentProvider),reason:item=>supportReason(item,currentProvider),
+      available:item=>!currentProvider || item.providers.includes(currentProvider),reason:item=>supportReason(item,currentProvider),
       detail:item=>`${item.description?`<small>${esc(item.description)}</small>`:''}${runtimeBadges(item,esc)}`,
       emptyMessage:()=>loaded?'没有可添加的匹配项':'正在读取…'
     })]));
-    Promise.all([api('/api/runtime/marketplace'),api('/api/runtime/mcp-marketplace')]).then(([plugins,mcps])=>{if(!target.isConnected)return;catalogs={plugin:plugins.plugins,mcp:mcps.entries};loaded=true;for(const kind of ['plugin','mcp'])pickers[kind].refresh(catalogs[kind]);target.querySelector('[data-selection-state]').textContent=runtime.extensionSelection?.skillIds?.length?'单 Skill 选择已移除，请重新选择完整插件后保存。':'插件和 MCP 只属于此员工，历史任务不变。';}).catch(error=>{if(target.isConnected)target.querySelector('[data-selection-state]').textContent=`扩展读取失败：${error.message}`;});
-    return {provider(value){currentProvider=value;Object.values(pickers).forEach(picker=>picker.refresh());},value(){if(!loaded)throw new Error('扩展尚未读取成功，请关闭后重试');for(const kind of ['plugin','mcp'])for(const id of pickers[kind].value()){const item=catalogs[kind].find(item=>item.id===id);if(!item)throw new Error('已选版本未安装，请移除后重新安装选择');if(!item.providers.includes(currentProvider))throw new Error(`「${item.name}」与 ${providerLabel(currentProvider)} 不兼容：${supportReason(item,currentProvider)}`);}return {pluginIds:pickers.plugin.value(),mcpIds:pickers.mcp.value()};}};
+    Promise.all([selectionCatalog(api,'/api/runtime/marketplace','plugins',target),selectionCatalog(api,'/api/runtime/mcp-marketplace','entries',target)]).then(([plugins,mcps])=>{if(!target.isConnected)return;catalogs={plugin:plugins,mcp:mcps};loaded=true;for(const kind of ['plugin','mcp'])pickers[kind].refresh(catalogs[kind]);target.querySelector('[data-selection-state]').textContent=runtime.extensionSelection?.skillIds?.length?'单 Skill 选择已移除，请重新选择完整插件后保存。':currentProvider?'此处配置员工直接选择；角色扩展自动合并，历史任务不变。':'绑定此角色的员工自动继承这些扩展；须兼容员工 Runtime。';}).catch(error=>{if(target.isConnected)target.querySelector('[data-selection-state]').textContent=`扩展读取失败：${error.message}`;});
+    return {provider(value){currentProvider=value;Object.values(pickers).forEach(picker=>picker.refresh());},value(){if(!loaded)throw new Error('扩展尚未读取成功，请关闭后重试');for(const kind of ['plugin','mcp'])for(const id of pickers[kind].value()){const item=catalogs[kind].find(item=>item.id===id);if(!item)throw new Error('已选版本未安装，请移除后重新安装选择');if(currentProvider && !item.providers.includes(currentProvider))throw new Error(`「${item.name}」与 ${providerLabel(currentProvider)} 不兼容：${supportReason(item,currentProvider)}`);}return {pluginIds:pickers.plugin.value(),mcpIds:pickers.mcp.value()};}};
   }};
 }

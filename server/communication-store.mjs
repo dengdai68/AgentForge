@@ -6,7 +6,7 @@ const now = () => new Date().toISOString();
 const id = (prefix) => prefix + "_" + randomUUID();
 
 // Invoked only inside createStore. No IO, Provider calls or external domain writes.
-export function communicationCommands(state, save) {
+export function communicationCommands(state, save, employeeSnapshot) {
   for (const key of ["communicationConversations", "communicationMessages", "communicationDeliveries", "communicationEvents", "communicationAttachments"]) state[key] ||= [];
   let migratedReadState = false;
   for (const thread of state.communicationConversations) if (!Object.hasOwn(thread, "humanReadThroughMessageId")) {
@@ -81,6 +81,7 @@ export function communicationCommands(state, save) {
   // deliveries, never rewrite queued or historical snapshots.
   const withRole = (agent) => {
     if (!agent) return agent;
+    if(employeeSnapshot)return employeeSnapshot(copy(agent));
     const roleSnapshots=(agent.roleIds || []).map(roleId=>{const role=(state.roles || []).find(row=>row.id===roleId);if(!role)throw new Error('绑定的角色不存在');return {id:role.id,name:role.name,prompt:role.prompt};});
     return {...copy(agent),roleSnapshots};
   };

@@ -20,8 +20,8 @@ const {spawn}=await import('node:child_process');
 const cli=(args,input='')=>new Promise((done,reject)=>{const c=spawn(process.execPath,['cli/main.mjs',...args,'--json','--endpoint-file',join(root,'endpoint.json'),'--session-file',join(root,'cli/session.json')]);let stdout='',stderr='';c.stdout.on('data',b=>stdout+=b);c.stderr.on('data',b=>stderr+=b);c.once('error',reject);c.once('close',code=>{if(code!==0)reject(Error(stderr||stdout));else done(JSON.parse(stdout).data)});c.stdin.end(input)});
 await cli(['auth','login','--username','edit-qa','--password-stdin'],password+'\n');const saved=await cli(['mcps','update',installed.id,'--file','-'],JSON.stringify({description:'CLI 实际更新'}));assert.equal(saved.previousId,installed.id);assert.ok(saved.employees.some(e=>e.id===employee.id));assert.ok(!JSON.stringify(saved).includes('fixture-secret'));
 const agents=(await api('/api/agents')).data.agents;assert.deepEqual(agents.find(a=>a.id===employee.id).runtime.extensionSelection.mcpIds,[saved.id]);assert.equal((await api('/api/runtime/mcp-marketplace/'+installed.id, {name:'过期'},'PUT')).status,404);
-const refused=await api('/api/runtime/mcp-marketplace/'+saved.id,{content:JSON.stringify({mcpServers:{knowledge:{command:'node',cwd:root}}})},'PUT');assert.equal(refused.status,400);assert.equal((await api('/api/runtime/mcp-marketplace')).data.entries.length,1);
-console.log('PASS actual CLI/API rebind/incompatible/stale/secret checks',root);
+const refused=await api('/api/runtime/mcp-marketplace/'+saved.id,{content:JSON.stringify({mcpServers:{knowledge:{command:'node',unsupportedField:true}}})},'PUT');assert.equal(refused.status,400);assert.equal((await api('/api/runtime/mcp-marketplace')).data.entries.length,1);
+console.log('PASS actual CLI/API rebind/invalid/stale/secret checks',root);
 // Repeat imports share the same authenticated command across UI and CLI.
 await api('/api/runtime/marketplace/updates/settings',{enabled:false},'PUT');
 for(const size of [{width:1280,height:850},{width:760,height:600}]){
@@ -32,7 +32,7 @@ for(const size of [{width:1280,height:850},{width:760,height:600}]){
   await page.locator('#roles-search').fill('不存在');await page.getByText('没有匹配的角色',{exact:true}).waitFor();await page.locator('#roles-search').fill('');
   await page.screenshot({path:join(root,`roles-empty-${size.width}.png`)});
   await page.goto(origin+'/mcp-marketplace');await page.locator('[data-market-list] .agent-card').waitFor();
-  await page.getByRole('searchbox',{name:'搜索MCP',exact:true}).fill('不存在');await page.locator('[data-market-empty]').filter({hasText:'没有匹配项'}).waitFor();
+  await page.getByRole('searchbox',{name:'搜索MCP',exact:true}).fill('不存在');await page.locator('[data-market-empty]').filter({hasText:'没有匹配的MCP'}).waitFor();
   const mcpEmpty=await page.locator('[data-market-empty]').evaluate(n=>({padding:getComputedStyle(n).padding,textAlign:getComputedStyle(n).textAlign,background:getComputedStyle(n).backgroundColor,borderRadius:getComputedStyle(n).borderRadius}));
   assert.equal(roleEmpty.padding,mcpEmpty.padding);assert.equal(roleEmpty.textAlign,mcpEmpty.textAlign);assert.equal(roleEmpty.background,mcpEmpty.background);assert.equal(roleEmpty.borderRadius,mcpEmpty.borderRadius);
 }
@@ -44,7 +44,7 @@ await page.locator('[data-market-list] .agent-card').filter({hasText:'重复导�
 let mcps=(await api('/api/runtime/mcp-marketplace')).data.entries;assert.equal(mcps.length,1);assert.notEqual(mcps[0].id,saved.id);
 let rebound=(await api('/api/agents')).data.agents.find(a=>a.id===employee.id);assert.deepEqual(rebound.runtime.extensionSelection.mcpIds,[mcps[0].id]);
 const retained=mcps[0].id;
-try{await cli(['mcps','create','--file','-'],JSON.stringify({name:mcps[0].name,content:JSON.stringify({mcpServers:{knowledge:{command:'node',cwd:root}}})}));assert.fail('incompatible overwrite must fail');}catch(error){assert.match(error.message,/不兼容/);}
+try{await cli(['mcps','create','--file','-'],JSON.stringify({name:mcps[0].name,content:JSON.stringify({mcpServers:{knowledge:{command:'node',unsupportedField:true}}})}));assert.fail('invalid overwrite must fail');}catch(error){assert.match(error.message,/不支持/);}
 assert.deepEqual((await api('/api/runtime/mcp-marketplace')).data.entries.map(m=>m.id),[retained]);
 const parallelInput={name:'并发安装',description:'同名只留一条',content:JSON.stringify({mcpServers:{parallel:{command:'node'}}})};
 const parallel=await Promise.all([api('/api/runtime/mcp-marketplace',parallelInput),api('/api/runtime/mcp-marketplace',parallelInput)]);assert.ok(parallel.every(r=>r.status===201));

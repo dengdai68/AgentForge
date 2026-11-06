@@ -31,7 +31,7 @@ export function consoleContentTokens(value, { json = true, truncated = false } =
 }
 
 export const STATUS_TEXT = {
-  backlog: "待开始", planning: "进行中", running: "进行中", awaiting_human: "等待你的澄清",
+  backlog: "草稿", planning: "进行中", running: "进行中", awaiting_human: "等待你的澄清",
   review: "进行中", awaiting_acceptance: "待你验收", paused: "已暂停", done: "已完成",
   blocked: "错误中断", failed: "错误中断", completed: "已完成", cancelled: "已终止"
 };
@@ -215,7 +215,7 @@ export const TASK_FILTERS = Object.freeze([
   { id: "all", label: "全部" },
   { id: "attention", label: "待你处理" },
   { id: "active", label: "执行中" },
-  { id: "backlog", label: "待开始" },
+  { id: "backlog", label: "草稿" },
   { id: "done", label: "已完成" },
   { id: "cancelled", label: "已终止" }
 ]);
@@ -339,14 +339,14 @@ export function workspaceAgents(workspace = {}, agents = [], { includeDeleted = 
 
 // A running Trace is an invocation fact, but a terminal Run is the lifecycle
 // authority for the whole workspace. A late read model must not make a
-// cancelled, failed, or completed Run look as though a member is still active.
+// cancelled or completed Run look active. Failed Runs can have peers finishing.
 export function roleExecutionStatus(run = {}, traces = [], agentId) {
   const agentTraces = asArray(traces).filter(trace => trace.agentId === agentId)
     .map((trace, index) => ({ trace, index }))
     .sort((a, b) => (Date.parse(a.trace.startedAt || a.trace.createdAt) || 0) - (Date.parse(b.trace.startedAt || b.trace.createdAt) || 0) || a.index - b.index)
     .map(item => item.trace);
   const latest = agentTraces.at(-1), terminal = terminalRunStatuses.has(run.status);
-  const activeTrace = !terminal && latest?.status === "running" ? latest : null;
+  const activeTrace = (!terminal || run.status === "failed") && latest?.status === "running" ? latest : null;
   const failed = !activeTrace && latest?.status === "failed";
   const terminalLabel = terminal ? run.status === "failed" ? "已停止" : STATUS_TEXT[run.status] || run.status : null;
   return {
@@ -486,7 +486,7 @@ export function collaborationRecords(workspace = {}) {
     return {
       id: item.id, timestamp: item.createdAt, category: "message", senderType: item.sender?.type,
       from: item.sender?.name || "AgentForge", to: item.recipient?.type === "team" ? null : item.recipient?.name || (item.recipient?.type === "human" ? "你" : item.recipient?.id || null),
-      title: kinds[item.kind] || (item.replyToMessageId ? "答复" : "协作消息"), content: collaborationContent(item),
+      title: kinds[item.kind] || (item.replyToMessageId ? "答复" : "协作消息"), content: collaborationContent(item), attachments: asArray(item.attachments),
       status: answer ? "当前：已回答" : waiting ? "当前：等待答复" : "", statusCode,
       tone: waiting || item.kind === "escalation" ? "warning" : item.sender?.type === "human" ? "info" : ["manager_decision", "agent_consultation"].includes(item.kind) ? "violet" : "teal",
       human: item.sender?.type === "human" || item.recipient?.type === "human",

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm,readdir} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {createStore} from '../server/store.mjs';
@@ -17,7 +18,7 @@ test('update period is validated atomically, persisted, and reschedules without 
   const value=updater.configure({intervalMinutes:7});assert.equal(value.intervalMs,420000);assert.ok(Math.abs(Date.parse(value.nextCheckAt)-Date.now()-420000)<1000);
   for(const input of [{},[],null,{enabled:0},{intervalMinutes:0},{intervalMinutes:1441},{intervalMinutes:1.5},{intervalMinutes:'2'},{enabled:false,intervalMinutes:0},{extra:true}])assert.throws(()=>updater.configure(input));
   assert.deepEqual(store.getPluginUpdateSettings(),{enabled:true,intervalMinutes:7});assert.equal(calls,0);
-  updater.configure({enabled:false});assert.equal(updater.status().nextCheckAt,null);await updater.check();assert.equal(calls,1);assert.equal(updater.status().nextCheckAt,null);
+  updater.configure({enabled:false});assert.equal(updater.status().nextCheckAt,null);await updater.check();assert.equal(calls,0,'checks use persisted metadata without rescanning catalog files');assert.equal(updater.status().nextCheckAt,null);
 });
 
 import {gitOrigin} from './plugin-git-fixture.mjs';
@@ -33,9 +34,13 @@ test('real Git commit polling updates selected plugins, retains frozen files and
   await origin.git('-C',origin.source,'branch','stable');await origin.git('-C',origin.source,'tag','-a','v1','-m','fixture',initialRevision);await origin.git('-C',origin.source,'push','origin','stable','v1');
   const market=createMarketplace(join(origin.root,'runtime')),store=createStore({databasePath:join(origin.root,'state.sqlite')});t.after(()=>store.close());
   const installed=await market.import({url:origin.url}),old=installed.plugins.find(p=>p.name==='alpha'),beta=installed.plugins.find(p=>p.name==='beta');
+  store.registerExtensions([...installed.plugins,...installed.mcps]);
   store.removeExtension({kind:'plugin',id:beta.id,name:beta.name});
   const frozen=await market.resolve({pluginIds:[old.id],mcpIds:installed.mcps.map(m=>m.id)},'codex');
   const employee=store.createAgent({name:'原生更新验证',runtime:{provider:'codex',...frozen}});
+  const role=store.createRole({name:'更新继承角色',prompt:'ROLE',...await market.resolveRole({pluginIds:[old.id],mcpIds:[]})});
+  const inheritedEmployee=store.createAgent({name:'仅角色继承',roleIds:[role.id],runtime:{provider:'codex'}});
+
   const updater=createPluginUpdates({getStore:()=>store,marketplace:market,intervalMs:process.env.AGENTFORGE_PLUGIN_UPDATE_SCHEDULE_REAL==='1'?pluginUpdateIntervalMs:500});t.after(()=>updater.stop());
   assert.equal(updater.status().enabled,true);assert.equal(pluginUpdateIntervalMs,120000);
   await writeFile(join(origin.source,'alpha/skills/check/SKILL.md'),'---\nname: check\ndescription: test\n---\nAFTER');
@@ -47,6 +52,7 @@ test('real Git commit polling updates selected plugins, retains frozen files and
   if(process.env.AGENTFORGE_PLUGIN_UPDATE_SCHEDULE_REAL==='1')assert.ok(Date.now()-start>=120000);
   updater.configure({enabled:false});
   const updated=store.listAgents().find(a=>a.id===employee.id).runtime;
+  assert.deepEqual(store.getRole(role.id).extensionSelection.pluginIds,updated.extensionSelection.pluginIds);assert.deepEqual(store.listAgents().find(item=>item.id===inheritedEmployee.id).inheritedExtensionSelection.pluginIds,updated.extensionSelection.pluginIds);
   assert.notEqual(updated.extensionSelection.pluginIds[0],old.id);assert.deepEqual(updated.extensionSelection.mcpIds,frozen.extensionSelection.mcpIds);
   assert.match(await readFile(updated.skillPaths[0],'utf8'),/AFTER/);assert.match(await readFile(frozen.skillPaths[0],'utf8'),/BEFORE/);
   assert.equal((await market.mcpCatalog()).entries.length,installed.mcps.length);
@@ -62,6 +68,7 @@ test('real Git commit polling updates selected plugins, retains frozen files and
 test('checks never overlap, disable persists and stopping aborts in-flight network work',async t=>{
   const root=await mkdtemp(join(tmpdir(),'af-update-state-')),databasePath=join(root,'state.sqlite');t.after(()=>rm(root,{recursive:true,force:true}));let store=createStore({databasePath});
   const marketplace={catalog:async()=>({plugins:[{id:'installed',name:'probe',source:{url:'https://example.invalid/repo.git',revision:'a'}}]})};
+  store.registerExtensions((await marketplace.catalog()).plugins.map(item=>({...item,id:randomUUID(),kind:'plugin',providers:[],createdAt:new Date().toISOString()})));
   let calls=0;const updater=createPluginUpdates({getStore:()=>store,marketplace,probe:async(_,{signal})=>{calls++;await new Promise(done=>signal.addEventListener('abort',done,{once:true}));throw new Error('cancelled')}});
   const first=updater.check();assert.equal(first,updater.check());await pause(10);assert.equal(calls,1);updater.configure({enabled:false,intervalMinutes:3});updater.stop();await first;assert.equal(updater.status().running,false);assert.equal(updater.status().nextCheckAt,null);
   store.close();store=createStore({databasePath});assert.deepEqual(store.getPluginUpdateSettings(),{enabled:false,intervalMinutes:3});store.close();
@@ -75,12 +82,14 @@ test('a network failure in one origin does not block the remaining origins',asyn
   const root=await mkdtemp(join(tmpdir(),'af-update-error-')),store=createStore({databasePath:join(root,'state.sqlite')});t.after(()=>{store.close();return rm(root,{recursive:true,force:true})});
   let calls=0;
   const marketplace={catalog:async()=>({plugins:['broken','healthy'].map(name=>({id:name,name,source:{url:`https://${name}.invalid/repo.git`,revision:'current'}}))})};
+  store.registerExtensions((await marketplace.catalog()).plugins.map(item=>({...item,id:randomUUID(),kind:'plugin',providers:[],createdAt:new Date().toISOString()})));
   const updater=createPluginUpdates({getStore:()=>store,marketplace,probe:async spec=>{calls++;if(spec.url.includes('broken'))throw Error('fixture network failure');return 'current'}});t.after(()=>updater.stop());
   const result=await updater.check();assert.equal(calls,2);assert.equal(result.checkedSources,2);assert.equal(result.errors.length,1);assert.equal(result.updatedPlugins,0);
 });
 test('a shared failing dependency is probed only once per cycle across origins',async t=>{
   const root=await mkdtemp(join(tmpdir(),'af-shared-source-')),store=createStore({databasePath:join(root,'state.sqlite')});t.after(()=>{store.close();return rm(root,{recursive:true,force:true})});
   const counts=new Map(),marketplace={catalog:async()=>({plugins:['a','b'].map(name=>({id:name,name,source:{url:'https://shared.invalid/plugin.git',revision:'old',origin:{url:`https://${name}.invalid/market.git`,revision:'current'}}}))})};
+  store.registerExtensions((await marketplace.catalog()).plugins.map(item=>({...item,id:randomUUID(),kind:'plugin',providers:[],createdAt:new Date().toISOString()})));
   const updater=createPluginUpdates({getStore:()=>store,marketplace,probe:async spec=>{counts.set(spec.url,(counts.get(spec.url)||0)+1);if(spec.url.includes('shared'))throw Error('offline');return 'current'}});t.after(()=>updater.stop());
   assert.equal((await updater.check()).errors.length,2);assert.equal(counts.get('https://shared.invalid/plugin.git'),1);
 });

@@ -82,3 +82,5 @@ runtime-paths.mjs 复用 server/data-home.mjs 的纯路径函数，将默认任�
 各 Tab 主目录的搜索框和下拉筛选共用任务中心的32px高度、内边距与圆角；角色页共用数字员工的44px工具栏及顶部/卡片间距。规则限定主目录，不改变弹框和任务工作区控件。纯视觉调整，HTTP/CLI 的搜索、筛选和分页语义不变。
 
 自动化触发记录增加任务标题列后，桌面表格保留1100px最小宽度，防止通用820px密度覆盖挤压状态列；窄窗口在表格内横向滚动。
+
+沟通媒体复用认证 HTTP 与 renderer 原生 dialog：图片覆盖应用窗口，文件走原生下载，不新增宿主 IPC。自动化触发表 compact 最小宽度与共享 CSS 同为 820px，足够宽时无横向滚动。隔离 `test-communication-media.mjs` 使用 Electron will-download 将验证文件保存到测试目录。

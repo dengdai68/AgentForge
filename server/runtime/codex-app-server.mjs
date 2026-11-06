@@ -27,7 +27,7 @@ export async function runCodexAppServer(input, { args, normalizeEvent, authentic
   let killTimer;
   const signal = name => {try {process.platform==='win32'?child.kill(name):process.kill(-child.pid,name);}catch{}};
   const stop = () => {if(closed)return;signal('SIGTERM');if(!killTimer){killTimer=setTimeout(()=>{if(!closed)signal('SIGKILL')},3000);killTimer.unref();}};
-  const unregister = registerExecution(key,{terminate(reason){cancelled=cancelledError(reason);abort(cancelled);}});
+  const unregister = registerExecution(key,{terminate(reason){cancelled=cancelledError(reason);abort(cancelled);}}, input.runId || key);
   let complete, rejectComplete;
   const completion = new Promise((resolve,reject)=>{complete=resolve;rejectComplete=reject}); completion.catch(()=>{});
   let idle, retryTimer;

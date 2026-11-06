@@ -40,7 +40,7 @@ CLI 专属于客户端：源码和安装版都只发现运行中的客户端，�
 
 `plugins import --file source.json` 安装时展开来源目录/所属 Git 仓库内的符号链接，形成不依赖原目录的普通文件副本；中文、空格等文件名保留。断链、循环、越界目标和特殊文件返回插件名/相对路径，整批不发布，不静默忽略。输入仍只有 url/path 二选一，`--help` 和 schema 同步说明，无额外兼容开关；员工选择及详情查询协议不变。
 
-插件和 MCP 支持 `agentforge plugins delete ID --yes`、`agentforge mcps delete ID --yes`。先 `list --search 文本` 或 `get ID` 核对目标；没有 `--yes` 不发删除请求。当前员工仍选择该版本时服务拒绝并指出员工，需先 `agents update` 移除选择。成功回执包含 ID、名称、deleted 与 historyRetained；再 list 不显示、get 返回 404。历史冻结引用和文件保留，插件删除不影响独立 MCP。各操作的 `--help`/schema 与认证 HTTP 同步。
+插件和 MCP 支持 `agentforge plugins delete ID --yes`、`agentforge mcps delete ID --yes`。先 `list --search 文本` 或 `get ID` 核对目标；没有 `--yes` 不发删除请求。删除会在同一事务中解除所有员工（含停用）的当前绑定。成功回执包含 ID、名称、deleted、受影响 employees 与 historyRetained；再 list 不显示、get 返回 404。历史冻结引用和文件保留，插件删除不影响独立 MCP。各操作的 `--help`/schema 与认证 HTTP 同步。
 
 任务协作的界面配色不进入 CLI 文本/JSON；仍输出真实状态文字，不输出 `tone` / `statusCode` 等视觉元数据。
 
@@ -63,7 +63,7 @@ TTY 隐藏输入密码；脚本使用显式 `--password-stdin`。没有密码命
 
 命令组包含员工、角色、团队、工作流、Runtime、插件和 MCP。根帮助列组，组帮助列操作，操作 `--help` 和 `schema` 提供字段与 JSON 模板。默认可读文本，机器消费者显式 `--json`。
 
-角色：`roles list/get/create/update/delete` 管理只有名称和纯文本提示词的共用角色；list `--search` 与界面一致，按名称和提示词匹配。update 为部分更新（至少 name/prompt 一项），delete 需要 `--yes` 且仍有员工（含停用）绑定时拒绝并列出员工。员工以有序、不重复的 `roleIds` 数组绑定一组角色，省略保持不变、[] 全部解绑；旧 roleId/null 输入明确拒绝；角色提示词并入该员工沟通与任务执行的应用系统/developer 指令，不进入每轮用户消息。角色编辑只影响之后创建的任务与后续沟通投递，冻结 Task/Run 快照保持原文本；删除角色不改写历史快照。
+角色：`roles list/get/create/update/delete` 管理共用名称、提示词及插件/MCP选择的角色；list `--search` 与界面一致，按名称和提示词匹配。update 为部分更新（至少 name/prompt/extensionSelection 一项），delete 需要 `--yes` 且仍有员工（含停用）绑定时拒绝并列出员工。员工以有序、不重复的 `roleIds` 数组绑定一组角色，省略保持不变、[] 全部解绑；旧 roleId/null 输入明确拒绝；角色提示词并入该员工沟通与任务执行的应用系统/developer 指令，不进入每轮用户消息。角色编辑只影响之后创建的任务与后续沟通投递，冻结 Task/Run 快照保持原文本；删除角色不改写历史快照。
 
 员工通过 `runtime.profileId` 引用连接，扩展只接受完整 `extensionSelection:{pluginIds:[],mcpIds:[]}`。拒绝单 Skill、员工 `mcpJson`、手工路径及派生字段。工作流用 `staffingGuidance` 表达人员需求；员工仅 business/manager 两类，仓库说明写入 systemPrompt；拒绝 developer 与 repository 输入。`pluginSources`、工作流 `ownerRole/repositoryPath/reuseOwnerFrom` 不属于当前写入协议。
 
@@ -126,3 +126,13 @@ automations list/get/create/update/delete/trigger/triggers 与 App 使用同一�
 `agents list --role ID_OR_NAME` 按当前绑定角色精确 ID 或唯一名称筛选；同名歧义拒绝并要求 ID，不存在的角色明确失败。与 --search 组合后分页/--all，和 App 角色下拉一致。沿用受认证 /api/agents、/api/roles 的目录读模型，不新增写入字段或权限。角色卡片移除 ID、创建时间与绑定人数仅属呈现调整，CLI ID 仍用于关联。
 
 自动化任务标题统一为 `自动化名称#yyyy-MM-dd HH:mm:ss`（当地时区、24 小时制；定时取计划时刻，手动取触发时刻）。触发列表首列展示真实任务标题；HTTP/CLI 的触发回执、列表和 latestTrigger 返回 taskTitle，未生成任务为 null；不重写历史任务名称。
+
+同任务并行无需新增输入字段：App/CLI 创建/启动的目标、成员、可选工作流、验收标准及默认值一致。经理可批量派工，不同员工并行，同员工排队。`tasks progress` 文本/JSON 的 activeTraces 返回所有运行 Trace，pendingDispatches 返回所有 claimed/queued/waiting；不再把 currentFocus 当作唯一执行者。failed 且有在途成员时 nextAction 提示收尾，`tasks terminate --yes` 同时停止全部调用（包括失败后收尾者）。重试/最终确认继续保留客户端边界。
+
+任务草稿双端对齐：App「保存草稿」对应 `tasks create --file task.json`，返回 status=backlog 且没有 Run；`tasks list --status backlog` 筛选草稿，`tasks get ID` 查询，`tasks start ID` 显式开始，`tasks delete ID --yes` 删除。App「保存并开始」对应 `tasks create --file task.json --start`。字段、默认值、冻结快照与失败回执保持一致；任务创建校验未放宽。
+
+插件/MCP list 通过认证 HTTP 使用服务端 page/search，每页20项，--all 逐页收集；默认和 App 相同。delete ID --yes 对齐 App 确认删除：软删除并解除所有员工（含停用）的当前绑定，返回 employees ID/名称及 historyRetained；无需先手工解绑，独立 MCP 不随插件删除。详情/创建/导入/编辑字段不变，删除后的旧 ID 详情404、重新绑定失败。
+
+tasks message/reply 的 JSON 支持 attachmentPaths（本机文件路径数组）与 attachmentIds（同一 Run 已上传引用）；两者合计最多10个，单文件最多20 MiB。CLI 以二进制经认证 HTTP 上传后提交附件 ID，不读取数据库。content 必填，有附件时可为空字符串；reply 仍要求精确 replyToMessageId。回执 message.attachments 与 collaboration 列表包含附件元数据；错误/归档/自动化边界同 App。示例：{"content":"参考附件","attachmentPaths":["/absolute/参考图片.png","/absolute/说明.txt"]}。
+
+roles create/update 的 schema 与 App 同步增加 extensionSelection，必须同时提供 pluginIds/mcpIds，均引用已安装版本；创建省略为空，更新省略保留，两个空数组清空。roles list/get 返回选择 ID；agents list/get 的 inheritedExtensionSelection 表示角色继承来源，runtime.extensionSelection 仍为直接选择。保存时校验 Provider 兼容及合并命名空间，执行自动去重。automations delete ID --yes 仅删除停用自动化，同时终止关联执行并永久删除全部任务和触发记录，返回 taskIds/runIds；与 App 删除确认一致。

@@ -31,3 +31,9 @@ workflowFocus 仅依据执行、等待和经理当前焦点；不接收独立问
 自动化直接复用任务工作区与既有协作/控制台投影，不另建执行详情组件。自动化参与者无 human，因此不显示人类输入与筛选；普通任务投影和历史定位不变。
 
 workspaceAgents 默认排除已移除成员；历史 Trace 保留冻结身份。任务成员列表复用执行状态与控制台选择。
+
+并行成员状态按各自最新 Trace 显示：Run 已 failed 时，仍在收尾的成员保留“执行中”；完成/取消等状态继续覆盖旧执行。App 的当前执行行展示所有 running Trace 对应成员，CLI progress 的 activeTraces 使用同一事实范围。
+
+共享 STATUS_TEXT 与 TASK_FILTERS 将 backlog 显示为「草稿」，协议仍为 backlog；任务启动及 Run 状态不变。
+
+collaborationRecords 保留 Message.attachments 元数据；任务和沟通共用图片预览/下载展示，CLI 保留对应引用。Trace/Artifact 中 agent 为 id/name 引用，完整成员配置从 Run.participants 读取。

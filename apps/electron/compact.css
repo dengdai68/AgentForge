@@ -147,7 +147,7 @@ button:disabled { cursor:not-allowed; opacity:.5; }
 /* Seven-column task inventory, with room for evidence and safe action groups. */
 .full-panel { border:0; border-radius:0; }
 .table { min-width:820px; }
-.automation-trigger-table { min-width:1100px; }
+.automation-trigger-table { min-width:820px; }
 .table .col-task { width:34%; }
 .table .col-workflow { width:13%; }
 .table .col-path { width:10%; }

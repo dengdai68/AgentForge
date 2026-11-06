@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { createCatalogFixtureStore, createFixtureStore, freezeHistoricalRepository } from "./fixture-store.mjs";
 import { createSqlitePersistence } from "../server/persistence.mjs";
 import { createRunFiles } from "../server/run-files.mjs";
-import { dispatchBlocksHandoff, executeRun, requestHumanIntervention, scheduleManagerFollowup } from "../server/orchestrator.mjs";
+import { executeRun, requestHumanIntervention, scheduleManagerFollowup } from "../server/orchestrator.mjs";
 
 test('unaddressed task messages route to the frozen manager while terminal runs remain inquiry-only', () => {
   for (const status of ['running', 'paused', 'completed', 'cancelled', 'awaiting_acceptance']) {
@@ -341,19 +341,6 @@ function backoffDispatch(store, run, nodeId, agentId) {
   return { delivery, trace };
 }
 
-test("dispatchBlocksHandoff distinguishes real pending work from retry backoff", () => {
-  const future = new Date(Date.now() + 300000).toISOString();
-  const past = new Date(Date.now() - 1000).toISOString();
-  assert.equal(dispatchBlocksHandoff({ status: "done" }), false);
-  assert.equal(dispatchBlocksHandoff({ status: "cancelled" }), false);
-  assert.equal(dispatchBlocksHandoff({ status: "claimed" }), true, "in-flight work blocks");
-  assert.equal(dispatchBlocksHandoff({ status: "waiting" }), true, "an open consultation blocks");
-  assert.equal(dispatchBlocksHandoff({ status: "queued" }), true, "a freshly queued instruction blocks");
-  assert.equal(dispatchBlocksHandoff({ status: "queued", nextRetryAt: past, lastError: "x" }), true, "an immediately claimable retry blocks");
-  assert.equal(dispatchBlocksHandoff({ status: "queued", nextRetryAt: future, lastError: "x" }), false, "retry backoff never blocks");
-  assert.equal(dispatchBlocksHandoff({ status: "queued", nextRetryAt: future }), true, "queued without a recorded failure still blocks");
-});
-
 test("manager redispatch materializes during retry backoff while failed evidence is preserved", () => {
   const store = createFixtureStore();
   const run = store.createRun(store.listTasks()[0].id);
@@ -378,59 +365,14 @@ test("manager redispatch materializes during retry backoff while failed evidence
   assert.equal(store.getRunWorkspace(run.id).traces.find((item) => item.id === failed.trace.id).status, "failed");
 });
 
-test("real pending work still blocks a non-terminal handoff; backoff does not", () => {
-  const store = createFixtureStore();
-  const run = store.createRun(store.listTasks()[0].id);
-  store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
-  const managerDelivery = store.enqueueDispatch(run.id, { recipientAgentId: run.manager.id, workflowNodeId: "requirements", purpose: "manager", dedupeKey: "manager-decision-2" });
-  store.claimDispatch(run.id);
-  store.completeDispatch(managerDelivery.id);
-
-  // A freshly queued instruction (new work) keeps priority: followup blocked,
-  // and the deferral is revisited by a queued manager redispatch, never dropped.
-  store.enqueueDispatch(run.id, { recipientAgentId: "agent_tester", workflowNodeId: "testing", purpose: "instruction", dedupeKey: "fresh-instruction" });
-  const deferred = scheduleManagerFollowup(store, run.id, managerDelivery, { nextNodeId: "requirements", nextAgentId: "agent_analyst", rationale: "重派" });
-  assert.equal(deferred.scheduled, "blocked"); assert.equal(deferred.requeued, true);
-  assert.ok(!store.listDispatches(run.id).some((item) => item.dedupeKey === "handoff:" + managerDelivery.id));
-  const redispatch = store.listDispatches(run.id).find((item) => item.dedupeKey === "redispatch:" + managerDelivery.id);
-  assert.ok(redispatch && redispatch.recipientAgentId === run.manager.id && redispatch.purpose === "manager", "a blocked decision queues a manager re-evaluation");
-  const note = store.getRunWorkspace(run.id).messages.find((item) => redispatch.messageIds.includes(item.id));
-  assert.match(note.content, /暂未建立派工/);
-  assert.equal(dispatchBlocksHandoff(redispatch), false, "the redispatch never blocks the handoff it revisits");
-
-  // Once only backoff remains, the non-terminal handoff materializes.
-  const fresh = store.listDispatches(run.id).find((item) => item.dedupeKey === "fresh-instruction");
-  store.claimDispatch(run.id);
-  const failedTrace = store.createTrace(run.id, { workflowNodeId: "testing", agentId: "agent_tester", type: "instruction" });
-  store.attachDispatchTrace(fresh.id, failedTrace.id);
-  store.completeTrace(failedTrace.id, { status: "failed", error: "临时失败" });
-  store.retryDispatch(fresh.id, "临时失败", 300000);
-  assert.equal(scheduleManagerFollowup(store, run.id, managerDelivery, { nextNodeId: "requirements", nextAgentId: "agent_analyst", rationale: "重派" }).scheduled, "handoff");
-  assert.ok(store.listDispatches(run.id).some((item) => item.dedupeKey === "handoff:" + managerDelivery.id));
-});
-
-test("a deferred manager decision materializes after pending work drains instead of stalling the run", () => {
-  const store = createFixtureStore();
-  const run = store.createRun(store.listTasks()[0].id);
-  store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
-  const managerDelivery = store.enqueueDispatch(run.id, { recipientAgentId: run.manager.id, workflowNodeId: "requirements", purpose: "manager", dedupeKey: "manager-decision-3" });
-  store.claimDispatch(run.id);
-  store.completeDispatch(managerDelivery.id);
-
-  // An ordinary instruction queued while the manager was answering keeps
-  // priority; the decision waits and queues its own re-evaluation.
-  const blocker = store.enqueueDispatch(run.id, { recipientAgentId: run.manager.id, workflowNodeId: "requirements", purpose: "instruction", dedupeKey: "queued-instruction" });
-  assert.equal(scheduleManagerFollowup(store, run.id, managerDelivery, { nextNodeId: "requirements", nextAgentId: "agent_analyst", rationale: "安排需求" }).scheduled, "blocked");
-  assert.ok(!store.listDispatches(run.id).some((item) => item.purpose === "node"));
-  const redispatch = store.listDispatches(run.id).find((item) => item.dedupeKey === "redispatch:" + managerDelivery.id);
-  assert.ok(redispatch);
-
-  // The queued instruction drains first, then the re-evaluation can hand off.
-  store.claimDispatch(run.id);
-  store.completeDispatch(blocker.id);
-  assert.equal(scheduleManagerFollowup(store, run.id, redispatch, { nextNodeId: "requirements", nextAgentId: "agent_analyst", rationale: "重新安排" }).scheduled, "handoff");
-  const handoff = store.listDispatches(run.id).find((item) => item.purpose === "node" && item.workflowNodeId === "requirements");
-  assert.ok(handoff && handoff.recipientAgentId === "agent_analyst");
+test("pending work does not block independent manager handoffs; recipient queues remain FIFO", () => {
+  const store = createFixtureStore(), run = store.createRun(store.listTasks()[0].id);
+  const first = store.enqueueDispatch(run.id, { recipientAgentId: 'agent_tester', workflowNodeId: 'testing', purpose: 'instruction' });
+  const managerDelivery = { id:'independent-handoff', recipientAgentId:run.manager.id };
+  assert.equal(scheduleManagerFollowup(store, run.id, managerDelivery, { nextNodeId:'requirements', nextAgentId:'agent_analyst', rationale:'独立工作' }).scheduled, 'handoff');
+  assert.equal(store.claimDispatch(run.id).id, first.id);
+  assert.equal(store.claimDispatch(run.id).recipientAgentId, 'agent_analyst');
+  assert.equal(store.getDispatch(first.id).status, 'claimed');
   store.close();
 });
 
@@ -444,11 +386,7 @@ test("a concluded run settles pending coordination follow-ups so completion and 
   const a = store.enqueueDispatch(run.id, { recipientAgentId: run.manager.id, workflowNodeId: "requirements", purpose: "manager", dedupeKey: "decision-a" });
   store.claimDispatch(run.id); store.completeDispatch(a.id);
   const b = store.enqueueDispatch(run.id, { recipientAgentId: run.manager.id, workflowNodeId: "requirements", purpose: "manager", dedupeKey: "decision-b" });
-  const deferred = scheduleManagerFollowup(store, run.id, a, { nextNodeId: "requirements", nextAgentId: "agent_analyst", rationale: "先处理排队消息" });
-  assert.equal(deferred.requeued, true);
-  const redispatch = store.listDispatches(run.id).find((item) => item.dedupeKey === "redispatch:" + a.id);
-  assert.equal(redispatch.coordinationFollowup, true);
-  assert.equal(redispatch.deferredRevisit, true);
+  const redispatch = store.enqueueDispatch(run.id, { recipientAgentId: run.manager.id, workflowNodeId: 'requirements', purpose: 'manager', coordinationFollowup: true, deferredRevisit: true, dedupeKey: 'historical-redispatch' });
   assert.equal(store.claimDispatch(run.id).id, b.id); store.completeDispatch(b.id);
   assert.equal(scheduleManagerFollowup(store, run.id, b, { nextNodeId: null, rationale: "经理提交验收" }).scheduled, "acceptance");
   assert.equal(store.getDispatch(redispatch.id).status, "cancelled", "acceptance settles the superseded deferred revisit");
@@ -473,9 +411,11 @@ test("the manager handoff directly requests acceptance without a final review ga
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
   const failed = backoffDispatch(store, run, "testing", "agent_tester");
   const delivery = { id: "manager-finish", traceIds: [] };
+  assert.throws(() => scheduleManagerFollowup(store, run.id, delivery, { nextNodeId:null, rationale:'提交人类验收' }), /仍有成员/);
+  store.retryScheduledDispatches(run.id);store.claimDispatch(run.id);store.completeDispatch(failed.delivery.id);
   assert.equal(scheduleManagerFollowup(store, run.id, delivery, { nextNodeId: null, rationale: "提交人类验收" }).scheduled, "acceptance");
   assert.equal(store.getRun(run.id).status, "awaiting_acceptance");
-  assert.equal(store.getDispatch(failed.delivery.id).status, "queued");
+  assert.equal(store.getDispatch(failed.delivery.id).status, "done");
   assert.equal(store.listDispatches(run.id).some(item => item.purpose === "delivery_review"), false);
 });
 
@@ -483,9 +423,10 @@ test("human acceptance is not vetoed by a platform result gate", () => {
   const store = createFixtureStore(), run = store.createRun(store.listTasks()[0].id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(run.taskId, "running");
   const failed = backoffDispatch(store, run, "testing", "agent_tester");
+  store.retryScheduledDispatches(run.id);store.claimDispatch(run.id);store.completeDispatch(failed.delivery.id);
   store.requestHumanAcceptance(run.id);
   assert.equal(store.confirmRunCompletion(run.id).status, "completed");
-  assert.equal(store.getDispatch(failed.delivery.id).status, "queued");
+  assert.equal(store.getDispatch(failed.delivery.id).status, "done");
 });
 
 test("formal routing chain: direct @ → manager dispatch → node delivery → legitimate artifact accepted, out-of-bounds rejected", async (t) => {

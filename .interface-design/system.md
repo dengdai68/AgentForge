@@ -123,7 +123,7 @@
 - **共享空态**：`.directory-empty` 跨满列表宽度，padding `14px 16px`，1px 虚线、6px 圆角、`surface-soft` 背景、muted 文字、12px/1.6；本次自动化空态与员工无匹配均为标题+说明两行，实测约 74px 高；纯单行按当前盒模型约 49.2px，内容换行后自然增高。空态不重复创建按钮。
 - **分页**：[web/pagination.mjs](../web/pagination.mjs) 维护共享分页；当前页、禁用页按钮及查询重置页码沿用现有实现，不用视觉调整改变查询语义。
 
-自动化触发记录首列为任务标题（280px），长标题省略并通过 title 查看全文；表格最小宽度1100px，窄窗口仅表格内部横向滚动，保留计划时间、触发方式、状态、完成方式及操作。实现位置：`web/automations.mjs`、`web/styles.css .automation-trigger-table/.automation-trigger-title` 与 `apps/electron/compact.css .automation-trigger-table`。
+自动化触发记录首列为任务标题（28%），长标题省略并通过 title 查看全文；表格最小宽度820px，窄窗口仅表格内部横向滚动，保留计划时间、触发方式、状态、完成方式及操作。实现位置：`web/automations.mjs`、`web/styles.css .automation-trigger-table/.automation-trigger-title` 与 `apps/electron/compact.css .automation-trigger-table`。
 
 ### 按钮与表单
 
@@ -146,7 +146,7 @@
 - 设置由 [web/settings.mjs](../web/settings.mjs) 的 `createSettingsUI` 维护；用 `.settings-layout/.settings-nav/.settings-section`，不是外套大卡片。Runtime 用原生 `details/summary` 收起展开，展开时才创建编辑区，收起保留草稿。
 - 共享弹窗由 [web/app.js](../web/app.js) 的 `openModal/closeModal/confirmDialog` 维护（约 200 行），壳在 [web/index.html](../web/index.html) 的 `#modal-backdrop`。外层为原生 `<dialog>`，使用 `showModal()/close()`；浏览器负责背景不可交互与 Tab 模态，标题通过 `aria-labelledby` 关联。打开聚焦首个输入或按钮，关闭返回触发入口；入口已移除则回到当前导航。
 - 通用宽度上限 560px；确认框 440px；员工配置 760px；任务创建 900px 且不超视口减 40px；员工只读详情 640px 且不超视口减 32px。高度与视口、表单类型共同约束，正文滚动，操作区保留。
-- 新建任务的正文为主要输入区域，13px、行高 1.65，textarea 高度约 6–12 行自适应；验收标准为可选 `details`，底部保留成员多选、工作流和操作。复用 `newTaskModal`，自动化增加调度字段。
+- 新建任务的正文为主要输入区域，13px、行高 1.65，textarea 高度约 6–12 行自适应；验收标准为可选 `details`，正文包含成员多选和工作流，底部仅保留操作。复用 `newTaskModal`，普通任务底部依次为取消、次级保存草稿、主操作保存并开始；Enter 默认保存草稿。自动化增加调度字段。
 - 员工只读详情（源码）：[web/communication.js](../web/communication.js) 的 `employeeDetailMarkup` 与 `app.js` 的 `showEmployeeDetail`；头部头像+姓名+小字类型，简介与工作提示词直接展开，无重复“员工详细信息”标题；提示词底色 `surface-soft`、padding `12px 16px`、圆角 6px、13px/1.75。样式位于 `styles.css` 的 `.employee-profile-*`，约 2124 行。
 
 ### 多选与浮层
@@ -212,3 +212,15 @@
 本轮新增两个共享颜色语义 Token：`--control-focus-ring`、`--control-hover-border`，均引用已有 accent-line；采用浏览器原生 dialog，不增加框架或依赖。App/CLI 业务能力无变化，无需新增 CLI 命令。
 
 触发记录操作列固定右侧，复用 paper 背景与 line 分隔；所有已创建 Task/Run 均保留「查看详情」，不按执行状态隐藏。
+
+沟通媒体：`web/communication.js` 与 `web/styles.css .communication-image-*` 使用 8px 间距、6px 圆角、surface-soft 背景；缩略图最大200×160px，原生 dialog 全窗口 contain 展示，Esc/关闭返回焦点。文件保留原名下载。自动化内容描述 `.automation-config-objective` 为 surface-soft 背景、12px 16px 内边距、6px 圆角，不增加分割线。
+
+附件输入（协作与沟通共用）：`web/communication.js attachmentControls/draftAttachments`、`web/app.js renderCollaboration` 与 `web/styles.css .message-composer-input/.communication-draft-attachments/.composer-icon-button`。paper 输入表面，1px line 边界、8px圆角、focus-within 蓝色焦点；图片96×48px放在输入框内上方、间距8px、右上角移除，图片区最多176px后内部滚动；文件与图片在文字输入区上方同排，以16px附件图标+名称/类型+移除显示，最长320px，名称省略并用title保留。上传入口32×32px、20px线条图标，无文本及外框，hover用surface-soft背景和accent图标；粗指针最小44px。发送仍在右侧，共享上传/发送协议保持不变。
+
+参考式输入卡片：`.message-composer-card` 将图片区、文字输入、文件卡片和底部操作包在同一边界内；图片与文件在文字区上方同排，按添加顺序排列，空间不足换行，上传图标左对齐、发送右对齐。整体12px内边距、8px圆角，复用当前主题，不引入参考图中的模型/权限控件。
+
+统一预览排：图片和文件均在文字输入区上方，按添加顺序排列，间距8px；图片96×48px、文件卡片48px高，空间不足换行。图片无边框与悬停色框，仅键盘focus-visible使用muted中性灰内描边；共享规则优先于桌面全局焦点样式。
+
+发送后的附件复用 `.communication-attachment-list`：图片和文件按原顺序横向排列，间距8px，仅超出可用宽度换行。图片仅显示预览，不再显示下方名称/大小；原图下载入口位于全屏预览顶部，文件保留名称、大小及下载链接。
+
+多选约束：所有 createEmployeeMultiSelect 使用固定38px高度，选择前后高度不变；.extension-picked 单行横向滚动，长标签省略，输入至少70px，保留键盘移除和候选浮层。禁止 flex-wrap 或选中标签撑高控件。位置：web/marketplace.mjs、web/styles.css 的 .extension-picker-control/.extension-picked/.extension-chip；宿主继续使用现有 tokens。自动化与普通任务的成员、模板、目录说明进入 .modal-scroll，.task-form-footer 只保留操作按钮（web/app.js newTaskModal）。

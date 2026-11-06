@@ -33,3 +33,5 @@ Electron 自有子服务尚无管理员时，主进程以一次性私有 bootstr
 客户端宿主经 Electron 正式 Cookie API 获取自身登录会话，向认证的 `POST /api/auth/cli-session` 申请独立、关联父会话的委托 token；不把浏览器 Cookie 直接交给 CLI。服务仅在父会话仍有效时接受委托 token，父会话退出、账户重置或服务重启即失效。宿主在当前实例目录发布 0600 的 `desktop-cli-session.json`（目录0700），绑定 origin 与 instanceId；不进入 renderer、日志或 Provider。续存同一父会话复用委托，避免刷新使正在使用的 CLI 失效。
 
 CLI 先验证私有 endpoint 和实例身份，再读取同目录的专用共享凭证；有有效客户端授权时优先使用，没有时使用自己的私有登录会话。显式 `--session-file` 隔离使用独立 CLI 会话。CLI 不读取 Chromium 存储或 SQLite。CLI logout 只撤销自己的独立会话，不能注销共享客户端会话；客户端授权由客户端退出登录管理。此能力不扩大权限，仍为本机同用户、单管理员。
+
+任务附件二进制例外仅适用于 POST /api/runs/run_…/attachments（与沟通附件一致）；仍强制管理员会话、精确 Origin/Host，其他写接口继续要求 JSON。下载与图片预览同样鉴权，禁止活动 HTML/SVG 作为内联图片执行。

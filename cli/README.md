@@ -71,7 +71,7 @@ tasks collaboration 文本/JSON 仅返回角色沟通，包含 startMessageId；
 
 tasks progress 移除 openDefects；问题报告与处理反馈统一使用 tasks collaboration 查询、tasks message/reply 交接。帮助/schema 同步此读模型变化，不增加命令或确认权限。
 
-automations 新增 list/get/create/update/delete/trigger/triggers；列表与触发历史按页查询，--all 显式逐页读取，配置字段与 App 弹窗一致。update 支持 enabled 开关，历史只可停用；trigger 的失败/跳过回执不代表任务已启动。tasks list 仅普通任务；priority 已废弃，输入/schema/输出同步移除。
+automations 新增 list/get/create/update/delete/trigger/triggers；列表与触发历史按页查询，--all 显式逐页读取，配置字段与 App 弹窗一致。update 支持 enabled 开关，停用后可删除全部对应任务及触发历史；trigger 的失败/跳过回执不代表任务已启动。tasks list 仅普通任务；priority 已废弃，输入/schema/输出同步移除。
 
 任务成员查询/修改使用 tasks members TASK_ID，写入附 --file，完整成员列表含经理；App 编辑与 CLI 共用 Store 的状态、忙碌成员、唯一经理校验。团队创建支持 status，默认 active。
 
@@ -80,3 +80,13 @@ tasks/automations create 的 workflowTemplateId 可省略、null 或空字符串
 员工列表支持 --role ID_OR_NAME，与搜索组合后分页；精确 ID 优先，名称需唯一。App 采用同一角色目录与 roleIds 绑定关系。
 
 自动化任务标题统一为 `自动化名称#yyyy-MM-dd HH:mm:ss`（当地时区、24 小时制；定时取计划时刻，手动取触发时刻）。触发列表首列展示真实任务标题；HTTP/CLI 的触发回执、列表和 latestTrigger 返回 taskTitle，未生成任务为 null；不重写历史任务名称。
+
+并行任务不增加创建参数或开关：App/CLI 通过同一 HTTP 创建与启动，经理按任务指令批量分工。`tasks progress` 的 activeTraces/pendingDispatches 展示全部成员执行与队列；错误后仍有成员收尾时 nextAction 明示等待收尾后重试。`tasks terminate --yes` 停止全部成员，包含 failed 后仍在执行的成员；最终确认与重试仍在客户端。
+
+任务草稿：tasks create 默认只保存完整任务（backlog），tasks start ID 显式执行，create --start 对齐 App「保存并开始」。列表 --status backlog、详情和删除沿用既有命令，不引入第二套 draft 状态或未完成字段协议。
+
+插件/MCP 列表改为服务端搜索分页，--all 显式逐页收集；删除直达指定 ID，无需读取整个目录。plugins/mcps delete --yes 与 App 同为软删除＋全员工当前解绑，回执含受影响员工引用。
+
+tasks message/reply 支持 JSON attachmentPaths/attachmentIds，CLI 保留二进制原字节，经同一认证 HTTP 上传、发送并返回引用；content 有附件时可空，最多10个/单文件20 MiB，具体字段见 schema。client.request 仅对 Buffer 使用 octet-stream，普通命令仍发送 JSON。
+
+roles create/update 支持 extensionSelection，和 App 的角色插件/MCP选择一致；agents 返回 inheritedExtensionSelection 区分继承来源。automations delete ID --yes 仅接受停用自动化，删除全部对应任务和触发历史并先终止执行。

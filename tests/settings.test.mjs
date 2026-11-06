@@ -54,7 +54,7 @@ test('workspace HTTP save creates missing directories, preserves existing files 
 test('collaboration aligns by sender, never by the human recipient or human filter',async()=>{
   const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8'),start=source.indexOf('function renderCollaboration('),end=source.indexOf('/* ---------- 任务空间数据与动作',start),dock={};
   const messages=[{id:'human',createdAt:'2026-01-01T00:00:00Z',sender:{type:'human',name:'操作者'},recipient:{type:'agent',name:'员工'},content:'HUMAN-CONTENT'},{id:'employee',createdAt:'2026-01-01T00:00:01Z',sender:{type:'agent',name:'员工'},recipient:{type:'human',name:'操作者'},content:'AGENT-TO-HUMAN'}];
-  const render=vm.runInNewContext(`${source.slice(start,end)};renderCollaboration`,{$:selector=>selector==='#collaboration-panel'?dock:{addEventListener(){}},state:{workspace:{pendingQuestions:[]}},workspaceView:()=>({draft:''}),collaborationRecords,acceptanceReview:()=>null,esc:String,exactTime:String,collaborationMessageMarkup:content=>content,sendInstruction(){},refreshCollaborationBodies(){}});
+  const render=vm.runInNewContext(`${source.slice(start,end)};renderCollaboration`,{$:selector=>selector==='#collaboration-panel'?dock:{addEventListener(){}},state:{workspace:{pendingQuestions:[]}},workspaceView:()=>({draft:''}),collaborationRecords,acceptanceReview:()=>null,esc:String,exactTime:String,collaborationMessageMarkup:content=>content,sendInstruction(){},refreshCollaborationBodies(){},messageAttachments(){return "";},draftAttachments(){return "";},attachmentControls(){return "";},bindTaskAttachments(){}});
   render({run:{id:'run',status:'paused',task:{}},messages},[]);
   const articles=dock.innerHTML.match(/<article[\s\S]*?<\/article>/g);assert.equal(articles.length,2);assert.match(articles[0],/class="collaboration-row from-human/);assert.match(articles[1],/AGENT-TO-HUMAN/);assert.doesNotMatch(articles[1],/from-human/);
 });
@@ -67,7 +67,7 @@ test('plugin and MCP empty/error states are outside their card grid, and search 
     ui.mount(root);await new Promise(done=>setImmediate(done));
     assert.match(root.innerHTML,/<div data-market-list hidden[^>]*><\/div><div class="directory-empty market-directory-empty"/);
     assert.equal(query('[data-market-list]').innerHTML,'');assert.equal(query('[data-market-list]').hidden,true);assert.match(query('[data-market-empty]').innerHTML,/<strong>尚未安装/);
-    query('input').oninput({target:{value:'missing'}});assert.match(query('[data-market-empty]').innerHTML,/<strong>没有匹配的/);
+    query('input').oninput({target:{value:'missing'}});await new Promise(done=>setTimeout(done,250));assert.match(query('[data-market-empty]').innerHTML,/<strong>没有匹配的/);
     ui.unmount();fail=true;ui.mount(root);await new Promise(done=>setImmediate(done));assert.equal(query('[data-market-empty]').textContent,'read failed');assert.equal(query('[data-market-empty]').role,'alert');
     query('input').oninput({target:{value:'another search'}});assert.equal(query('[data-market-empty]').textContent,'read failed','typing after a failed read must not imply an empty catalog');
   }

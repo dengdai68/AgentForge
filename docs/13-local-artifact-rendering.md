@@ -37,3 +37,5 @@ Artifact 内容使用冻结 SHA-256 与字节信息验证；错误不冒充为�
 基准存于 Run Files 私有元数据，同一路径首次登记后不变；提交、push、重试和重启不更新。CHANGE 和逐文件 diff 使用同一仓库发现与固定基准，按最深仓库归属读取，不重复展示外层仓库引用。无需改造 submodule，不修改员工 index/HEAD/Hook。读取 CHANGE 与调用结束时补查，Hook 失败记诊断但不改变任务业务结果。已有冻结子模块基准仍保留。独立 clone 后再修改是推荐执行方式；本地 git init/worktree 的基准不自动推断。
 
 当前文件与 CHANGE 左侧目录树仅展示文件/目录及必要操作，移除空目录、展开后读取、无更改、仓库基准等提示段落及 CHANGE 解释副标题；实际读取错误移至树外，比较基准保留在右侧预览头部。仅展示变更，无 CLI/API 协议变化。
+
+任务协作附件保存于 runs/<runId>/attachments/<attachmentId>/<原文件名>，与交付快照分开。POST /api/runs/:id/attachments?name=... 接收 application/octet-stream，最多20 MiB；GET /api/runs/:id/attachments/:attachmentId 下载，?preview=1 仅允许按实际文件签名识别的位图。写入逐层拒绝符号链接与非法文件名，读取检查归属/大小/sha256，登记失败清理本次文件。任务删除复用 Run Files 暂存删除流程。

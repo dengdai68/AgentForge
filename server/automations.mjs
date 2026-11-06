@@ -61,10 +61,21 @@ export function automationCommands(state) {
         return view(item);
       });
     },
+    automationDeletionPlan(id) {
+      if(get(id).enabled)throw new Error('请先停用自动化再删除');
+      const taskIds=state.tasks.filter(item=>item.automationId===id).map(item=>item.id);
+      return {id,taskIds,runIds:state.runs.filter(item=>taskIds.includes(item.taskId)).map(item=>item.id)};
+    },
     deleteAutomation(id) {
-      get(id);
-      if (state.automationTriggers.some(item => item.automationId === id)) throw new Error('自动化已有触发记录，请停用以保留历史');
-      return this.transaction(() => { state.automations = state.automations.filter(item => item.id !== id); this.addEvent({type:'automation.deleted',message:'自动化已删除',data:{automationId:id}}); return { id }; });
+      const plan=this.automationDeletionPlan(id);
+      return this.transaction(() => {
+        for(const taskId of plan.taskIds)this.deleteTask(taskId,{automationId:id});
+        state.automationTriggers=state.automationTriggers.filter(item=>item.automationId!==id);
+        state.automations=state.automations.filter(item=>item.id!==id);
+        state.events=state.events.filter(item=>item.data?.automationId!==id);
+        this.addEvent({type:'automation.deleted',message:'已删除停用自动化及全部任务',data:{automationId:id,taskCount:plan.taskIds.length}});
+        return plan;
+      });
     },
     dueAutomations(at = new Date()) { return state.automations.filter(item => item.enabled && item.nextTriggerAt && Date.parse(item.nextTriggerAt) <= +at).map(item => ({ id: item.id, plannedAt: item.nextTriggerAt })); },
     triggerAutomation(id, { plannedAt = null, at = new Date() } = {}) {

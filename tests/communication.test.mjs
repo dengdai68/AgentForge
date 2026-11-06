@@ -47,7 +47,7 @@ test('attachment upload failure retains the draft and references without sending
   const f = communicationReaderFixture(t);
   f.mount(); f.take('').resolve({ conversations: [] }); f.take('/a').resolve(f.result([])); await f.flush();
   const files = f.query('[data-chat-file]');
-  files.files = [{ name: 'a.txt', size: 1 }, { name: 'b.txt', size: 1 }]; files.onchange();
+  files.files = [{ name: 'a.txt', size: 1 }, { name: 'b.txt', size: 1 }]; files.onchange({currentTarget:files});
   const input = f.query('textarea'); input.value = '保留原草稿'; input.oninput();
   const sending = f.query('form').onsubmit({ preventDefault() {} });
   f.take('/a/attachments?name=a.txt').resolve({ attachment: { id: 'attachment-one' } }); await f.flush();
@@ -66,7 +66,7 @@ function communicationReaderFixture(t) {
   const pending = [], intervals = new Set();
   t.mock.method(globalThis, "setInterval", (callback) => { intervals.add(callback); return callback; });
   t.mock.method(globalThis, "clearInterval", (callback) => intervals.delete(callback));
-  const node = () => ({ innerHTML: "", textContent: "", hidden: false, disabled: false, value: "", dataset: {}, classList: { toggle() {} }, setAttribute() {}, scrollTop: 0, scrollHeight: 100, clientHeight: 100, selectionStart: 0, querySelectorAll: () => [] });
+  const node = () => ({ innerHTML: "", textContent: "", hidden: false, disabled: false, value: "", dataset: {}, classList: { toggle() {} }, setAttribute() {}, addEventListener() {}, scrollTop: 0, scrollHeight: 100, clientHeight: 100, selectionStart: 0, querySelectorAll: () => [] });
   const nodes = new Map();
   const query = (selector) => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); };
   Object.defineProperty(query(".communication-messages"), "scrollHeight", { get() { return (this.innerHTML.match(/<article /g) || []).length * 100; } });

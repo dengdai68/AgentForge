@@ -146,7 +146,7 @@ export function createClient({ endpointFile, sessionFile, fetcher = fetch, home 
     const session = cookie === undefined && authenticated ? (await desktopSession() || await readSession()) : null;
     let response, value;
     try {
-      response = await fetcher(origin + path, { method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { Origin: origin, 'Content-Type': 'application/json', ...(cookie || session ? { Cookie: cookie || session.cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      response = await fetcher(origin + path, { method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { Origin: origin, 'Content-Type': Buffer.isBuffer(body) ? 'application/octet-stream' : 'application/json', ...(cookie || session ? { Cookie: cookie || session.cookie } : {}) }, ...(body === undefined ? {} : { body: Buffer.isBuffer(body) ? body : JSON.stringify(body) }) });
       value = JSON.parse(await readBounded(response.body, 16 * maxBytes));
     } catch {
       throw new CliError('CONNECTION_UNCERTAIN', '客户端服务未连接、超时或响应无法确认', method === 'GET' ? '确认 AgentForge 客户端正在运行，再查询；不自动切换实例。' : '写操作可能已经提交：先list/get核验再决定重试；不自动重发。', 5);

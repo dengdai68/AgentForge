@@ -279,7 +279,7 @@ test("shared client role status lets a terminal Run override a stale active Trac
 
   const cancelled = roleExecutionStatus({ status: "cancelled" }, [trace], "analyst");
   assert.deepEqual(cancelled, { active: false, activeTrace: null, failed: false, state: "idle", traceCount: 1, label: "○ 已终止 · 1 条 Trace" });
-  assert.equal(roleExecutionStatus({ status: "failed" }, [trace], "analyst").label, "○ 已停止 · 1 条 Trace");
+  assert.equal(roleExecutionStatus({ status: "failed" }, [trace], "analyst").label, "● 执行中 · requirements");
   assert.equal(roleExecutionStatus({ status: "completed" }, [trace], "analyst").label, "○ 已完成 · 1 条 Trace");
 });
 

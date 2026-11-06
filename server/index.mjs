@@ -62,6 +62,7 @@ let store = createStore(storeOptions);
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const runFiles = createRunFiles({ root: runFilesRoot });
 const taskDeletionLocks = new Set();
+const automationDeletionLocks = new Set();
 const eventStreams = new Set();
 let runtimeTestActive = false;
 let resettingData = false, resetCommitted = false, writeRequests = 0;
@@ -82,13 +83,14 @@ function importExtensions(prepare) {
     const targetStore=store, result=await prepare();
     const candidates=result.plugins?[...result.plugins,...result.mcps]:[result];
     try {
-      const plan=targetStore.planExtensionImport(candidates,await marketplace.list());
+      const plan=targetStore.planExtensionImport(candidates,targetStore.listExtensions());
       const bindings=await Promise.all(plan.bindings.map(async binding=>({
         agentId:binding.agentId,previousRuntime:binding.previousRuntime,
         runtime:{profileId:binding.previousRuntime.profileId,...await marketplace.resolve(binding.selection,binding.previousRuntime.provider)}
       })));
       if(store!==targetStore || resettingData)throw new Error('实例正在重置，本次导入未应用');
-      return {...result,...targetStore.replaceImportedExtensions(plan.replacements,bindings)};
+      const roleBindings=await marketplace.resolveRoleReplacements(targetStore.listRoles(),plan.replacements);
+      return targetStore.transaction(()=>{ targetStore.registerExtensions(candidates); return {...result,...targetStore.replaceImportedExtensions(plan.replacements,bindings,roleBindings)}; });
     } catch(error) {
       for(const item of candidates)try{targetStore.removeExtension(item);}catch(cleanupError){diagnostic('extensions.import_cleanup_failed',{error:cleanupError});}
       throw error;
@@ -108,21 +110,48 @@ async function employeeInput(request, agentId = null) {
   if (input.runtime !== undefined && (!input.runtime || typeof input.runtime !== 'object' || Array.isArray(input.runtime) || Object.keys(input.runtime).some(key => !['profileId', 'extensionSelection'].includes(key)))) throw new Error('员工Runtime仅接受profileId和extensionSelection；扩展只选择已安装插件和MCP');
   const previous = agentId ? store.listAgents().find(agent => agent.id === agentId)?.runtime : undefined;
   if (agentId && !previous) throw new Error('数字员工不存在');
-  if (agentId && input.runtime === undefined) return input;
+  if(agentId && input.runtime===undefined && input.roleIds===undefined)return input;
   const profileId = Object.hasOwn(input.runtime || {}, 'profileId') ? input.runtime.profileId : previous?.profileId ?? store.listRuntimeProfiles().find(item => item.provider === 'claude-code')?.id;
   const profile = store.listRuntimeProfiles().find(item => item.id === profileId);
   if (!profile) throw new Error('请选择固定 Runtime 的有效 profileId');
   if (!profile.enabled && profileId !== previous?.profileId) throw new Error('Runtime 已停用，请先在设置中启用');
   const selection = Object.hasOwn(input.runtime || {}, 'extensionSelection') ? input.runtime.extensionSelection : previous?.extensionSelection ?? {pluginIds:[], mcpIds:[]};
+  for (const [kind,ids] of [['plugin',selection.pluginIds],['mcp',selection.mcpIds]]) {
+    if (!Array.isArray(ids)) throw new Error('插件/MCP 选择无效');
+    if (ids.some(id=>!store.getExtension(kind,id))) throw new Error('所选插件或 MCP 未安装或已删除，请刷新选择');
+  }
   const resolved = await marketplace.resolve(selection, profile.provider);
   const {provider, model, executable, profile: cliProfile, effort} = profile;
   input.runtime = {profileId, provider, model, executable, profile: cliProfile, effort, ...resolved};
+  await validateInheritedExtensions({...input,roleIds:input.roleIds ?? store.listAgents().find(item=>item.id===agentId)?.roleIds ?? []});
   return input;
 }
 
-async function roleInput(request) {
+async function validateInheritedExtensions(employee,roles=store.listRoles()) {
+  if(!Array.isArray(employee.roleIds))throw new Error('roleIds 必须是角色 ID 数组');
+  const selections=[employee.runtime.extensionSelection];
+  for(const id of employee.roleIds){const role=roles.find(item=>item.id===id);if(!role)throw new Error('绑定的角色不存在');selections.push(role.extensionSelection);}
+  await marketplace.resolve(Object.fromEntries(['pluginIds','mcpIds'].map(key=>[key,[...new Set(selections.flatMap(item=>item?.[key] || []))]])),employee.runtime.provider);
+}
+
+function extensionPage(kind, searchParams) {
+  if ([...searchParams.keys()].some(key=>!['page','search'].includes(key)) || ['page','search'].some(key=>searchParams.getAll(key).length>1)) throw new Error('目录查询只接受 page 与 search');
+  const rawPage = searchParams.get('page') ?? '1';
+  if (!/^[1-9][0-9]*$/.test(rawPage)) throw new Error('page 必须为正整数');
+  const {items,...pagination} = store.queryExtensions(kind, {page:Number(rawPage),search:searchParams.get('search') || ''});
+  return {...pagination,[kind==='plugin'?'plugins':'entries']:items};
+}
+async function roleInput(request,roleId=null) {
   const input = await readJson(request);
-  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['name', 'prompt'].includes(key))) throw new Error('角色配置字段无效，请按当前配置协议提交');
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['name', 'prompt','extensionSelection'].includes(key))) throw new Error('角色配置字段无效，请按当前配置协议提交');
+  if(input.extensionSelection!==undefined) {
+    const selection=input.extensionSelection;
+    if(!selection || ['pluginIds','mcpIds'].some(key=>!Array.isArray(selection[key])))throw new Error('角色扩展选择无效');
+    for(const [kind,key] of [['plugin','pluginIds'],['mcp','mcpIds']])for(const id of selection[key])if(!store.getExtension(kind,id))throw new Error('角色所选扩展未安装或已删除');
+    Object.assign(input,await marketplace.resolveRole(selection));
+    const roles=store.listRoles().map(role=>role.id===roleId?{...role,...input}:role);
+    for(const employee of store.listAgents().filter(item=>item.roleIds.includes(roleId)))await validateInheritedExtensions(employee,roles);
+  }
   return input;
 }
 
@@ -137,6 +166,15 @@ const contentTypes = {
 };
 const languageFor = (name = "") => ({ js: "javascript", mjs: "javascript", cjs: "javascript", ts: "typescript", tsx: "typescript", jsx: "javascript", json: "json", yml: "yaml", yaml: "yaml", toml: "ini", sql: "sql", py: "python", java: "java", go: "go", rs: "rust", sh: "bash", css: "css", html: "xml", htm: "xml", xml: "xml", md: "markdown", mdx: "markdown", diff: "diff", patch: "diff" }[extname(name).slice(1).toLowerCase()] || null);
 const rasterImageType = (mediaType = "") => /^image\/(png|jpeg|gif|webp)$/.test(mediaType);
+function attachmentImageType(bytes) {
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+  if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return 'image/jpeg';
+  if (/^GIF8[79]a$/.test(bytes.toString('ascii', 0, 6))) return 'image/gif';
+  if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  if (bytes.toString('ascii', 0, 2) === 'BM') return 'image/bmp';
+  if (bytes.toString('ascii', 4, 8) === 'ftyp' && /^(avif|avis)$/.test(bytes.toString('ascii', 8, 12))) return 'image/avif';
+  return null;
+}
 function artifactPresentation(artifact, content) { const language = languageFor(artifact.name); return { language, highlightedHtml: language ? hljs.highlight(content, { language, ignoreIllegals: true }).value : null }; }
 function artifactReadError(error) {
   const message = error instanceof Error ? error.message : "";
@@ -184,6 +222,10 @@ async function withTaskDeletionLock(locks, taskId, work) {
 }
 
 async function routeApi(request, response, pathname, searchParams = new URLSearchParams()) {
+  if(!['GET','HEAD','OPTIONS'].includes(request.method)) {
+    const runId=pathname.match(/^\/api\/runs\/([^/]+)/)?.[1],taskId=pathname.match(/^\/api\/tasks\/([^/]+)/)?.[1];
+    if(taskDeletionLocks.has(taskId) || (runId && taskDeletionLocks.has(store.getRun(runId)?.taskId)))throw new Error('任务正在删除，请稍候');
+  }
   if (pathname === "/api/settings/reset" && request.method === "POST") {
     const input = await readJson(request);
     if (input.confirmation !== "清除所有数据") throw new Error("请输入「清除所有数据」确认");
@@ -211,10 +253,12 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     } finally { resettingData = resetCommitted; }
     return true;
   }
-  const chatAttachment = pathname.match(/^\/api\/communications\/([^/]+)\/attachments(?:\/([^/]+))?$/);
+  const attachmentRoute = pathname.match(/^\/api\/(communications|runs)\/([^/]+)\/attachments(?:\/([^/]+))?$/);
+  const chatAttachment = attachmentRoute && [attachmentRoute[0], attachmentRoute[2], attachmentRoute[3]];
+  const taskAttachment = attachmentRoute?.[1] === 'runs';
   if (chatAttachment && request.method === 'POST' && !chatAttachment[2]) {
     if (!/^application\/octet-stream(?:;|$)/i.test(request.headers['content-type'] || '')) throw new Error('附件上传需要 application/octet-stream');
-    const key = chatAttachment[1]; store.getCommunication(key, { limit: 1 });
+    const key = chatAttachment[1]; if (taskAttachment) store.assertRunAttachmentUpload(key); else store.getCommunication(key, { limit: 1 });
     const chunks = []; let bytes = 0;
     try {
       for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -223,16 +267,22 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
         chunks.push(chunk);
       }
     } finally { if (!request.readableEnded) request.resume(); }
-    const record = await runFiles.writeCommunicationAttachment(key, searchParams.get('name'), Buffer.concat(chunks));
-    try { sendJson(response, 201, { attachment: store.registerCommunicationAttachment(key, record) }); }
-    catch (error) { await runFiles.discardCommunicationAttachment(key, record).catch(cleanup => diagnostic('communication.attachment_cleanup_failed', { error: cleanup })); throw error; }
+    const record = await runFiles[taskAttachment ? 'writeRunAttachment' : 'writeCommunicationAttachment'](key, searchParams.get('name'), Buffer.concat(chunks));
+    try { sendJson(response, 201, { attachment: store[taskAttachment ? 'registerRunAttachment' : 'registerCommunicationAttachment'](key, record) }); }
+    catch (error) { await runFiles[taskAttachment ? 'discardRunAttachment' : 'discardCommunicationAttachment'](key, record).catch(cleanup => diagnostic('communication.attachment_cleanup_failed', { error: cleanup })); throw error; }
     return true;
   }
   if (chatAttachment && request.method === 'GET' && chatAttachment[2]) {
-    const record = store.getCommunicationAttachment(chatAttachment[1], chatAttachment[2]);
+    const record = store[taskAttachment ? 'getRunAttachment' : 'getCommunicationAttachment'](chatAttachment[1], chatAttachment[2]);
     let content;
-    try { content = await runFiles.readCommunicationAttachment(chatAttachment[1], record); }
+    try { content = await runFiles[taskAttachment ? 'readRunAttachment' : 'readCommunicationAttachment'](chatAttachment[1], record); }
     catch (error) { diagnostic('communication.attachment_read_failed', { error }); sendJson(response, 409, { error: '附件不可读取或完整性校验失败；请核对原文件。' }); return true; }
+    if (searchParams.get('preview') === '1') {
+      const mediaType = attachmentImageType(content);
+      if (!mediaType) { sendJson(response, 415, { error: '此附件不是可预览的图片，请下载原文件。' }); return true; }
+      response.writeHead(200, { 'Content-Type': mediaType, 'Content-Disposition': 'inline', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" });
+      response.end(content); return true;
+    }
     const filename = encodeURIComponent(record.name).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
     response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="download"; filename*=UTF-8''${filename}`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" });
     response.end(content); return true;
@@ -315,7 +365,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   }
   const roleMatch = pathname.match(/^\/api\/roles\/([^/]+)$/);
   if (roleMatch && request.method === "PUT") {
-    sendJson(response, 200, { role: store.updateRole(roleMatch[1], await roleInput(request)) });
+    sendJson(response, 200, { role: store.updateRole(roleMatch[1], await roleInput(request,roleMatch[1])) });
     return true;
   }
   if (roleMatch && request.method === "DELETE") {
@@ -420,29 +470,30 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   if (pathname === "/api/runtime/mcp-marketplace" && ["GET", "POST"].includes(request.method)) {
     response.setHeader("Cache-Control", "no-store");
     const input=request.method==='POST'?await readJson(request):null;
-    const result = request.method === "GET" ? await marketplace.mcpCatalog() : await importExtensions(()=>marketplace.add({...input, kind:"mcp", visibility:"market"}));
-    if (request.method === "GET") result.entries = result.entries.filter(item => !store.isExtensionRemoved("mcp", item.id));
+    const result = request.method === "GET" ? extensionPage("mcp", searchParams) : await importExtensions(()=>marketplace.add({...input, kind:"mcp", visibility:"market"}));
+
     sendJson(response, request.method === "GET" ? 200 : 201, result);
     return true;
   }
   if (pathname === "/api/runtime/marketplace" && ["GET", "POST"].includes(request.method)) {
     response.setHeader("Cache-Control", "no-store");
     const input=request.method==='POST'?await readJson(request):null;
-    const result = request.method === "GET" ? await marketplace.catalog() : await importExtensions(()=>marketplace.import(input));
-    if (request.method === "GET") result.plugins = result.plugins.filter(item => !store.isExtensionRemoved("plugin", item.id));
+    const result = request.method === "GET" ? extensionPage("plugin", searchParams) : await importExtensions(()=>marketplace.import(input));
+
     sendJson(response, request.method === "GET" ? 200 : 201, result);
     return true;
   }
   const extensionDetail = pathname.match(/^\/api\/runtime\/(marketplace|mcp-marketplace)\/([^/]+)$/);
   if(extensionDetail?.[1]==='mcp-marketplace' && request.method==='PUT') {
     const previousId=extensionDetail[2];
-    if(store.isExtensionRemoved('mcp',previousId) || !(await marketplace.mcpCatalog()).entries.some(item=>item.id===previousId)){sendJson(response,404,{error:'此 MCP 未安装或已被更新，请刷新列表'});return true;}
+    if(!store.getExtension('mcp',previousId)){sendJson(response,404,{error:'此 MCP 未安装或已被更新，请刷新列表'});return true;}
     const input=await marketplace.mcpEditInput(previousId,await readJson(request));
     const replacement=await marketplace.add(input);
     try {
       const users=store.listAgents().filter(item=>item.runtime?.extensionSelection?.mcpIds?.includes(previousId));
       const bindings=await Promise.all(users.map(async item=>({agentId:item.id,previousRuntime:item.runtime,runtime:{profileId:item.runtime.profileId,...await marketplace.resolve({...item.runtime.extensionSelection,mcpIds:item.runtime.extensionSelection.mcpIds.map(id=>id===previousId?replacement.id:id)},item.runtime.provider)}})));
-      sendJson(response,200,store.replaceMcpExtension(previousId,replacement,bindings));
+      const roleBindings=await marketplace.resolveRoleReplacements(store.listRoles(),[{kind:'mcp',previousId,id:replacement.id}]);
+      sendJson(response,200,store.transaction(()=>{ store.registerExtensions([replacement]); return store.replaceMcpExtension(previousId,replacement,bindings,roleBindings); }));
     } catch(error) {
       // Failed candidates are hidden, not used to rewrite any frozen files.
       try{store.removeExtension({kind:'mcp',id:replacement.id,name:replacement.name});}catch(cleanupError){diagnostic('mcp.edit_cleanup_failed',{error:cleanupError});}
@@ -453,13 +504,13 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   if(extensionDetail && ['GET', 'DELETE'].includes(request.method)) {
     response.setHeader("Cache-Control", "no-store");
     const kind = extensionDetail[1] === 'marketplace' ? 'plugin' : 'mcp', extensionId = extensionDetail[2];
-    if (store.isExtensionRemoved(kind, extensionId)) { sendJson(response, 404, { error: "此插件或 MCP 已删除" }); return true; }
+    const entry = store.getExtension(kind, extensionId);
+    if (!entry) { sendJson(response, 404, { error: "此插件或 MCP 未安装或已删除" }); return true; }
     if (request.method === 'DELETE') {
       await readJson(request);
-      const catalog = kind === 'plugin' ? (await marketplace.catalog()).plugins : (await marketplace.mcpCatalog()).entries;
-      const entry = catalog.find(item => item.id === extensionId);
-      if (!entry) { sendJson(response, 404, { error: "此插件或 MCP 未安装" }); return true; }
-      sendJson(response, 200, store.removeExtension({ kind, id: entry.id, name: entry.name }));
+      const key=kind==='plugin'?'pluginIds':'mcpIds';
+      const roles=await Promise.all(store.listRoles().filter(role=>role.extensionSelection[key].includes(entry.id)).map(async role=>({roleId:role.id,...await marketplace.resolveRole({...role.extensionSelection,[key]:role.extensionSelection[key].filter(id=>id!==entry.id)})})));
+      sendJson(response, 200, store.transaction(()=>{const result=store.removeExtension({ kind, id: entry.id, name: entry.name });for(const role of roles)store.updateRole(role.roleId,role);return result;}));
     } else sendJson(response, 200, await marketplace.detail(extensionId, kind));
     return true;
   }
@@ -505,6 +556,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   const automationMatch = pathname.match(/^\/api\/automations\/([^/]+)(?:\/(triggers|trigger))?$/);
   if (automationMatch) {
     const [, automationId, action] = automationMatch;
+    if(automationDeletionLocks.has(automationId) && request.method!=='GET')throw new Error('自动化正在删除，请稍候');
     if (request.method === "GET" && action === "triggers") { sendJson(response, 200, store.listAutomationTriggers(automationId, Object.fromEntries(searchParams))); return true; }
     if (request.method === "POST" && action === "trigger") {
       const record = store.triggerAutomation(automationId);
@@ -513,7 +565,26 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     }
     if (!action && request.method === "GET") { sendJson(response, 200, { automation: store.getAutomation(automationId) }); return true; }
     if (!action && request.method === "PUT") { sendJson(response, 200, { automation: store.saveAutomation(await readJson(request), automationId) }); return true; }
-    if (!action && request.method === "DELETE") { sendJson(response, 200, store.deleteAutomation(automationId)); return true; }
+    if (!action && request.method === "DELETE") {
+      const plan=store.automationDeletionPlan(automationId);
+      if(plan.taskIds.some(id=>taskDeletionLocks.has(id)))throw new Error('任务正在删除，请稍候');
+      automationDeletionLocks.add(automationId);plan.taskIds.forEach(id=>taskDeletionLocks.add(id));
+      let staged,deleted;
+      try {
+        for(const runId of plan.runIds)terminateRun(store,runId,'删除已停用自动化');
+        const deadline=Date.now()+15000;
+        while(plan.runIds.some(id=>isRunExecuting(store,id) || hasActiveExecution(id))) {
+          if(Date.now()>deadline)throw new Error('任务仍在退出，请稍后重试删除；记录尚未删除');
+          await new Promise(resolve=>setTimeout(resolve,100));
+        }
+        staged=await runFiles.stageRunsForDeletion(plan.runIds);
+        try { deleted=store.deleteAutomation(automationId); }
+        catch(error){if(staged)await runFiles.restoreStagedRuns(staged);throw error;}
+        try { if(staged)await runFiles.finalizeStagedRuns(staged); }
+        catch { sendJson(response,202,{...deleted,runFileCleanup:'pending'});return true; }
+        sendJson(response,200,deleted);return true;
+      } finally { automationDeletionLocks.delete(automationId);plan.taskIds.forEach(id=>taskDeletionLocks.delete(id)); }
+    }
   }
   if (request.method === "GET" && pathname === "/api/tasks") {
     sendJson(response, 200, { tasks: store.listTasks() });
@@ -605,7 +676,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   const repositoryTreeMatch = pathname.match(/^\/api\/runs\/([^/]+)\/repository-tree$/);
   const workingChangesMatch = pathname.match(/^\/api\/runs\/([^/]+)\/working-directory\/(changes|diff)$/);
   if (request.method === "GET" && workingChangesMatch) {
-    const task = {...store.getRunWorkspace(workingChangesMatch[1]).run.task, runId: workingChangesMatch[1]};
+    const task = {...store.getRunTask(workingChangesMatch[1]), runId: workingChangesMatch[1]};
     sendJson(response, 200, workingChangesMatch[2] === "changes"
       ? await runFiles.listWorkingChanges(task)
       : await runFiles.readWorkingDiff(task, searchParams.get("path") || "", { full: searchParams.get("full") === "1" }));
@@ -613,7 +684,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   }
   const workingDirectoryMatch = pathname.match(/^\/api\/runs\/([^/]+)\/working-directory(?:\/(content))?$/);
   if (request.method === "GET" && workingDirectoryMatch) {
-    const task = store.getRunWorkspace(workingDirectoryMatch[1]).run.task;
+    const task = store.getRunTask(workingDirectoryMatch[1]);
     if (!workingDirectoryMatch[2]) sendJson(response, 200, await runFiles.listWorkingDirectory(task,{path:searchParams.get('path') || '',offset:Number(searchParams.get('offset') || 0)}));
     else {
       const raw = searchParams.get("raw") === "1";
@@ -631,17 +702,16 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     return true;
   }
   if (request.method === "GET" && repositoryTreeMatch) {
-    const workspace = store.getRunWorkspace(repositoryTreeMatch[1]);
+    const task = store.getRunTask(repositoryTreeMatch[1]);
     const repositoryPath = searchParams.get("path") || "";
-    const assignedRepository = workspace.run.task.repositoryMode === "agent" ? workspace.run.task.repositorySources.some((source) => source.path === repositoryPath) : workspace.run.task.workflowSnapshot.nodes.some((node) => node.repositoryPath === repositoryPath);
+    const assignedRepository = task.repositoryMode === "agent" ? task.repositorySources.some((source) => source.path === repositoryPath) : task.workflowSnapshot.nodes.some((node) => node.repositoryPath === repositoryPath);
     if (!assignedRepository) throw new Error("该仓库不属于当前 Task 工作流");
-    sendJson(response, 200, await runFiles.listRepositoryTree(workspace.run.task.workspacePath, repositoryPath));
+    sendJson(response, 200, await runFiles.listRepositoryTree(task.workspacePath, repositoryPath));
     return true;
   }
   const artifactMatch = pathname.match(/^\/api\/runs\/([^/]+)\/artifacts\/([^/]+)\/content$/);
   if (request.method === "GET" && artifactMatch) {
-    const workspace = store.getRunWorkspace(artifactMatch[1]);
-    const artifact = workspace.artifacts.find((candidate) => candidate.id === artifactMatch[2]);
+    const artifact = store.getRunArtifact(artifactMatch[1], artifactMatch[2]);
     if (!artifact) throw new Error("Artifact 不存在");
     if (!artifact.storagePath) throw new Error(artifact.unavailableReason || "该 Artifact 没有可读取的真实文件");
     const file = await readArtifactSafely(() => runFiles.readArtifact(artifact.storagePath, { expected: artifact }));
@@ -650,8 +720,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   }
   const artifactRawMatch = pathname.match(/^\/api\/runs\/([^/]+)\/artifacts\/([^/]+)\/raw$/);
   if (request.method === "GET" && artifactRawMatch) {
-    const workspace = store.getRunWorkspace(artifactRawMatch[1]);
-    const artifact = workspace.artifacts.find((candidate) => candidate.id === artifactRawMatch[2]);
+    const artifact = store.getRunArtifact(artifactRawMatch[1], artifactRawMatch[2]);
     if (!artifact?.storagePath) throw new Error("Artifact 不存在或不可读取");
     if (!rasterImageType(artifact.mediaType)) throw new Error("raw 预览仅支持 PNG、JPEG、GIF 和 WebP 图片");
     const content = await readArtifactSafely(() => runFiles.readArtifactBytes(artifact.storagePath, { expected: artifact }));
@@ -672,8 +741,9 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   const messageMatch = pathname.match(/^\/api\/runs\/([^/]+)\/messages$/);
   if (request.method === "POST" && messageMatch) {
     const runId = messageMatch[1]; const input = await readJson(request);
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key=>!['content','recipientAgentId','replyToMessageId','attachmentIds'].includes(key))) throw new Error('协作消息字段无效');
     store.initializeDispatches(runId);
-    const result = store.submitHumanMessage(runId, { content: input.content, recipientAgentId: input.recipientAgentId, replyToMessageId: input.replyToMessageId });
+    const result = store.submitHumanMessage(runId, { content: input.content, recipientAgentId: input.recipientAgentId, replyToMessageId: input.replyToMessageId, attachmentIds: input.attachmentIds });
     executeRun(store, runId, runExecutionOptions).catch((error) => console.error(`Run ${runId} dispatch failed: ${error.message}`));
     sendJson(response, 201, { ...result, replanRequested: false });
     return true;

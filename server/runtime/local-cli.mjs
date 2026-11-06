@@ -307,7 +307,7 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
       child.kill("SIGTERM");
       setTimeout(() => { if (!closed) child.kill("SIGKILL"); }, 3000).unref();
     }
-  });
+  }, runId);
   try {
     child.on("error", (error) => { diagnostic("provider.spawn_error", { error }); spawnFailure = error; });
     const stdout = createInterface({ input: child.stdout, crlfDelay: Infinity });

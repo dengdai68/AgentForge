@@ -1,9 +1,61 @@
+export function attachmentImageError(event) {
+  if (event.target.matches?.('.communication-image img')) event.target.closest('.communication-image').dataset.imageError = 'true';
+}
+export function openAttachmentImage(trigger, onClose = () => {}) {
+    const dialog = document.createElement('dialog'); dialog.className = 'communication-image-viewer';
+    const name = trigger.dataset.imageName, url = trigger.dataset.imageUrl;
+    dialog.setAttribute('aria-label', `图片预览：${name}`);
+    dialog.innerHTML = `<header><strong>${escapeHtml(name)}</strong><div class="communication-image-actions"><a class="text-action" href="${escapeHtml(url.replace(/\?preview=1$/, ""))}" download="${escapeHtml(name)}" data-image-download>下载</a><button type="button" class="text-action" data-close-image aria-label="关闭图片预览（Esc）">×</button></div></header><div class="communication-image-stage"><img src="${escapeHtml(url)}" alt="${escapeHtml(name)}"><p role="status" hidden>图片无法预览，请关闭后下载原文件。</p></div>`;
+    dialog.querySelector('[data-close-image]').onclick = () => dialog.close();
+    dialog.querySelector('[data-image-download]').onclick = async event => {
+      event.preventDefault();
+      try { await downloadAttachment(event.currentTarget); }
+      catch (error) { const status = dialog.querySelector('[role=status]'); status.textContent = error.message; status.hidden = false; }
+    };
+    dialog.querySelector('img').onerror = event => { event.target.hidden = true; dialog.querySelector('[role=status]').hidden = false; };
+    dialog.querySelector('.communication-image-stage').onclick = event => { if (event.target.classList.contains('communication-image-stage')) dialog.close(); };
+    dialog.onclose = () => { dialog.remove(); if (trigger.isConnected) trigger.focus({preventScroll:true}); onClose(); };
+    document.body.append(dialog); dialog.showModal(); return dialog;
+}
+export async function downloadAttachment(link) {
+  const response = await fetch(link.href);
+  if (!response.ok) throw new Error((await response.json()).error || '附件下载失败');
+  const url = URL.createObjectURL(await response.blob()), download = document.createElement('a');
+  download.href = url; download.download = link.download; download.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 import { createEmployeeMultiSelect, extensionAvatarColor } from "./marketplace.mjs";
 import { paginate, paginationMarkup } from "./pagination.mjs";
 import { createFloatingList, closeFloatingList, closeFloatingLists } from './floating-list.mjs';
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const date = (value) => new Date(value).toLocaleString("zh-CN", { hour12: false });
 const consoleIcon = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m7 9 3 3-3 3m6 0h4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+
+export const imageAttachment = name => /\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(name || '');
+const attachmentSize = bytes => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : bytes >= 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${bytes} B`;
+export const imageButton = (url, name) => `<button type="button" class="communication-image" data-chat-image data-image-url="${escapeHtml(url)}" data-image-name="${escapeHtml(name)}" aria-label="放大查看 ${escapeHtml(name)}"><img src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy"><span class="communication-image-error">图片无法预览</span></button>`;
+const attachmentIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/></svg>';
+const pictureIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg>';
+export function attachmentControls(scope, disabled = false) {
+  return `<button type="button" class="composer-icon-button" data-${scope}-attach aria-label="添加附件" title="添加附件" ${disabled ? 'disabled' : ''}>${attachmentIcon}</button><button type="button" class="composer-icon-button" data-${scope}-attach-image aria-label="添加图片" title="添加图片" ${disabled ? 'disabled' : ''}>${pictureIcon}</button>`;
+}
+export function draftAttachments(items, scope, disabled = false) {
+  return items.map(item => {
+    const name = escapeHtml(item.file.name);
+    const remove = `<button type="button" class="composer-remove" data-remove-${scope}-attachment="${escapeHtml(item.id)}" aria-label="移除附件 ${name}" title="移除 ${name}" ${disabled ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>`;
+    return item.previewURL
+      ? `<div class="communication-draft-image">${imageButton(item.previewURL, item.file.name)}${remove}</div>`
+      : `<div class="communication-attachment pending" title="${name}">${attachmentIcon}<span class="composer-file-info"><span>${name}</span><small>${escapeHtml(item.file.name.split(".").length > 1 ? item.file.name.split(".").pop().toUpperCase().slice(0,12) : "文件")}</small></span>${remove}</div>`;
+  }).join('');
+}
+export function messageAttachments(files, conversationId, scope = "communications") {
+  if (!files.length) return '';
+  return `<div class="communication-attachment-list">${files.map(file => {
+    const url = `/api/${scope}/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(file.id)}`;
+    if (imageAttachment(file.name)) return `<figure class="communication-image-item">${imageButton(url + '?preview=1', file.name)}</figure>`;
+    return `<a class="communication-attachment" href="${url}" download="${escapeHtml(file.name)}" data-attachment-download>${attachmentIcon}<span>${escapeHtml(file.name)}</span><small>${attachmentSize(file.bytes)}</small></a>`;
+  }).join('')}</div>`;
+}
 
 export function latestConversationId(conversations = []) {
   return conversations.reduce((latest,item)=>!latest || (Date.parse(item.updatedAt)||0)>(Date.parse(latest.updatedAt)||0)?item:latest,null)?.id || null;
@@ -59,6 +111,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
   let host, currentId = null, generation = 0, timer, contacts = [], conversations = [];
   let listLoaded = false, listError = "", listRequest = null, listPage = 1;
   const views = new Map();
+  let imageViewer = null;
   const view = (key) => {
     if (!views.has(key)) views.set(key, { messages: new Map(), readMessageIds: new Set(), deliveries: new Map(), draft: "", mentions: [], attachments: [], consoleOpen: false, consoleAgentId: null, consoleMembers: [], consolePages: new Map(), consoleRequest: null, consoleError: '', requestId: null, hasMore: false, before: null, loaded: false, sending: false, latestError: "", olderError: "", historyEpoch: 0, latestRequest: null, olderRequest: null });
     return views.get(key);
@@ -105,12 +158,13 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     const messages = [...state.messages.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const html = messages.map((message) => {
 
-      const attachments = (message.attachments || []).map(file => `<a class="communication-attachment" href="/api/communications/${encodeURIComponent(currentId)}/attachments/${encodeURIComponent(file.id)}" download="${escapeHtml(file.name)}" data-attachment-download><span aria-hidden="true">↧</span><span>${escapeHtml(file.name)}</span><small>${file.bytes} B</small></a>`).join('');
+      const attachments = messageAttachments(message.attachments || [], currentId);
       const failed = [...state.deliveries.values()].filter(item => item.messageId === message.id && item.status === 'failed');
       const recovery = failed.map(item => `<div class="communication-recovery"><span>${escapeHtml(state.conversation.members.find(member=>member.id===item.agentId)?.name || '员工')} 回复失败</span><button type="button" class="text-action" data-chat-failure-console="${escapeHtml(item.agentId)}">查看控制台</button><button type="button" class="text-action" data-retry-chat-delivery="${escapeHtml(item.id)}">重试</button></div>`).join('');
       return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header><div class="communication-body communication-markdown">${renderContent(message.content, (state.conversation?.members || []).map(member => member.name))}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}${recovery}</article>`;
     }).join("") || `<div class="communication-empty">${state.latestError ? "聊天记录读取失败，正在重连。" : state.loaded ? "从一句话开始沟通。消息将持续保留。" : "正在读取聊天记录…"}</div>`;
-    if (list.innerHTML !== html) {
+    if (state.renderedMessages !== html || state.messageList !== list) {
+      state.renderedMessages = html; state.messageList = list;
       list.innerHTML = html;
       if (state.loadingOlder) list.scrollTop = top + list.scrollHeight - height;
       else list.scrollTop = bottom ? list.scrollHeight : top;
@@ -247,10 +301,29 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     finally { if (state.consoleRequest === request) state.consoleRequest = null; if (isCurrent(key, token)) renderConsolePanel(); }
   }
   function renderAttachments() {
-    const state = view(currentId), container = query('[data-chat-attachments]');
-    container.innerHTML = state.attachments.map(item => `<span class="communication-attachment pending"><span>${escapeHtml(item.file.name)}</span><button type="button" class="text-action" data-remove-chat-attachment="${item.id}" aria-label="移除附件 ${escapeHtml(item.file.name)}"${state.sending ? ' disabled' : ''}>×</button></span>`).join('');
-    container.querySelectorAll('button').forEach(button => button.onclick = () => { state.attachments = state.attachments.filter(item => item.id !== button.dataset.removeChatAttachment); state.requestId = null; renderAttachments(); });
+    const state = view(currentId);
+    const container = query('[data-chat-attachments]');
+    container.innerHTML = draftAttachments(state.attachments, 'chat', state.sending);
+    container.onclick = event => {
+      const image = event.target.closest('[data-chat-image]');
+      if (image) { openImage(image); return; }
+      const button = event.target.closest('[data-remove-chat-attachment]');
+      if (!button || state.sending) return;
+      const item = state.attachments.find(item => item.id === button.dataset.removeChatAttachment);
+      if (item?.previewURL) URL.revokeObjectURL(item.previewURL);
+      state.attachments = state.attachments.filter(value => value !== item);
+      state.requestId = null; renderAttachments();
+      query('#communication-input')?.focus({preventScroll:true});
+    };
+    for (const button of host.querySelectorAll('.composer-icon-button')) button.disabled = state.sending;
   }
+
+  const imageError = attachmentImageError;
+  function openImage(trigger) {
+    imageViewer?.close();
+    imageViewer = openAttachmentImage(trigger, () => { if (!trigger.isConnected) query('#communication-input')?.focus(); });
+  }
+
   function mentionMenu() {
     const input = query("textarea"), state = view(currentId), menu = query(".communication-mentions");
     state.mentions = state.mentions.filter((member) => input.value.includes("@" + member.name));
@@ -312,7 +385,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       <section class="communication-chat">
         <header class="communication-header"><div><h2 class="communication-heading"></h2><input class="communication-name-input" data-chat-name-input aria-label="群聊名称" maxlength="100" required hidden><p class="communication-subtitle"></p></div><button type="button" class="text-action" data-toggle-chat-members aria-expanded="false" hidden>成员</button><button type="button" class="text-action member-console-icon communication-console-toggle" data-toggle-communication-console aria-label="控制台" title="控制台" aria-controls="communication-console-panel" aria-expanded="${state.consoleOpen}" hidden>${consoleIcon}</button></header>
         <button class="small-button communication-older" hidden>加载更早消息</button><div class="communication-messages" aria-label="聊天记录"></div>
-        <form class="communication-composer"><div class="communication-mentions" role="listbox" aria-label="@ 成员" hidden></div><textarea id="communication-input" aria-label="输入消息" placeholder="输入消息；群聊输入 @ 选择成员" rows="3">${escapeHtml(state.draft)}</textarea><div class="communication-draft-attachments" data-chat-attachments></div><p class="field-hint" data-chat-upload-status role="status"></p><input type="file" multiple data-chat-file hidden><div class="communication-composer-actions"><button type="button" class="small-button" data-chat-attach aria-label="添加附件"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>附件</span></button><span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" type="submit">发送</button></div></form>
+        <form class="communication-composer"><div class="communication-mentions" role="listbox" aria-label="@ 成员" hidden></div><div class="message-composer-card"><div class="message-composer-input"><div class="communication-draft-attachments" data-chat-attachments></div><textarea id="communication-input" aria-label="输入消息" placeholder="输入消息；群聊输入 @ 选择成员" rows="3">${escapeHtml(state.draft)}</textarea></div><p class="field-hint" data-chat-upload-status role="status"></p><input type="file" multiple data-chat-file hidden><input type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/bmp" data-chat-image-file hidden><div class="communication-composer-actions">${attachmentControls('chat', state.sending)}<span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" type="submit">发送</button></div></div></form>
       </section>
       <aside class="communication-roster" aria-label="聊天成员" hidden><header><strong data-chat-member-count>成员</strong><button type="button" class="text-action" data-edit-chat-group>编辑群聊</button><button type="button" class="text-action" data-close-chat-members aria-label="关闭成员列表">×</button></header><div data-chat-roster></div></aside>
       <dialog class="communication-picker communication-member-detail" aria-label="员工详细信息"></dialog>
@@ -338,15 +411,22 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     query('[data-communication-console-latest]').onclick = () => { const stream = query('[data-communication-stream]'); stream.scrollTop = stream.scrollHeight; };
     const fileInput = query('[data-chat-file]');
     query('[data-chat-attach]').onclick = () => { if (!state.sending) fileInput.click(); };
-    fileInput.onchange = () => {
+    const imageInput = query('[data-chat-image-file]');
+    query('[data-chat-attach-image]').onclick = () => { if (!state.sending) imageInput.click(); };
+    query('.communication-messages').addEventListener('error', imageError, true);
+    query('[data-chat-attachments]').addEventListener('error', imageError, true);
+    fileInput.onchange = imageInput.onchange = event => {
+      const picker = event.currentTarget;
       if (state.sending) return;
-      for (const file of fileInput.files) {
+      for (const file of picker.files) {
         if (file.size > 20 * 1024 * 1024) { notify(`「${file.name}」超过单文件 20 MiB 上限。`, true); continue; }
-        state.attachments.push({ id: crypto.randomUUID(), file, uploaded: null });
+        state.attachments.push({ id: crypto.randomUUID(), file, uploaded: null, previewURL: imageAttachment(file.name) ? URL.createObjectURL(file) : null });
       }
-      fileInput.value = ''; state.requestId = null; renderAttachments();
+      picker.value = ''; state.requestId = null; renderAttachments();
     };
     query('.communication-messages').onclick = async event => {
+      const image = event.target.closest('[data-chat-image]');
+      if (image) { openImage(image); return; }
       const consoleButton = event.target.closest('[data-chat-failure-console]');
       if (consoleButton) { openMemberConsole(consoleButton.dataset.chatFailureConsole); return; }
       const retry = event.target.closest('[data-retry-chat-delivery]');
@@ -359,10 +439,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       if (!link) return;
       event.preventDefault();
       try {
-        const response = await fetch(link.href);
-        if (!response.ok) throw new Error((await response.json()).error || '附件下载失败');
-        const url = URL.createObjectURL(await response.blob()), download = document.createElement('a');
-        download.href = url; download.download = link.download; download.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        await downloadAttachment(link);
       } catch (error) { notify(error.message, true); }
     };
     query(".communication-messages").onscroll = () => { void markVisibleRead(); };
@@ -407,6 +484,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         const { message } = await api(`/api/communications/${key}/messages`, { method: "POST", body: JSON.stringify({ content, mentionAgentIds, attachmentIds: attachments.map(item => item.uploaded.id), clientRequestId: requestId }) });
         state.messages.set(message.id, message);
         state.attachments = state.attachments.filter(item => !attachments.includes(item));
+        attachments.forEach(item => { if (item.previewURL) URL.revokeObjectURL(item.previewURL); });
         state.latestRequest?.sentMessages.push(message);
         if (state.draft === content) { state.draft = ""; state.mentions = []; state.requestId = null; if (isCurrent(key, token)) input.value = ""; }
         if (isCurrent(key, token)) { closeFloatingList(query(".communication-mentions")); renderMessages(); const list = query(".communication-messages"); list.scrollTop = list.scrollHeight; }
@@ -499,12 +577,12 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         query(".communication-pager").onclick = (event) => { const button = event.target.closest("[data-page]"); if (button) { listPage = Number(button.dataset.page); renderList(); } };
       }
       const changed = fresh || currentId !== selectedId;
-      if (changed) { if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} generation++; currentId = selectedId; if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} setupConversation(); }
+      if (changed) { imageViewer?.close(); if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} generation++; currentId = selectedId; if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} setupConversation(); }
       const update = () => { poll(); loadMessages(); void loadConsole(); };
       renderList(); renderReadErrors();
       if (changed || !timer) { clearInterval(timer); timer = setInterval(update, 2000); update(); }
     },
-    unmount() { for(const state of views.values()){state.consoleOpen=false;state.consoleRequest=null;} clearInterval(timer); timer = null; closeFloatingLists(host); host = null; currentId = null; generation++; }
+    unmount() { imageViewer?.close(); for(const state of views.values()){state.consoleOpen=false;state.consoleRequest=null;} clearInterval(timer); timer = null; closeFloatingLists(host); host = null; currentId = null; generation++; }
   };
 }
 

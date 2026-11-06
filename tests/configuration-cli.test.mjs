@@ -64,7 +64,7 @@ test('CLI rejects removed targets offline and never contacts a service when the 
 test('plugin CLI exposes Runtime support progressively and documents source-wide Git imports',async()=>{
   const f=await fixture(),compatibility={'claude-code':{supported:true,reasons:[]},codex:{supported:false,reasons:['Codex 适配器不支持 settings']}};
   const entry={id:'plugin_one',name:'Claude-only',description:'proof',providers:['claude-code'],compatibility,components:{skills:1,agents:0,hooks:0,commands:0}};
-  const fetcher=async url=>new Response(JSON.stringify(url.endsWith('/plugin_one')?entry:{plugins:[entry]}));
+  const fetcher=async url=>new Response(JSON.stringify(url.endsWith('/plugin_one')?entry:{plugins:[entry],total:1,page:1,pageSize:20,totalPages:1,hasMore:false}));
   const listed=await captured(['plugins','list','--session-file',f.sessionFile],{fetcher});
   assert.match(listed.stdout,/Runtime/);assert.match(listed.stdout,/Claude Code/);assert.doesNotMatch(listed.stdout,/settings/);
   const detail=await captured(['plugins','get',entry.id,'--session-file',f.sessionFile],{fetcher});assert.match(detail.stdout,/不兼容原因/);assert.match(detail.stdout,/settings/);
@@ -296,9 +296,10 @@ async function fixture() {
     assert.equal(options.headers.Cookie, cookie);
     if (path === '/api/auth/logout') return response({ ok: true });
     if (path === '/api/auth/session') return response({ username: 'operator', expiresAt: null });
-    const resource = Object.values(resources).find(item => path === item.path || path.startsWith(item.path + '/'));
+    const pathname=new URL(url).pathname;
+    const resource = Object.values(resources).find(item => pathname === item.path || pathname.startsWith(item.path + '/'));
     if (path.endsWith('/test')) return response({ ok: false, logPath: '/private/probe.jsonl', testId: 'probe-1' });
-    if (options.method === 'GET') return response({ [resource.key]: state[resource.key], ...(resource.key === 'plugins' ? { entries: state.entries } : {}) });
+    if (options.method === 'GET') return response({ [resource.key]: state[resource.key], ...(resource.key === 'plugins' ? { entries: state.entries } : {}),...(['plugins','entries'].includes(resource.key)?{totalPages:1,total:state[resource.key].length,page:1,pageSize:20,hasMore:false}:{}) });
     return response(body || { deleted: true });
   };
   const options = { fetcher };
@@ -721,7 +722,7 @@ test('CLI task creation supports teams, empty criteria and explicit create/start
     return url.endsWith('/run') ? new Response(JSON.stringify(rejectStart ? {error:'Runtime 不可用'} : {run:{id:'run_one',taskId:'task_one',status:'running'}}),{status:rejectStart?409:202}) : new Response(JSON.stringify({task:{id:'task_one',title:'任务',status:'backlog'}}));
   };
   const invoke = (args, body=value) => execute(['tasks','create','--file','-',...args,'--session-file',f.sessionFile],{fetcher,stdin:input(body)});
-  const created = await invoke([]); assert.equal(created.run,undefined); assert.equal(writes.length,1); assert.deepEqual(writes[0].body,value);
+  const created = await invoke([]); assert.equal(created.run,undefined); assert.equal(created.task.status,'backlog'); assert.match(formatOutput(['tasks','create'],created),/草稿已保存/); assert.equal(writes.length,1); assert.deepEqual(writes[0].body,value);
   writes.length=0; const started = await invoke(['--start']); assert.equal(writes.length,2); assert.equal(started.run.id,'run_one'); assert.match(formatOutput(['tasks','create'],started),/已创建并启动/);
   rejectStart=true; writes.length=0;
   await assert.rejects(invoke(['--start']),error=>error.code==='TASK_CREATED_START_FAILED' && error.taskId==='task_one' && /不要重复创建/.test(error.hint));
@@ -799,4 +800,18 @@ test('employee role filter resolves ID or unique name before search and paginati
  roles.push({id:'role_c',name:'分析'});await assert.rejects(invoke(['--role','分析']),e=>e.code==='AMBIGUOUS_REFERENCE');
  assert.equal((await invoke(['--role','role_a'])).total,22);
  assert.match((await captured(['agents','list','--help'])).stdout,/--role/);
+});
+
+
+test('task progress exposes all concurrent members and failed-run settlement in text and JSON', async () => {
+ const f=await fixture(),task={id:'task_parallel',title:'并行',status:'running'};
+ const workspace={run:{id:'run_parallel',task,status:'running',participants:[{id:'a',name:'A'},{id:'b',name:'B'}]},traces:[{id:'ta',agentId:'a',status:'running'},{id:'tb',agentId:'b',status:'running'}],dispatches:[{id:'da',recipientAgentId:'a',status:'claimed'},{id:'db',recipientAgentId:'b',status:'claimed'},{id:'dc',recipientAgentId:'a',status:'queued'}],pendingQuestions:[],messages:[],events:[],artifacts:[]};
+ const fetcher=async url=>new Response(JSON.stringify(url.endsWith('/api/bootstrap')?{tasks:[task],runs:[{id:workspace.run.id,taskId:task.id}]}:workspace));
+ const args=['tasks','progress',task.id,'--session-file',f.sessionFile];
+ const initial=await execute(args,{fetcher});assert.deepEqual(initial.activeTraces.map(t=>t.agentId),['a','b']);assert.equal(initial.pendingDispatches.length,3);
+ workspace.run.status='failed';workspace.traces[0].status='failed';
+ const json=await captured([...args,'--json'],{fetcher});const data=JSON.parse(json.stdout).data;assert.deepEqual(data.activeTraces.map(t=>t.agentId),['b']);assert.match(data.nextAction,/收尾/);
+ assert.match((await captured(args,{fetcher})).stdout,/收尾/);
+ workspace.traces[1].status='completed';assert.doesNotMatch((await execute(args,{fetcher})).nextAction,/收尾/);
+ assert.match(resources.tasks.notes.join(' '),/不同员工并行/);
 });

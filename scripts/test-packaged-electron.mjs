@@ -330,7 +330,7 @@ async function runPackagedTask(page) {
   await form.locator(`[data-add-extension="${team.team.id}"]`).click();
   assert.equal(await form.locator("#node-assignment-panel").count(), 0);
   assert.equal(await form.locator('[name^="nodeAssignment_"]').count(), 0);
-  await form.getByRole("button", { name: "创建并开始", exact: true }).click();
+  await form.getByRole("button", { name: "保存并开始", exact: true }).click();
   await form.waitFor({ state: "detached" });
 
   const started = await waitFor("Task 和 Run 创建", async () => {

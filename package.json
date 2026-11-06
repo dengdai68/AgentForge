@@ -1,6 +1,6 @@
 {
   "name": "agentforge-app",
-  "version": "0.1.5",
+  "version": "0.1.6-beta.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "Local AI teams, collaborative tasks and scheduled automation",

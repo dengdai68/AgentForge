@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -165,4 +165,26 @@ test('task team selection merges active employees once and freezes independent m
   assert.throws(()=>store.createTask(input),/可用的团队/);
   store.deleteTeam(team.id);
   assert.deepEqual(store.listTasks().find(item=>item.id===task.id).memberAgentIds,[worker.id,manager.id]);
+});
+
+
+test('saved task drafts persist without execution and start explicitly exactly once', t => {
+  const options = fixture();
+  t.after(() => rmSync(options.workspaceRoot, {recursive:true,force:true}));
+  let store = createStore(options);
+  try {
+    const manager = store.createAgent({name:'草稿经理',kind:'manager'});
+    const task = store.createTask({title:'持久化草稿',objective:'只在显式启动后执行',memberAgentIds:[manager.id]});
+    assert.equal(task.status,'backlog');
+    assert.equal(store.listRuns().length,0);
+    assert.equal(existsSync(task.workspacePath),false);
+    store.close(); store = createStore(options);
+    assert.equal(store.listTasks().find(item=>item.id===task.id).status,'backlog');
+    assert.equal(store.listRuns().length,0);
+    const run = store.createRun(task.id);
+    assert.equal(run.taskId,task.id);
+    assert.equal(store.listTasks().find(item=>item.id===task.id).status,'running');
+    assert.throws(()=>store.createRun(task.id),/不能启动/);
+    assert.equal(store.listRuns().length,1);
+  } finally { store.close(); }
 });

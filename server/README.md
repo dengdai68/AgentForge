@@ -112,3 +112,13 @@ PUT /api/runs/:id/members 经认证交给 Store 更新当前成员投影，不�
 任务和自动化共用可选工作流语义：未选使用固定默认协作快照。自动化配置和预览接口拒绝 timeZone 输入，使用本机当地时区；生成标题带当地日期和时分秒。Runtime 诊断正文保存在受认证内容通道，事件仅保留摘要。
 
 自动化任务标题统一为 `自动化名称#yyyy-MM-dd HH:mm:ss`（当地时区、24 小时制；定时取计划时刻，手动取触发时刻）。触发列表首列展示真实任务标题；HTTP/CLI 的触发回执、列表和 latestTrigger 返回 taskTitle，未生成任务为 null；不重写历史任务名称。
+
+同任务并行：经理通过 `managerDecision.assignments` 一次向不同员工发送独立指令，`wait:true` 等待其他工作。Store 按成员领取且同成员串行；Orchestrator 一次准备、多个 Worker，新增消息唤醒领取。任一业务调用失败阻止新工作，但保留其他在途成员的结果与交接；重试原投递及其咨询链，不提前释放其他队列。验收前必须清空在途和排队工作（旧平台 deferredRevisit 可结算）。暂停/终止覆盖 Run 全部进程，失败任务也可终止。
+
+沟通附件 GET 的 `preview=1` 分支在既有归属与完整性校验后按位图签名提供 image MIME；非位图返回 415，普通附件仍下载。鉴权、no-store/nosniff/CSP 和原文件记录保持，契约见 docs/17。
+
+插件/MCP 目录摘要在 Store.registerExtensions 中登记，由 persistence 的独立 SQLite extension_catalog 保存；queryExtensions 直接 SQL 搜索分页。index.mjs 将导入/编辑登记与绑定替换原子提交，plugin-updates 读取数据库活跃项并同步提交。removeExtension 软删除及全员工当前解绑原子完成，不碰冻结事实和文件。
+
+任务协作上传共用认证二进制入口与位图预览；Run Files 保存原字节，Store 保存同 Run 引用，orchestrator 在投递前核验附件并传递绝对路径。调度上下文和工作目录/Artifact 查询不再构建全量 getRunWorkspace；深拷贝移除 JSON 字符串中间结果，避免长任务重复展开员工配置导致 Invalid string length。
+
+角色扩展内部保存按Provider解析引用，配置API仅返回选择ID；Store在任务和沟通快照中合并员工直接扩展与角色扩展。市场替换及删除同步当前角色关联。停用自动化删除先退出执行并暂存Run文件，再原子删除相关记录。

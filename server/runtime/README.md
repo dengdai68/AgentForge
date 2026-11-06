@@ -61,3 +61,9 @@ Codex 在 Provider 确认 thread.started 之前出现明确鉴权/未登录错�
 任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。
 
 local-cli 将 Claude api_retry、Codex error/stderr 的明确诊断字段保存为脱敏 execution content；不记录整帧或请求 body，重试后的成功仍按原完成协议结算。
+
+任务 Runtime 使用 `executionKey = Run ID:员工 ID`，`registerExecution` 第三个参数为 Run 分组；同键不允许重叠，不同成员可并发，`terminateExecution(runId)` 停止该组所有调用。Claude CLI、Codex exec/app-server、DSH 共用注册逻辑；沟通/探测不传分组时保持原键语义。注册释放按 entry 身份核对，避免旧回调删除新调用。
+
+marketplace 负责安装文件准备、单项详情和实际绑定/执行校验；HTTP 列表不再调用磁盘 catalog() 全量解析，导入摘要交给 Store 登记 SQLite。低层 catalog() 仅保留文件诊断和 Runtime 测试用途，不作产品目录源。当前兼容性展示为导入快照；目录协议见 docs/15。
+
+Marketplace.resolveRole 解析角色选择到兼容Provider引用；resolveRoleReplacements 在插件更新、重复导入及MCP编辑时准备角色的新引用。源码/MCP内容保持不可变文件，角色与员工关联留在Store/SQLite。

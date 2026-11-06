@@ -23,7 +23,7 @@ test('role CRUD validates input, updates partially and records audit events', ()
     assert.equal(role.name, '事实核查员');
     assert.match(role.id, /^role_/);
     assert.deepEqual(store.getRole(role.id).prompt, '凡引用外部事实必须给出来源。');
-    assert.throws(() => store.updateRole(role.id, {}), /至少提供名称或提示词/);
+    assert.throws(() => store.updateRole(role.id, {}), /至少提供名称、提示词或扩展选择/);
     assert.throws(() => store.updateRole('role_missing', { name: 'x' }), /角色不存在/);
     const renamed = store.updateRole(role.id, { name: '独立核查' });
     assert.equal(renamed.prompt, '凡引用外部事实必须给出来源。', 'partial update keeps the prompt');
@@ -156,7 +156,7 @@ test('role prompts join application system instructions for both task and commun
 
 test('role CLI exposes progressive help, schema and partial update offline', async () => {
   assert.ok(resources.roles);
-  assert.deepEqual(Object.keys(resources.roles.schema.properties), ['name', 'prompt']);
+  assert.deepEqual(Object.keys(resources.roles.schema.properties), ['extensionSelection', 'name', 'prompt']);
   const update = documentation('roles', 'update');
   assert.deepEqual(update.schema.required, [], 'role update is a partial patch');
   assert.equal(documentation('roles', 'create').schema.required.includes('prompt'), true);

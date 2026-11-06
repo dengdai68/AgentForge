@@ -524,17 +524,19 @@ test('Store freezes selected market versions and rejects mixed legacy paths', as
   await assert.rejects(async()=>store.updateAgent(employee.id,{runtime:{...runtime,pluginPaths:[root]}}),/只能/);
 });
 
-test('extension removal blocks all current employee references, stale bindings and persists atomically without deleting frozen files', async t => {
+test('extension soft deletion detaches all current employees, blocks stale bindings and preserves frozen files', async t => {
   const {root,market}=await fixture(t),entry=await install(market,root),service=await market.add(mcp);
   const databasePath=join(root,'state.sqlite');let store=createStore({databasePath});
   t.after(()=>store.close());
   for(const [kind,item,key] of [['plugin',entry,'pluginIds'],['mcp',service,'mcpIds']]) {
     const resolved={provider:'claude-code',...await market.resolve({...empty,[key]:[item.id]},'claude-code')};
     const employee=store.createAgent({name:`Inactive ${kind}`,status:'inactive',runtime:resolved});
-    assert.throws(()=>store.removeExtension({kind,id:item.id,name:item.name}),/Inactive.*请先/);
-    assert.equal(store.isExtensionRemoved(kind,item.id),false);
-    store.updateAgent(employee.id,{runtime:{provider:'claude-code',...await market.resolve(empty,'claude-code')}});
-    assert.equal(store.removeExtension({kind,id:item.id,name:item.name}).historyRetained,true);
+    store.registerExtensions([item]);
+    const receipt=store.removeExtension({kind,id:item.id,name:item.name});
+    assert.equal(receipt.historyRetained,true);
+    assert.deepEqual(receipt.employees,[{id:employee.id,name:employee.name}]);
+    assert.equal(store.getExtension(kind,item.id),null);
+    assert.equal(store.queryExtensions(kind).total,0);
     assert.throws(()=>store.createAgent({name:'Stale create',runtime:resolved}),/已删除/);
     assert.throws(()=>store.updateAgent(employee.id,{runtime:resolved}),/已删除/);
     assert.throws(()=>store.removeExtension({kind,id:item.id,name:item.name}),/已删除/);

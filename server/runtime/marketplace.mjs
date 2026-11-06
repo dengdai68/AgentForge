@@ -436,6 +436,18 @@ export function createMarketplace(root) {
       const content=JSON.stringify(configuration,null,2), id=entryId || randomUUID(), entry={protocol:location?3:2,id,kind:'mcp',name:input.name.trim(),description:input.description.trim(),createdAt:new Date().toISOString(),providers:['claude-code','codex','dsh'],sha256:digest(content),visibility:'market'};
       await ensure();const target=location || join(directory,id);await mkdir(target,{recursive:true,mode:0o700});await writeFile(join(target,'mcp.json'),content,{flag:'wx',mode:0o600});await writeFile(join(target,'entry.json'),JSON.stringify(entry),{flag:'wx',mode:0o600});return location?entry:summary(entry);
     },
+    async resolveRole(selection) {
+      const selected=selectionIds(selection);
+      const entries=await Promise.all(['plugin','mcp'].flatMap(kind=>selected[kind==='plugin'?'pluginIds':'mcpIds'].map(id=>read(id,kind))));
+      const providers=['claude-code','codex','dsh'].filter(provider=>entries.every(item=>item.providers.includes(provider)));
+      if(!providers.length)throw new Error('所选角色扩展没有共同兼容的 Runtime');
+      const extensionBindings=Object.fromEntries(await Promise.all(providers.map(async provider=>[provider,await this.resolve(selected,provider)])));
+      return {extensionSelection:selected,extensionBindings};
+    },
+    async resolveRoleReplacements(roles,replacements) {
+      const maps=Object.fromEntries(['plugin','mcp'].map(kind=>[kind,new Map(replacements.filter(item=>(item.kind || 'plugin')===kind).map(item=>[item.previousId,item.id]))]));
+      return Promise.all(roles.filter(role=>['plugin','mcp'].some(kind=>role.extensionSelection?.[kind==='plugin'?'pluginIds':'mcpIds']?.some(id=>maps[kind].has(id)))).map(async role=>({roleId:role.id,previousSelection:role.extensionSelection,...await this.resolveRole(Object.fromEntries(['plugin','mcp'].map(kind=>{const key=kind==='plugin'?'pluginIds':'mcpIds';return [key,[...new Set(role.extensionSelection[key].map(id=>maps[kind].get(id)||id))]];})))})));
+    },
     async resolve(selection,provider) {
       const selected=selectionIds(selection), extensionManifest=[], names=new Set();
       for(const kind of ['plugin','mcp']) for(const id of selected[kind==='plugin'?'pluginIds':'mcpIds']) {
