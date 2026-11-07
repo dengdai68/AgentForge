@@ -44,7 +44,7 @@ if (!real) {
   // Clearly labelled UI pagination fixture, never passed off as a real Provider.
   store.sendCommunication(group.id, { content: '隔离分页夹具', mentionAgentIds: [failedAgent.id], clientRequestId: 'controlled-history-fixture' });
   const delivery = store.claimCommunication(group.id);
-  for (let i = 0; i < 65; i++) store.appendCommunicationEvent(group.id, delivery.id, { providerEventType: 'fixture', message: '隔离分页夹具记录 ' + i });
+  for (let i = 0; i < 265; i++) store.appendCommunicationEvent(group.id, delivery.id, { providerEventType: 'fixture', message: '隔离分页夹具记录 ' + i });
   store.completeCommunication(group.id, delivery.id, '隔离分页夹具完成，不是真实 Provider。');
 }
 store.close();
@@ -101,7 +101,7 @@ try {
     assert.equal(await p.locator('.communication-console-header, [data-close-communication-console]').count(), 0);
     assert.deepEqual(await p.locator('.communication-console-toolbar button').allTextContents(), ['↓ 最新', '刷新', '×']);
     assert.equal(await p.locator('.communication-console-toolbar [data-communication-members], .communication-console-toolbar [data-communication-console-older]').count(), 0);
-    if(await p.evaluate(()=>innerWidth<=760)) { assert.equal(await p.locator('.communication-chat').isVisible(),false);assert.equal(await p.locator('[data-close-chat-console]').isVisible(),true);return geometry; }
+    if(await p.evaluate(()=>innerWidth<=760)) { assert.equal(await p.locator('.communication-chat > .communication-header').isVisible(),true);assert.equal(await p.locator('.communication-messages').isVisible(),false);assert.equal(await p.locator('[data-close-chat-console]').isVisible(),true);return geometry; }
     assert.ok(Math.abs(geometry.left.y - geometry.console.y) < 1);
     assert.ok(Math.abs(geometry.toolbar.y - geometry.console.y) < 1);
     assert.ok(Math.abs(geometry.left.width - geometry.chat.width) < 2);
@@ -198,8 +198,17 @@ try {
   if (!real) {
     const older = page.locator('[data-communication-console-older]');
     await older.waitFor(); assert.equal(await page.locator('.communication-console-toolbar [data-communication-console-older]').count(), 0);
-    await older.click(); await page.waitForFunction(() => document.querySelector('[data-communication-console-older]').hidden);
-    assert.equal(await page.locator('[data-communication-stream] .log-row').filter({ hasText: '隔离分页夹具记录' }).count(), 65, 'all fixture history retained after paging');
+    while (await older.isVisible()) {
+      await older.click(); await page.waitForFunction(() => !document.querySelector('[data-communication-console-older]').disabled);
+      assert.ok(await page.locator('[data-communication-stream] .log-row').filter({ hasText: '隔离分页夹具记录' }).count() <= 200);
+    }
+    await page.getByText('隔离分页夹具记录 0', { exact: true }).waitFor();
+    assert.equal(await page.getByText('隔离分页夹具记录 264', { exact: true }).count(), 0, 'older window evicts the newest end');
+    await page.waitForTimeout(2400);
+    assert.equal(await page.getByText('隔离分页夹具记录 0', { exact: true }).count(), 1, 'polling preserves history reading');
+    await page.locator('[data-communication-console-latest]').click();
+    await page.getByText('隔离分页夹具记录 264', { exact: true }).waitFor();
+    assert.equal(await page.getByText('隔离分页夹具记录 0', { exact: true }).count(), 0, 'latest fetches the tail again');
   }
   await page.locator('[data-close-chat-console]').click();
   await page.locator(`[data-chat-member-detail="${employee.id}"]`).click();

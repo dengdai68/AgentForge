@@ -67,3 +67,5 @@ local-cli 将 Claude api_retry、Codex error/stderr 的明确诊断字段保存�
 marketplace 负责安装文件准备、单项详情和实际绑定/执行校验；HTTP 列表不再调用磁盘 catalog() 全量解析，导入摘要交给 Store 登记 SQLite。低层 catalog() 仅保留文件诊断和 Runtime 测试用途，不作产品目录源。当前兼容性展示为导入快照；目录协议见 docs/15。
 
 Marketplace.resolveRole 解析角色选择到兼容Provider引用；resolveRoleReplacements 在插件更新、重复导入及MCP编辑时准备角色的新引用。源码/MCP内容保持不可变文件，角色与员工关联留在Store/SQLite。
+
+性能：市场 ID→安装目录索引按批次目录指纹失效，单操作共享解析/校验结果；跨操作摘要缓存仍校验文件元数据和链接，不跳过变化内容哈希。模型目录 30 秒缓存/in-flight 去重，Provider、二进制、环境摘要、账号/配置变动失效，支持显式 refresh。任务/沟通资源池属于编排层，Runtime 仍只适配 Provider，不拥有任务业务状态。

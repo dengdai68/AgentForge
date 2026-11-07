@@ -82,10 +82,14 @@ test('communication console owns bounded attempts and private content without le
   assert.equal(consolePage.events.length, 3); assert.equal(consolePage.hasMore, true);
   const older = store.getCommunicationConsole(chat.id, { agentId: 'agent_analyst', limit: 3, before: consolePage.nextBefore });
   assert.ok(older.events.every(row => !consolePage.events.some(other => row.id === other.id)));
-  assert.equal(consolePage.traces.length, 2);
-  assert.deepEqual(consolePage.traces.map(row => row.sessionMode), ['create', 'resume']);
+  assert.equal(consolePage.traces.length, 1, 'only calls represented by this event page are projected');
+  assert.deepEqual(consolePage.traces.map(row => row.sessionMode), ['resume']);
   assert.ok(consolePage.traces.every(row => row.providerSessionId === calls[0].session.sessionId && row.promptRef && row.status === 'completed'));
   const all = store.getCommunicationConsole(chat.id, { agentId: 'agent_analyst', limit: 200 });
+  assert.deepEqual(all.traces.map(row => row.sessionMode), ['create', 'resume']);
+  const pages=[...consolePage.events];let cursor=consolePage;
+  while(cursor.hasMore){cursor=store.getCommunicationConsole(chat.id,{agentId:'agent_analyst',limit:3,before:cursor.nextBefore});pages.unshift(...cursor.events);assert.ok(cursor.traces.every(trace=>cursor.events.some(event=>event.data.traceId===trace.id)));}
+  assert.deepEqual(pages.map(row=>row.id),all.events.map(row=>row.id));
   const text = all.events.find(row => row.data.presentation === 'text');
   const reference = store.getCommunicationContentReference(chat.id, text.id);
   assert.equal((await files.readConsoleContent(reference)).fields.text.text, 'private-file-runtime-text');

@@ -90,9 +90,34 @@ console.log('PASS bundled AI CLI offline schema without a global Node/PATH insta
 // Signing a malformed archive does not prove its entries match the frozen
 // source. Read critical resources with the bundled Node/ASAR adapter first.
 const resourcePaths = ['LICENSE', 'NOTICE', 'web/icons/application.png', 'web/icons/application-ui.png', 'web/icons/application-dock.png', 'web/icons/trayTemplate.png', 'web/icons/trayTemplate@2x.png', 'web/login.html', 'web/login.js', 'web/settings.mjs', 'web/floating-list.mjs', 'web/app.js', 'web/automations.mjs', 'server/automations.mjs', 'web/communication.js', 'web/marketplace.mjs', 'web/styles.css', 'apps/electron/main.mjs', 'apps/electron/compact.css', 'server/index.mjs', 'cli/main.mjs'];
+async function bundleSources(directory) {
+  for(const entry of await readdir(directory,{withFileTypes:true})) {
+    const file=join(directory,entry.name);
+    if(entry.isDirectory())await bundleSources(file);
+    else if(entry.isFile()&&!entry.name.startsWith('.')&&(directory!=='cli'||entry.name.endsWith('.mjs'))&&!resourcePaths.includes(file))resourcePaths.push(file);
+  }
+}
+for(const directory of ['apps/electron','server','web','client','cli'])await bundleSources(directory);
 const resourceProof = await execute(executable, ['-e', `const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');console.log(JSON.stringify(${JSON.stringify(resourcePaths)}.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(path.join(${JSON.stringify(join(appBundle, 'Contents/Resources/app.asar'))},file))).digest('hex')])));`], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30000 });
 for (const [file, hash] of JSON.parse(resourceProof.stdout)) assert.equal(hash, createHash('sha256').update(await readFile(resolve(file))).digest('hex'), `packaged resource differs from frozen source: ${file}`);
 console.log('PASS packaged application resources match the frozen source');
+// Native image decoding and Worker loading must work from the real ASAR bundle.
+const performanceRuntimeProof=await execute(executable,['-e',`
+(async()=>{
+  const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),{Readable}=require('node:stream');
+  const load=require('node:module').createRequire(${JSON.stringify(join(appBundle,'Contents/Resources/app.asar/package.json'))});
+  const sharp=load('sharp'),{attachmentThumbnail}=load('./server/attachment-thumbnails.mjs');
+  const original=await sharp({create:{width:800,height:600,channels:3,background:'#2450de'}}).png().toBuffer();
+  const preview=await attachmentThumbnail('packaged-proof',async()=>({stream:Readable.from([original])}));
+  assert.equal((await sharp(preview).metadata()).width,144);
+  const {createAsyncDiagnosticLog}=load('./server/diagnostics.mjs');
+  const log=createAsyncDiagnosticLog({directory:path.join(${JSON.stringify(evidenceRoot)},'worker-proof')});
+  try{log.write('packaged.worker.proof',{count:1});await log.flush();assert.match(await fs.readFile(log.status().filePath,'utf8'),/packaged.worker.proof/);}
+  finally{await log.close();}
+  console.log('PASS packaged sharp native thumbnail and asynchronous diagnostic Worker');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+`],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',HOME:home,AGENTFORGE_LOG_DIR:join(evidenceRoot,'logs')},timeout:30000});
+console.log(performanceRuntimeProof.stdout.trim());
 // Exercise the actual ASAR implementation using bundled Electron Node, not the
 // source checkout's parser/FS implementation or a real business plugin Hook.
 const yamlProjectionProof=await execute(executable,['-e',`
@@ -132,6 +157,7 @@ await access(join(appBundle, "Contents", "Resources", "scripts", "migrate-data-h
 for (const name of ['LICENSE', 'LICENSES.chromium.html']) {
   assert.deepEqual(await readFile(join(appBundle,'Contents','Resources','licenses','electron',name)), await readFile(resolve('node_modules/electron/dist',name)), 'Electron/Chromium license text must survive packaging');
 }
+for(const [source,target] of [['node_modules/sharp/LICENSE','sharp/LICENSE'],['node_modules/@img/sharp-libvips-darwin-arm64/README.md','sharp-libvips/README.md']])assert.deepEqual(await readFile(join(appBundle,'Contents/Resources/licenses',target)),await readFile(source),'native image dependency notices must survive packaging');
 console.log("PASS packaged bundle ships the one-time data migration script");
 // Actual stdio MCP through the packaged Electron Node-mode private-file launcher.
 // This verifies ASAR/module resolution, not a model invocation.
@@ -487,6 +513,11 @@ async function runPackagedTask(page) {
       console.log('PASS collapsed Bash/Read/Write summaries, grouped Read Done/error, literal Write content and narrow Console');
       assert.equal(await page.locator('.workspace-mode-tabs [data-toggle-task-details]').count(), 1);
       assert.equal(await page.locator(".log-row:has(.log-time)").first().evaluate((row) => row.querySelector(".log-time").getBoundingClientRect().right <= row.querySelector(".log-body").getBoundingClientRect().left), true, "console timestamp must not overlap the message");
+      await page.locator('[data-console-latest]').click();
+      await page.waitForFunction(() => !document.querySelector('.console-history-controls [role="status"]'));
+      assert.equal(await page.locator('.log-row-trace-prompt').count(), 0, 'latest reloads the tail rather than retaining an earlier prompt');
+      await page.locator('.log-row:not(:has(details)) [data-console-content]').first().scrollIntoViewIfNeeded();
+      await page.locator('[data-execution-kind="text"]').first().waitFor();
     }
     await page.screenshot({ path: join(evidenceRoot, `packaged-workspace-${tab}.png`), animations: "disabled" });
   }

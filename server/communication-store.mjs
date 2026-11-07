@@ -1,42 +1,43 @@
+import { copyState } from "./state-journal.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { communicationVisibility } from "./history/index.mjs";
 
-const copy = (value) => structuredClone(value);
+const copy = copyState;
 const now = () => new Date().toISOString();
 const id = (prefix) => prefix + "_" + randomUUID();
 
 // Invoked only inside createStore. No IO, Provider calls or external domain writes.
-export function communicationCommands(state, save, employeeSnapshot) {
+export function communicationCommands(state, save, employeeSnapshot, journal, persistence) {
   for (const key of ["communicationConversations", "communicationMessages", "communicationDeliveries", "communicationEvents", "communicationAttachments"]) state[key] ||= [];
   let migratedReadState = false;
   for (const thread of state.communicationConversations) if (!Object.hasOwn(thread, "humanReadThroughMessageId")) {
-    thread.humanReadThroughMessageId = state.communicationMessages.filter(message => message.conversationId === thread.id).at(-1)?.id || null;
+    thread.humanReadThroughMessageId = journal.select("communicationMessages", "conversationId", thread.id).at(-1)?.id || null;
     migratedReadState = true;
   }
   if (migratedReadState) save();
   const conversation = (key) => {
-    const item = state.communicationConversations.find((row) => row.id === key);
+    const item = journal.get("communicationConversations", key);
     if (!item) throw new Error("沟通会话不存在");
     return item;
   };
   const delivery = (conversationId, key) => {
     conversation(conversationId);
-    const item = state.communicationDeliveries.find((row) => row.id === key && row.conversationId === conversationId);
-    if (!item) throw new Error("沟通投递不存在");
+    const item = journal.get("communicationDeliveries", key);
+    if (!item || item.conversationId !== conversationId) throw new Error("沟通投递不存在");
     return item;
   };
   const rosterIds = thread => {
     if (thread.kind === "agent") return [thread.targetId];
     if (thread.memberAgentIds) return thread.memberAgentIds;
     // Read saved legacy conversations without rewriting messages or sessions.
-    const recorded = state.communicationMessages.filter(row => row.conversationId === thread.id).flatMap(row => row.visibleToAgentIds || []);
-    const team = state.teams.find(row => row.id === thread.targetId);
+    const recorded = journal.select("communicationMessages", "conversationId", thread.id).flatMap(row => row.visibleToAgentIds || []);
+    const team = journal.get("teams", thread.targetId);
     return [...new Set(recorded.length ? recorded : [...(team?.memberAgentIds || []), team?.managerAgentId].filter(Boolean))];
   };
-  const members = thread => rosterIds(thread).map(value => state.agents.find(row => row.id === value)).filter(row => row && row.status !== "deleted").map(row => ({
+  const members = thread => rosterIds(thread).map(value => journal.get("agents", value)).filter(row => row && row.status !== "deleted").map(row => ({
     id: row.id, name: row.name, kind: row.kind, status: row.status, description: row.description, color: row.color, initials: row.initials,
     systemPrompt: row.systemPrompt, capabilities: copy(row.capabilities || []),
-    roles: (row.roleIds || []).map(value => state.roles.find(role => role.id === value)).filter(Boolean).map(role => ({ id: role.id, name: role.name, prompt: role.prompt }))
+    roles: (row.roleIds || []).map(value => journal.get("roles", value)).filter(Boolean).map(role => ({ id: role.id, name: role.name, prompt: role.prompt }))
   }));
   const validateMembers = ids => {
     if (!Array.isArray(ids) || ids.some(value => typeof value !== "string") || new Set(ids).size !== ids.length) throw new Error("群聊成员必须是不重复的数字员工 ID 数组");
@@ -51,13 +52,18 @@ export function communicationCommands(state, save, employeeSnapshot) {
   };
   // Failed replies remain visible and require explicit retry after the cause is fixed.
   const pending = (item) => !["done", "cancelled"].includes(item.status);
+  const unread = thread => {
+    if(!journal.changes.has('communicationMessages'))return persistence.communicationUnread(thread);
+    const rows=journal.select('communicationMessages','conversationId',thread.id);
+    const readIndex=rows.findIndex(row=>row.id===thread.humanReadThroughMessageId);
+    let count=0;for(let i=readIndex+1;i<rows.length;i++)if(rows[i].sender.type==='agent')count++;
+    return count;
+  };
   const summary = (thread, details = false) => {
-    const target = thread.kind === "agent" ? state.agents.find(row => row.id === thread.targetId) : null;
-    const last = state.communicationMessages.filter((row) => row.conversationId === thread.id).at(-1);
-    const rows = state.communicationMessages.filter(row => row.conversationId === thread.id);
-    const readIndex = rows.findIndex(row => row.id === thread.humanReadThroughMessageId);
-    const unreadCount = rows.slice(readIndex + 1).filter(row => row.sender.type === "agent").length;
-    return { id: thread.id, kind: thread.kind === "agent" ? "agent" : "group", ...(thread.kind === "agent" ? { targetId: thread.targetId } : {}), name: target?.name || thread.name, unreadCount, createdAt: thread.createdAt, updatedAt: thread.updatedAt, members: members(thread).map(({systemPrompt,roles,...member}) => ({ ...(details ? { ...member, systemPrompt, roles } : member), running: state.communicationDeliveries.some(row => row.conversationId === thread.id && row.agentId === member.id && row.status === "running") })), preview: last?.content.slice(0, 100) || last?.attachments?.map(row => row.name).join('、').slice(0, 100) || "", pending: state.communicationDeliveries.filter((row) => row.conversationId === thread.id && pending(row)).length };
+    const target = thread.kind === "agent" ? journal.get("agents", thread.targetId) : null;
+    const last = journal.select("communicationMessages", "conversationId", thread.id,{last:1})[0];
+    const unreadCount=unread(thread),pendingRows=['queued','claimed','running','failed'].flatMap(status=>journal.select('communicationDeliveries','status',status)).filter(row=>row.conversationId===thread.id);
+    return { id: thread.id, kind: thread.kind === "agent" ? "agent" : "group", ...(thread.kind === "agent" ? { targetId: thread.targetId } : {}), name: target?.name || thread.name, unreadCount, createdAt: thread.createdAt, updatedAt: thread.updatedAt, members: members(thread).map(({systemPrompt,roles,...member}) => ({ ...(details ? { ...member, systemPrompt, roles } : member), running: pendingRows.some(row => row.agentId === member.id && row.status === "running") })), preview: last?.content.slice(0, 100) || last?.attachments?.map(row => row.name).join('、').slice(0, 100) || "", pending: pendingRows.length };
   };
   const page = (rows, before, limit) => {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error("分页大小必须为 1–200");
@@ -71,8 +77,8 @@ export function communicationCommands(state, save, employeeSnapshot) {
   };
   const attachment = (key, attachmentId) => {
     conversation(key);
-    const item = state.communicationAttachments.find(row => row.conversationId === key && row.id === attachmentId);
-    if (!item) throw new Error("附件不属于当前会话或不存在");
+    const item = journal.get("communicationAttachments", attachmentId);
+    if (!item || item.conversationId !== key) throw new Error("附件不属于当前会话或不存在");
     return item;
   };
   const callId = row => `${row.deliveryId}_${row.attempt}`;
@@ -86,10 +92,11 @@ export function communicationCommands(state, save, employeeSnapshot) {
     return {...copy(agent),roleSnapshots};
   };
   return {
+    communicationUnreadCount() { return state.communicationConversations.filter(thread=>thread.kind!=='agent'||journal.get('agents',thread.targetId)?.status!=='deleted').reduce((sum,thread)=>sum+unread(thread),0); },
     registerCommunicationAttachment(key, record) {
       conversation(key);
       if (!record || !/^attachment_[a-f0-9-]{36}$/.test(record.id) || typeof record.name !== 'string' || !record.name || /[/\\\0]/.test(record.name) || record.path !== `attachments/${record.id}/${record.name}` || !Number.isSafeInteger(record.bytes) || record.bytes < 0 || record.bytes > 20 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(record.sha256)) throw new Error('附件元数据无效');
-      if (state.communicationAttachments.some(row => row.id === record.id)) throw new Error('附件已存在');
+      if (journal.get("communicationAttachments", record.id)) throw new Error('附件已存在');
       const item = { id: record.id, name: record.name, path: record.path, bytes: record.bytes, sha256: record.sha256, conversationId: key, createdAt: now() };
       state.communicationAttachments.push(item); save(); return copy(item);
     },
@@ -106,7 +113,7 @@ export function communicationCommands(state, save, employeeSnapshot) {
       if (kind !== "group" || Object.hasOwn(input, "targetId")) throw new Error("群聊独立创建，请提交 kind=group、name 和 memberAgentIds，不再绑定团队");
       const memberAgentIds = validateMembers(input.memberAgentIds);
       if (!memberAgentIds.length) throw new Error("新群聊至少选择一位数字员工");
-      const name = input.name === undefined ? memberAgentIds.map(value => state.agents.find(row => row.id === value).name).join("，") : groupName(input.name);
+      const name = input.name === undefined ? memberAgentIds.map(value => journal.get("agents", value).name).join("，") : groupName(input.name);
       const thread = { id: id("chat"), kind: "group", name, memberAgentIds, createdAt: now(), updatedAt: now(), sessions: {}, humanReadThroughMessageId: null };
       state.communicationConversations.push(thread); save(); return summary(thread);
     },
@@ -117,7 +124,7 @@ export function communicationCommands(state, save, employeeSnapshot) {
       const name = input.name === undefined ? thread.name : groupName(input.name), ids = input.memberAgentIds === undefined ? rosterIds(thread) : validateMembers(input.memberAgentIds);
       return this.transaction(() => {
         thread.kind = "group"; delete thread.targetId; thread.name = name; thread.memberAgentIds = ids; thread.updatedAt = now();
-        for (const item of state.communicationDeliveries.filter(row => row.conversationId === key && !ids.includes(row.agentId) && ["queued", "failed"].includes(row.status))) {
+        for (const item of journal.select("communicationDeliveries", "conversationId", key).filter(row => !ids.includes(row.agentId) && ["queued", "failed"].includes(row.status))) {
           item.status = "cancelled"; item.nextAttemptAt = null; item.updatedAt = now(); event(item, "cancelled", "成员已离开群聊，待回复取消；历史保留");
         }
         save(); return summary(thread);
@@ -132,20 +139,26 @@ export function communicationCommands(state, save, employeeSnapshot) {
         item.status = "cancelled"; item.nextAttemptAt = null; item.updatedAt = now(); event(item, "cancelled", "员工已删除，待回复取消；历史保留");
       }
     },
-    listCommunications() { return state.communicationConversations.filter(thread => thread.kind !== "agent" || state.agents.some(row => row.id === thread.targetId && row.status !== "deleted")).map(thread => summary(thread)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); },
+    listCommunications(query) {
+      if(query){const page=persistence.queryEntities('communicationConversations',query);return {...page,items:page.items.map(id=>summary(conversation(id)))};}
+      return state.communicationConversations.filter(thread=>thread.kind!=='agent'||journal.get('agents',thread.targetId)?.status!=='deleted').map(thread=>summary(thread)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+    },
     markCommunicationRead(key, messageId) {
-      const thread = conversation(key), rows = state.communicationMessages.filter(message => message.conversationId === key);
-      const next = rows.findIndex(message => message.id === messageId);
+      const thread = conversation(key),target=journal.get('communicationMessages',messageId),next=target?.conversationId===key?journal.entry('communicationMessages',messageId).position:-1;
       if (next < 0) throw new Error("已读消息不属于当前会话");
-      const previous = rows.findIndex(message => message.id === thread.humanReadThroughMessageId);
+      const previous = journal.entry('communicationMessages',thread.humanReadThroughMessageId)?.position??-1;
       if (next > previous) { thread.humanReadThroughMessageId = messageId; save(); }
       return summary(thread);
     },
-    getCommunication(key, { before = null, limit = 100 } = {}) {
-      const thread = conversation(key), result = page(state.communicationMessages.filter((row) => row.conversationId === key), before, limit);
+    getCommunication(key, { before = null, limit = 100, since = null } = {}) {
+      const revision=['communicationConversations','communicationMessages','communicationDeliveries','agents','roles'].map(name=>journal.version(name)).join(':');
+      if(since===revision&&!before){conversation(key);return {unchanged:true,revision};}
+      if(!Number.isInteger(limit)||limit<1||limit>200)throw new Error('分页大小必须为 1–200');
+      const thread=conversation(key),window=journal.select('communicationMessages','conversationId',key,{before,last:limit+1}),items=window.slice(-limit);
+      const result={items:copy(items),hasMore:window.length>limit,nextBefore:items[0]?.id||null};
       const messageIds = new Set(result.items.map((row) => row.id));
-      return { conversation: summary(thread, true), messages: result.items, hasMore: result.hasMore, nextBefore: result.nextBefore,
-        deliveries: copy(state.communicationDeliveries.filter((row) => row.conversationId === key && (messageIds.has(row.messageId) || row.status !== "done"))).map(({ agentSnapshot, invocations, ...row }) => row) };
+      return { revision, conversation: summary(thread, true), messages: result.items, hasMore: result.hasMore, nextBefore: result.nextBefore,
+        deliveries: copy([...new Map([...messageIds].flatMap(id=>journal.select('communicationDeliveries','messageId',id)).concat(['queued','claimed','running','failed'].flatMap(status=>journal.select('communicationDeliveries','status',status)).filter(row=>row.conversationId===key)).map(row=>[row.id,row])).values()]).map(({ agentSnapshot, invocations, ...row }) => row) };
     },
     sendCommunication(key, { content = '', mentionAgentIds = [], attachmentIds = [], clientRequestId } = {}) {
       const thread = conversation(key);
@@ -154,7 +167,7 @@ export function communicationCommands(state, save, employeeSnapshot) {
       if (typeof content !== "string" || (!content.trim() && !attachments.length) || content.length > 32000) throw new Error("消息需为 1–32000 字符，或包含附件");
       if (typeof clientRequestId !== "string" || !/^[a-zA-Z0-9_-]{8,100}$/.test(clientRequestId)) throw new Error("发送请求标识无效");
       if (!Array.isArray(mentionAgentIds) || mentionAgentIds.some((item) => typeof item !== "string")) throw new Error("@ 成员列表无效");
-      const previous = state.communicationMessages.find((row) => row.conversationId === key && row.clientRequestId === clientRequestId);
+      const previous = journal.select("communicationMessages", "clientRequestId", clientRequestId).find(row => row.conversationId === key);
       if (previous) {
         if (previous.content !== content || JSON.stringify(previous.mentionAgentIds) !== JSON.stringify([...new Set(mentionAgentIds)]) || JSON.stringify((previous.attachments || []).map(row => row.id)) !== JSON.stringify(attachmentIds)) throw new Error("发送标识已用于另一条消息");
         return copy(previous);
@@ -165,14 +178,14 @@ export function communicationCommands(state, save, employeeSnapshot) {
       const recipients = thread.kind === "agent" ? [thread.targetId] : mentioned.length ? mentioned : roster.filter((member) => member.status === "active").map((member) => member.id);
       if (recipients.some((key) => !roster.some((member) => member.id === key && member.status === "active"))) throw new Error("数字员工已停用");
       if (!recipients.length) throw new Error("没有可回复的群聊成员，请先添加可用员工");
-      for (const agentId of recipients) this.assertRuntimeEnabled(state.agents.find(row => row.id === agentId).runtime);
+      for (const agentId of recipients) this.assertRuntimeEnabled(journal.get("agents", agentId).runtime);
       const message = { id: id("chat_message"), conversationId: key, clientRequestId, sender: { type: "human", id: "human_operator", name: "你" }, content, attachments, mentionAgentIds: mentioned, visibleToAgentIds: roster.map(member => member.id), createdAt: now(), replyToMessageId: null };
-      const deliveries = recipients.map((agentId) => ({ id: id("chat_delivery"), conversationId: key, messageId: message.id, rootMessageId: message.id, agentId, agentSnapshot: withRole(state.agents.find((row) => row.id === agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null }));
+      const deliveries = recipients.map((agentId) => ({ id: id("chat_delivery"), conversationId: key, messageId: message.id, rootMessageId: message.id, agentId, agentSnapshot: withRole(journal.get("agents", agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null }));
       state.communicationMessages.push(message); state.communicationDeliveries.push(...deliveries); thread.updatedAt = now(); save();
       return copy(message);
     },
     claimCommunication(key) {
-      const thread = conversation(key), queue = state.communicationDeliveries.filter((row) => row.conversationId === key && !["done", "cancelled"].includes(row.status));
+      const thread = conversation(key), queue = ['queued','claimed','running','failed'].flatMap(status=>journal.select('communicationDeliveries','status',status)).filter(row=>row.conversationId===key).sort((a,b)=>journal.entry('communicationDeliveries',a.id).position-journal.entry('communicationDeliveries',b.id).position);
       // FIFO per member; an unavailable member must not block other group members.
       for (const candidate of queue) if (["queued", "failed"].includes(candidate.status) && !members(thread).some(member => member.id === candidate.agentId && member.status === "active")) { candidate.status = "cancelled"; candidate.nextAttemptAt = null; event(candidate, "cancelled", "成员已离开或不可用，待回复取消"); save(); }
       const seen = new Set();
@@ -187,14 +200,14 @@ export function communicationCommands(state, save, employeeSnapshot) {
     },
     communicationContext(key, deliveryId) {
       const thread = conversation(key), item = delivery(key, deliveryId);
-      const all = state.communicationMessages.filter((row) => row.conversationId === key);
-      const cutoff = all.findIndex((row) => row.id === item.messageId);
+      const all = journal.select("communicationMessages", "conversationId", key, {idsOnly:true});
+      const cutoff = all.indexOf(item.messageId), current=journal.get('communicationMessages',item.messageId);
       const through = thread.sessions[item.agentId]?.inputThroughMessageId;
-      const previous = through ? all.findIndex(row => row.id === through) : cutoff - 1;
-      const messages = all.filter((row, index) => communicationVisibility(state, thread, row).includes(item.agentId) &&
-        (row.id === item.messageId || row.id === all[cutoff].replyToMessageId ||
-          (index > previous && index <= cutoff && row.sender.id !== item.agentId)));
-      return { conversation: summary(thread, true), messages: copy(messages), message: copy(all[cutoff]) };
+      const previous = through ? all.indexOf(through) : cutoff - 1;
+      const selected=new Set([...all.slice(previous+1,cutoff+1),item.messageId,current.replyToMessageId].filter(Boolean));
+      const messages = [...selected].map(id=>journal.get('communicationMessages',id)).filter(row=>row?.conversationId===key&&communicationVisibility(state,thread,row).includes(item.agentId)&&
+        (row.id===item.messageId||row.id===current.replyToMessageId||row.sender.id!==item.agentId)).sort((a,b)=>journal.entry('communicationMessages',a.id).position-journal.entry('communicationMessages',b.id).position);
+      return { conversation: summary(thread, true), messages: copy(messages), message: copy(current) };
     },
     prepareCommunicationSession(key, deliveryId, cwd) {
       const thread = conversation(key), item = delivery(key, deliveryId);
@@ -242,7 +255,7 @@ export function communicationCommands(state, save, employeeSnapshot) {
         // Each new addressed message queues a reply, even for a busy or previously
         // participating member. Completion is idempotent; claim owns per-member FIFO.
         for (const agentId of senderPresent ? mentionAgentIds : []) {
-          state.communicationDeliveries.push({ id: id("chat_delivery"), conversationId: key, messageId: message.id, rootMessageId, agentId, agentSnapshot: withRole(state.agents.find(row => row.id === agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null });
+          state.communicationDeliveries.push({ id: id("chat_delivery"), conversationId: key, messageId: message.id, rootMessageId, agentId, agentSnapshot: withRole(journal.get("agents", agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null });
         }
         event(item, "completed", "回复已保存"); save();
       });
@@ -259,7 +272,7 @@ export function communicationCommands(state, save, employeeSnapshot) {
     retryCommunication(key, deliveryId) {
       const item = delivery(key, deliveryId);
       if (item.status !== "failed") throw new Error("只能重试失败回复");
-      const current = state.agents.find((row) => row.id === item.agentId);
+      const current = journal.get("agents", item.agentId);
       if (!current || current.status !== "active" || !members(conversation(key)).some(member => member.id === current.id)) throw new Error("成员已离开群聊、停用或删除，不能重试");
       this.assertRuntimeEnabled(current.runtime);
       item.agentSnapshot = withRole(current);
@@ -271,26 +284,26 @@ export function communicationCommands(state, save, employeeSnapshot) {
       item.status = "cancelled"; item.updatedAt = now(); event(item, "cancelled", "人类取消待回复，消息和操作记录保留"); save();
     },
     recoverCommunications() {
-      for (const item of state.communicationDeliveries.filter((row) => row.status === "running")) {
+      for (const item of journal.select("communicationDeliveries", "status", "running")) {
         item.status = "queued"; item.updatedAt = now(); event(item, "recovered", "服务重启，恢复未完成回复");
       }
       save();
     },
-    pendingCommunications() { return [...new Set(state.communicationDeliveries.filter(row => row.status === "queued").map((row) => row.conversationId))]; },
+    pendingCommunications() { return [...new Set(journal.select("communicationDeliveries", "status", "queued").map((row) => row.conversationId))]; },
     getCommunicationConsole(key, { agentId, before = null, limit = 50 } = {}) {
-      const thread = conversation(key), deliveries = state.communicationDeliveries.filter(row => row.conversationId === key);
+      const thread = conversation(key), deliveries = persistence.communicationConsoleMembers(key).map(row=>journal.get('communicationDeliveries',row.id));
       const roster = new Map(members(thread).map(row => [row.id, { id: row.id, name: row.name }]));
-      for (const row of deliveries.filter(item => state.agents.some(agent => agent.id === item.agentId && agent.status !== "deleted"))) roster.set(row.agentId, { id: row.agentId, name: row.agentSnapshot.name, runtime: { provider: row.agentSnapshot.runtime.provider } });
-      const agents = [...roster.values()].map(row => ({ ...row, running: deliveries.some(item => item.agentId === row.id && item.status === 'running') }));
+      for (const row of deliveries.filter(item => {const agent=journal.get('agents',item.agentId);return agent&&agent.status!=='deleted';})) roster.set(row.agentId, { id: row.agentId, name: row.agentSnapshot.name, runtime: { provider: row.agentSnapshot.runtime.provider } });
+      const running=new Set(journal.select('communicationDeliveries','status','running').filter(row=>row.conversationId===key).map(row=>row.agentId));
+      const agents = [...roster.values()].map(row => ({ ...row, running: running.has(row.id) }));
       if (agentId && !roster.has(agentId)) throw new Error('控制台成员不属于当前会话');
-      const records = state.communicationEvents.filter(row => row.conversationId === key && (!agentId || row.agentId === agentId));
-      const byCall = new Map(), byDelivery = new Map(deliveries.map(row => [row.id, row]));
-      for (const row of records) { const key = callId(row); if (!byCall.has(key)) byCall.set(key, []); byCall.get(key).push(row); }
-      const result = page(records.filter(row => row.type !== 'prompt.snapshot'), before, limit);
-      const traces = records.filter(row => row.type === 'started').map(row => {
-        const own = byCall.get(callId(row));
+      const result = persistence.communicationEventPage(key,{agentId,before,limit,excludePrompts:true});
+      const calls=new Map(result.items.map(row=>[callId(row),row]));
+      const traces = [...calls.values()].flatMap(event => {
+        const own=persistence.communicationCallEvents(key,event.deliveryId,event.attempt),row=own.find(item=>item.type==='started');
+        if(!row)return [];
         const ending = own.findLast(item => ['completed', 'failed'].includes(item.type));
-        const item = byDelivery.get(row.deliveryId), invocation = item?.invocations?.find(item => item.attempt === row.attempt);
+        const item = journal.get('communicationDeliveries',row.deliveryId), invocation = item?.invocations?.find(item => item.attempt === row.attempt);
         const active = item?.attempts === row.attempt && item.status === 'running';
         return { id: callId(row), agentId: row.agentId, type: '沟通调用', startedAt: row.createdAt, status: ending?.type === 'failed' ? 'failed' : ending ? 'completed' : active ? 'running' : 'interrupted',
           providerSessionId: invocation?.providerSessionId || null, sessionMode: invocation?.sessionMode || null, agent: { runtime: { provider: invocation?.provider } },
@@ -302,13 +315,14 @@ export function communicationCommands(state, save, employeeSnapshot) {
     },
     getCommunicationContentReference(key, eventId, { prompt = false } = {}) {
       conversation(key);
-      const row = state.communicationEvents.find(item => item.conversationId === key && (prompt ? callId(item) === eventId && item.type === 'prompt.snapshot' : item.id === eventId && item.data?.auditVersion === 2));
+      const call=prompt?/^(.+)_([1-9]\d*)$/.exec(eventId):null;
+      const row=prompt?(call?persistence.communicationCallEvents(key,call[1],Number(call[2])).find(item=>item.type==='prompt.snapshot'):null):journal.get('communicationEvents',eventId);
       const reference = row?.data?.contentRef;
-      if (!reference || !reference.storagePath.startsWith(`communications/${key}/.agentforge/`)) throw new Error('沟通执行内容不存在或不属于当前会话');
+      if (!reference || row.conversationId!==key || (!prompt&&row.data?.auditVersion!==2) || !reference.storagePath.startsWith(`communications/${key}/.agentforge/`)) throw new Error('沟通执行内容不存在或不属于当前会话');
       return copy(reference);
     },
     getCommunicationEvents(key, deliveryId, { before = null, limit = 100 } = {}) {
-      delivery(key, deliveryId); return page(state.communicationEvents.filter((row) => row.conversationId === key && row.deliveryId === deliveryId), before, limit);
+      delivery(key, deliveryId); return persistence.communicationEventPage(key,{deliveryId,before,limit});
     }
   };
 }

@@ -34,11 +34,11 @@ func tile(_ context: CGContext, _ rect: CGRect) {
     context.saveGState()
     context.addPath(CGPath(roundedRect: rect, cornerWidth: rect.width * 0.205, cornerHeight: rect.height * 0.205, transform: nil))
     context.clip()
-    // The supplied edge has partial alpha and detached flecks. Use a clean
-    // rounded mask over a dark matte, never a white plate or white stroke.
+    // Keep the complete supplied composition inside the standard rounded tile.
+    // The matte only fills any transparency in the owner-supplied source.
     context.setFillColor(CGColor(srgbRed: 0.02, green: 0.04, blue: 0.16, alpha: 1))
     context.fill(rect)
-    context.draw(image, in: rect.insetBy(dx: -rect.width * 0.006, dy: -rect.height * 0.006))
+    context.draw(image, in: rect)
     context.restoreGState()
 }
 render("application-ui.png", 1024) { tile($0, CGRect(x: 0, y: 0, width: 1024, height: 1024)) }

@@ -93,3 +93,11 @@ automations.test.mjs 验证触发标题的当地时分秒、延迟执行仍取�
 插件/MCP 数据库目录由 extension-catalog.test.mjs 覆盖服务端分页、字面搜索、软删除、事务回滚、重启与私密正文不落目录表；marketplace/plugin-updates/configuration-cli 测试覆盖员工解绑、更新与 CLI 分页契约。隔离 UI/API/CLI 验收使用 scripts/test-market-catalog.mjs 与 scripts/test-marketplace-edit.mjs。
 
 task-attachments.test.mjs 覆盖附件原字节、归属、澄清续接、重启、摘要篡改/路径/大小拒绝，以及长任务执行读取不重复展开员工提示词和审计。
+
+性能回归覆盖：实体增量写入/嵌套回滚/懒加载身份、历史水位重启、SQL 日志与共享投影一致、协作跨页问题/答复/投递/验收、流附件篡改/超限、缩略图并发、执行额度公平/取消、文件指纹失效、模型缓存刷新、诊断队列超载/保留及客户端字节 LRU。大样本与实际客户端复测见 docs/development/performance-audit-2026-11-06.md；合成数据不替代真实 Provider 任务至人类验收。
+
+派工拒收回归：dispatch-routing 使用明确标注的受控 CLI 检查单人四字段、错误反馈、一次纠正、重复失败/重启/人工续接、混合指令原子拒收、错误咨询及原文件保留；task-parallel 检查单双形式一致、空值拒绝与幂等。真实模型验证见 test-task-collaboration-real，故障注入与模型实际执行分别记录。
+
+`state-journal.test.mjs` 同时覆盖当前领域数据以快照形式保存时的首次物化：空/部分脏日志、首次事务失败保留原快照，以及已有安装 ID 的 Store 冷启动、列表/详情一致与冻结 Run 历史两次重启不变。
+
+协作发送滚动的真实 DOM 回归在 `AGENTFORGE_COLLABORATION_SCROLL_ONLY=1 node scripts/test-collaboration-flow.mjs`：宽窄窗口、两条待澄清问题、历史页回复、底部连续回复、HTTP 失败保留草稿/位置及“最新”定位。使用暂停 Run 的真实回复端点并核对无 Trace；settings/smoke 的轻量 DOM 夹具补齐 querySelector 和动画帧接口，仅验证原有呈现契约。

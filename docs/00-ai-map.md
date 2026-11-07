@@ -74,7 +74,7 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 
 - 历史与后续答疑：local-cli.mjs 为 Codex 的平台历史 MCP 完整传递 Bridge 自有环境（打包版 Electron Node 标记）并设为 required，不改变 Provider 自身环境。app.js 协作流渲染全部消息及关联派工、协调事实，移除固定验收副本和停止答疑按钮；styles.css 缩小人类气泡。安装包协议测试与 test-prompt-e2e 的 PACKAGED 模式覆盖真实历史调用和完成后答疑；CLI/状态机/历史可见性不变。
 
-- 应用标志：web/icons/application.png 保留用户提供的蓝紫 A 原图字节；scripts/build-app-icon.cjs 只用 sips/iconutil 生成 ICNS 尺寸。侧栏/Dock/安装包同源，菜单栏用原图彩色缩略图；无浏览器、新依赖或业务权限，移除过时三柱 SVG。
+- 应用标志：web/icons/application.png 保留用户提供的蓝紫 A 原图字节；scripts/build-app-icon.cjs 以 Swift/CoreGraphics 保留完整构图并生成圆角与透明留白，sips/iconutil 生成 ICNS 尺寸。侧栏/Dock/安装包同源，菜单栏使用原生单色模板；无浏览器、新依赖或业务权限，移除过时三柱 SVG。
 
 - 紧凑工作台：团队/工作流在 app.js 搜索后分页，任务归档/新建在搜索行；共享/compact 样式上移目录操作。tracePromptMarkup 展示完整脱敏提示词及已确认原生会话 ID；工具仅按 Trace/原生调用 ID 归并重复阶段，单次调用内重复输入只显示一次，不同调用即使参数相同也保留各自输入输出，无 ID 不猜测。人类协作元信息与正文气泡分离；侧栏/安装包同源图标。CLI 字段不变，扩展隔离帮助同步。
 
@@ -125,7 +125,7 @@ Runtime 设置入口：固定两项与 Store enabled 门禁见 docs/15，宿主�
 
 目录空态统一由 `web/styles.css` 的 `.directory-empty` 维护，跨满列表/卡片行并对齐左右边缘，内边距14px 16px；沟通选择器跟随其列表宽度。实时同步移至登录信息旁，窄侧栏保留可访问的状态圆点，顶栏不重复。仅呈现变化，无 CLI/API 协议影响。
 
-应用标志更新为用户最新提供的铺满画布版本，PNG 原样保留（SHA-256 `46bb3c5165723bba5f63f070de19647fa6c6385366579d0d9a9a9bb1277e937e`），侧栏、Dock 与菜单栏共用；macOS 包图标从同源 PNG 生成 ICNS，不改变主题配色或 CLI/API。
+应用标志更新为用户最新提供的 1536×1536 蓝紫渐变版本，PNG 原样保留（SHA-256 `530b81a4b34e489a9886d289c27151d1359fa2d8ebc3118c8d3c89adf46f38c9`），侧栏、Dock 与安装包使用同源派生图；菜单栏保留原生单色 A 模板，macOS 包图标从同源 PNG 生成 ICNS，不改变主题配色或 CLI/API。
 
 长任务排查：`server/runtime/local-cli.mjs` 区分 Claude 原生后台等待与活动轮次空闲；`server/prompts.mjs` 维护必要业务上下文及增量投递；`web/app.js` 的控制台按事件更新并在摘要刷新时保留阅读 DOM。
 
@@ -212,3 +212,13 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 输入卡片预览区的图片和文件统一48px高，图片保持比例；共享实现位于 `web/styles.css`，协作与沟通一致。
 
 角色扩展：store/communication-store 冻结合并，runtime/marketplace 解析，index/App/CLI同步选择契约；tests/extension-catalog.test.mjs 覆盖合并去重、解绑与冻结历史。自动化级联删除：automations/index/run-files；tests/automations.test.mjs、scripts/test-automations.mjs。固定高度多选及统一表单滚动：web/marketplace.mjs、web/app.js、web/styles.css。
+
+## 有界数据路径
+
+性能架构见 [docs/28](28-performance-architecture.md)，审查与复测见 [性能报告](development/performance-audit-2026-11-06.md)。持久写：`server/state-journal.mjs` → `persistence.mjs` 实体增量事务；历史：`server/history/index.mjs` 提交水位；资源准入：`server/execution-budget.mjs`（任务/沟通共享）；文件摘要：`server/file-fingerprints.mjs`；缩略图：`server/attachment-thumbnails.mjs`；异步诊断：`server/diagnostic-writer.mjs`；客户端字节缓存：`client/byte-cache.mjs`。目录分页/compact/协作游标契约由 Store/HTTP 所有，App 和 CLI 共用。
+
+派工协议纠错：orchestrator 将单人 instruction 归一为 assignments → Store 原子定向投递；协议拒收由 Store.rejectDispatchRouting 保留原报告/文件、失败 Trace 和 routingError，在同一会话内一次纠正，重复失败转人工续接。验收遇到其他工作时延后，deferredRevisit 不阻塞员工报告或反复调用。见 docs/03、22；tests/dispatch-routing、task-parallel 与 test-task-collaboration-real 验证。
+
+已有快照首次进入实体存储：`persistence.save` 在同一事务完整物化未初始化集合，再剥离快照数组；`tests/state-journal.test.mjs` 覆盖干净/部分脏日志、失败回滚及已有实例列表/详情与重启一致。
+
+协作回复后的滚动：`web/app.js` 的 `renderCollaboration` 统一捕获/恢复阅读位置；`sendInstruction` 成功后退出历史页并请求最新页，“最新”按钮使用同一跟随规则。定向宽窄隔离验收使用 `AGENTFORGE_COLLABORATION_SCROLL_ONLY=1 node scripts/test-collaboration-flow.mjs`，包含真实澄清回复与发送失败保留阅读位置；无 Provider 调用或 CLI 协议变化。

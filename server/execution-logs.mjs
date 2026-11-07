@@ -36,7 +36,7 @@ export function executionLogs(state, { source = "all", level = "all", before = n
   for (const event of state.communicationEvents) {
     const thread = conversations.get(event.conversationId), delivery = deliveries.get(event.deliveryId);
     if (!thread) continue;
-    append(event, { source: thread.kind === "team" ? "group" : "private", runId: null, taskId: null, name: thread.name, agentId: event.agentId, conversationId: thread.id, deliveryId: event.deliveryId, attempt: event.attempt, currentStatus: delivery?.status || null, nextAttemptAt: delivery?.nextAttemptAt || null });
+    append(event, { source: ['team','group'].includes(thread.kind) ? "group" : "private", runId: null, taskId: null, name: thread.name, agentId: event.agentId, conversationId: thread.id, deliveryId: event.deliveryId, attempt: event.attempt, currentStatus: delivery?.status || null, nextAttemptAt: delivery?.nextAttemptAt || null });
   }
   rows.sort((a, b) => b.timestamp.localeCompare(a.timestamp) || b.id.localeCompare(a.id));
   const start = before ? rows.findIndex(row => row.id === before) + 1 : 0;

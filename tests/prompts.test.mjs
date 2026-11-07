@@ -16,6 +16,18 @@ const taskInput = () => ({
   workspace: { traces: [], pendingQuestions: [], decisions: [], artifacts: [] }, messages: [], roster: [{ id: 'worker', name: '员工' }], mode: 'node', delivery: { messageIds: [], attempts: 1 }, session: { resume: false }
 });
 
+test('routing feedback is explicit current input, not a stale error or a role message', () => {
+  const input = taskInput();
+  input.delivery = { ...input.delivery, lastErrorKind:'routing', lastError:'EXACT_REJECTION', routingError:{traceId:'rejected-trace',message:'EXACT_REJECTION'} };
+  const correction = taskPrompt(input);
+  assert.equal(correction.prompt.match(/EXACT_REJECTION/g).length, 1);
+  assert.match(correction.prompt,/rejected-trace/); assert.match(correction.prompt,/不要重复已完成的业务操作/);
+  assert.deepEqual(input.messages, []);
+  delete input.delivery.routingError;
+  const resolved = taskPrompt(input);
+  assert.doesNotMatch(resolved.prompt,/EXACT_REJECTION|协调纠错反馈/);
+});
+
 test('workflow is manager-only system context; environment and persona never enter current input', () => {
   const input = taskInput(), worker = taskPrompt(input);
   assert.match(worker.systemPrompt, /PERSONA_RULE|任务工作目录：\/work/);
@@ -73,7 +85,7 @@ test('explicit manager selection is not overridden by static Task node assignmen
   const store = createFixtureStore(), run = store.createRun(store.listTasks()[0].id);
   store.updateRun(run.id, { status: 'running' });
   assert.equal(store.getRunTask(run.id).nodeAssignments.requirements, 'agent_analyst');
-  scheduleManagerFollowup(store, run.id, { id: 'manager-turn', traceIds: [] }, { nextNodeId: 'requirements', nextAgentId: 'agent_tester', rationale: '本轮选择具备能力的另一成员' });
+  scheduleManagerFollowup(store, run.id, { id: 'manager-turn', recipientAgentId: run.manager.id, traceIds: [] }, { nextNodeId: 'requirements', nextAgentId: 'agent_tester', rationale: '本轮选择具备能力的另一成员' });
   assert.equal(store.listDispatches(run.id).at(-1).recipientAgentId, 'agent_tester');
   store.close();
 });

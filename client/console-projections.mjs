@@ -1,6 +1,15 @@
 // Browser-safe view models shared by Web and desktop hosts. These functions only
 // project already-authoritative API payloads; they never own domain state.
 
+// Server pages are in stable archive order. Keep adjacent pages together up to
+// a fixed window; a missed live page must not silently bridge a history gap.
+export function consoleEventWindow(current, incoming, { older = false, limit = 200 } = {}) {
+  const currentIds = new Set(current.map(event => event.id));
+  const reset = !older && current.length > 0 && incoming.length > 0 && !incoming.some(event => currentIds.has(event.id));
+  const rows = [...new Map((older ? [...incoming, ...current] : [...(reset ? [] : current), ...incoming]).map(event => [event.id, event])).values()];
+  return { events: older ? rows.slice(0, limit) : rows.slice(-limit), trimmedBefore: !older && rows.length > limit, reset };
+}
+
 // Validate JSON, then format its original tokens: parsing and re-stringifying
 // would silently round large integers in tool output. Never interpret HTML.
 export function consoleContentTokens(value, { json = true, truncated = false } = {}) {
@@ -345,6 +354,7 @@ export function roleExecutionStatus(run = {}, traces = [], agentId) {
     .map((trace, index) => ({ trace, index }))
     .sort((a, b) => (Date.parse(a.trace.startedAt || a.trace.createdAt) || 0) - (Date.parse(b.trace.startedAt || b.trace.createdAt) || 0) || a.index - b.index)
     .map(item => item.trace);
+  const traceCount=run.traceCounts?.[agentId]??agentTraces.length;
   const latest = agentTraces.at(-1), terminal = terminalRunStatuses.has(run.status);
   const activeTrace = (!terminal || run.status === "failed") && latest?.status === "running" ? latest : null;
   const failed = !activeTrace && latest?.status === "failed";
@@ -352,9 +362,9 @@ export function roleExecutionStatus(run = {}, traces = [], agentId) {
   return {
     active: Boolean(activeTrace), activeTrace, failed,
     state: activeTrace ? "running" : failed ? "error" : "idle",
-    traceCount: agentTraces.length,
+    traceCount,
     label: activeTrace ? `● 执行中 · ${activeTrace.workflowNodeId}`
-      : `${failed ? "● 错误" : `○ ${terminalLabel || "空闲"}`} · ${agentTraces.length} 条 Trace`,
+      : `${failed ? "● 错误" : `○ ${terminalLabel || "空闲"}`} · ${traceCount} 条 Trace`,
   };
 }
 
@@ -597,8 +607,8 @@ export function collaborationRecords(workspace = {}) {
         if (!previous || time(file.createdAt) >= time(previous.createdAt)) latestFiles.set(file.name, file);
       }
       const files = [...latestFiles.values()].filter(item => !item.deleted && item.storagePath);
-      anchor.fileCount = files.length;
-      anchor.files = files.slice(-8).map(({ id, name }) => ({ id, name }));
+      anchor.fileCount = workspace.acceptanceFiles?.[event.id]?.count ?? files.length;
+      anchor.files = workspace.acceptanceFiles?.[event.id]?.files ?? files.slice(-8).map(({ id, name }) => ({ id, name }));
       acceptances.push({ timestamp: event.timestamp, recordId: anchor.id });
     } else {
       if (event.type === "run.completed") {

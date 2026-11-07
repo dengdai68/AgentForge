@@ -344,7 +344,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             effortStatus.textContent = cleared;
             effortStatus.hidden = !cleared;
           }
-          async function loadCatalog() {
+          async function loadCatalog(refresh=false) {
             if (!profile.installed) { syncModel(); return; }
             // Sequence every request: a response that returns after the user
             // collapsed the section or refreshed is stale and must never
@@ -353,7 +353,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             catalog.state = 'loading'; catalog.error = ''; syncModel();
             const provider = profile.provider;
             try {
-              const data = await api(`/api/settings/runtime-profiles/models?provider=${encodeURIComponent(provider)}`);
+              const data = await api(`/api/settings/runtime-profiles/models?provider=${encodeURIComponent(provider)}${refresh?'&refresh=true':''}`);
               if (!form.isConnected || request !== catalog.request) return;
               catalog.data = data; catalog.state = 'ok';
             } catch (error) {
@@ -363,7 +363,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             syncModel(); syncEffort();
           }
           void loadCatalog();
-          card.querySelector('[data-refresh-models]').addEventListener('click', () => { catalog.state = 'idle'; loadCatalog(); });
+          card.querySelector('[data-refresh-models]').addEventListener('click', () => { catalog.state = 'idle'; loadCatalog(true); });
           modelInput.addEventListener('input', () => { showModels(); syncEffort(); });
           syncModel();
           syncEffort();
@@ -538,7 +538,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             <h3>运行日志</h3><p class="settings-description">任务、私聊、群聊与本机服务的详细诊断写入本机文件，此处只显示路径。</p>
             <p class="settings-note">找不到 CLI 时，在日志文件中搜索 provider.launch_diagnostic：包含实际 PATH、目录与可执行文件检查，以及逐项排查建议。原始错误在同次调用的 provider.spawn_error / provider.stderr 中。</p><dl class="runtime-details"><div><dt>日志目录</dt><dd data-log-directory style="overflow-wrap:anywhere;user-select:text">正在读取…</dd></div><div><dt>当前服务日志</dt><dd data-log-file style="overflow-wrap:anywhere;user-select:text">正在读取…</dd></div></dl>
             <button class="small-button" data-logs-refresh>刷新路径</button><p data-log-status role="status">正在读取…</p>
-            <p class="settings-note">JSONL 格式，保留错误原文、堆栈、进程退出信息及脱敏诊断输出。每进程独立文件，10 MiB 分卷，不自动删除旧卷；默认位于 ~/.agentforge/logs/&lt;实例标识&gt;，由操作者手工清理。请在运行服务的机器上打开此路径，分享日志前检查敏感内容。旧版本未保存的错误无法恢复。</p>
+            <p class="settings-note">JSONL 格式，保留错误原文、堆栈、进程退出信息及脱敏诊断输出。每进程独立文件，10 MiB 分卷；当前实例的旧诊断文件按 256 MiB 总量、30 天保留期限清理，当前分卷保留。默认位于 ~/.agentforge/logs/&lt;实例标识&gt;。请在运行服务的机器上打开此路径，分享日志前检查敏感内容。旧版本未保存的错误无法恢复。</p>
           </section>
           <p class="settings-save-status" data-preferences-status role="status">外观和展示偏好自动保存在当前客户端。</p>
           <section class="settings-section" data-settings-panel="appearance" aria-labelledby="appearance-title">

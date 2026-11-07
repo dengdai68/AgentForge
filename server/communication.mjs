@@ -1,3 +1,5 @@
+import { executionBudget } from "./execution-budget.mjs";
+import { registerExecution } from "./runtime/registry.mjs";
 import { mkdir, writeFile, realpath } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
@@ -11,7 +13,11 @@ const replySchema = {type:"object",additionalProperties:false,properties:{reply:
 export function createCommunicationService(store, { root, invoke, files } = {}) {
   const active = new Map();
   async function execute(key, item) {
+      const controller=new AbortController();let release;
+      const unregister=registerExecution(`communication:${key}:${item.agentSnapshot?.id}:admission`,{terminate:reason=>controller.abort(new Error(reason))},key);
       try {
+        release=await executionBudget(store).acquire({owner:key,provider:item.agentSnapshot?.runtime?.provider,signal:controller.signal,onWaiting:()=>store.appendCommunicationEvent(key,item.id,{providerEventType:'resource.waiting',message:'等待实例执行资源',data:{presentation:'system'}})});
+        unregister();
         if (!item.available) throw new Error("被 @ 的成员已离开群聊、停用或删除");
         const group = store.getCommunication(key, { limit: 1 }).conversation.kind === "group";
         const schema = group ? { ...replySchema, properties: { ...replySchema.properties, mentionAgentIds: { type: "array", items: { type: "string" } } }, required: ["reply", "mentionAgentIds"] } : replySchema;
@@ -57,9 +63,11 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
         store.completeCommunication(key, item.id, reply, group ? parsed.mentionAgentIds : []);
         diagnostic("communication.completed");
       } catch (error) {
+        // Shutdown leaves admitted work recoverable; it is not a Provider failure.
+        if (error.name === 'AbortError') return;
         diagnostic("communication.failed", { error });
         store.failCommunication(key, item.id, redactExternalText(error.message || "回复失败"), error instanceof RuntimeSessionMissingError);
-      }
+      } finally {unregister();release?.();}
   }
   function pump(key) {
     let workers = active.get(key);

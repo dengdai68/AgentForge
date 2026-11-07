@@ -9,7 +9,7 @@ import { collaborationRecords } from '../client/console-projections.mjs';
 
 function parse(argv) {
   const args = [], flags = {};
-  const switches = new Set(['help', 'yes', 'all', 'password-stdin', 'json', 'archived', 'start']);
+  const switches = new Set(['help', 'yes', 'all', 'password-stdin', 'json', 'archived', 'start', 'refresh']);
   const values = new Set(['file', 'session-file', 'username', 'page', 'search', 'endpoint-file', 'status', 'run', 'workflow', 'role']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -42,6 +42,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     else if (operation === 'models') { if (args.length !== 3 || !['claude-code', 'codex', 'dsh'].includes(id)) throw usage('models 需要 Provider 参数：claude-code、codex 或 dsh'); }
     else if (args.length !== 2) throw usage('此命令不接受额外参数');
     if (['create', 'update', 'import', 'auto-update'].includes(operation)) allowed.push('file');
+    if (group === 'runtimes' && operation === 'models') allowed.push('refresh');
     if (operation === 'list') allowed.push('page', 'all', 'search');
     if (group === 'agents' && operation === 'list') allowed.push('role');
     if (['delete', 'terminate', 'test'].includes(operation)) allowed.push('yes');
@@ -79,7 +80,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     const input=await readInput(flags.file,stdin);validateInput(input,resource.operationInputs[operation].schema);
     return client.request(`${path}/updates/settings`,{method:'PUT',body:input});
   }
-  if (group === 'runtimes' && operation === 'models') return client.request(`${path}/models?provider=${id}`);
+  if (group === 'runtimes' && operation === 'models') return client.request(`${path}/models?provider=${id}${flags.refresh?'&refresh=true':''}`);
   let resourceId = id;
   const readList = async () => {
     const result = await client.request(path);
@@ -89,10 +90,24 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     return result;
   };
   const get = async () => {
+    if(['agents','roles','teams','workflows'].includes(group)){const result=await client.request(`${path}/${id}`);const item=result[({agents:'agent',roles:'role',teams:'team',workflows:'workflowTemplate'})[group]];if(!item)throw new CliError('NOT_FOUND','配置不存在','使用精确 ID。',4);return {item:group==='agents'?{...item,runtime:keyFields(item.runtime||{},['profileId','extensionSelection'])}:group==='teams'?{...keyFields(item,['id','name','mission','status','memberAgentIds','createdAt']),members:(item.members||[]).map(({id,name})=>({id,name}))}:item,result};}
     const result = await readList(), item = result[resource.key].find(item => item.id === id || group === 'runtimes' && (item.provider === id || ({codex: 'Codex', 'claude-code': 'Claude Code', dsh: 'DeepSeek Harness'})[item.provider] === id));
     if (!item) throw new CliError('NOT_FOUND', '配置ID不存在', '运行对应list，使用返回的精确ID，不猜名称。', 4);
     resourceId = item.id; return { item, result };
   };
+  if (operation === 'list' && ['agents','roles','teams','workflows'].includes(group)) {
+    const query=new URLSearchParams({page:String(page),search:flags.search||''});
+    if(group==='agents' && flags.role) {
+      const {roles}=await client.request('/api/catalog-references');
+      const exact=roles.find(item=>item.id===flags.role), matches=roles.filter(item=>item.name===flags.role);
+      if(!exact&&matches.length!==1)throw new CliError(matches.length?'AMBIGUOUS_REFERENCE':'NOT_FOUND','角色名称无法唯一定位','用 roles list 查询角色 ID。',4);
+      query.set('role',exact?.id||matches[0].id);
+    }
+    const result=await readDirectoryPages(client,path,resource.key,query,flags.all);
+    if(group==='teams')result.items=result.items.map(item=>({...keyFields(item,['id','name','mission','status','memberAgentIds','createdAt']),members:(item.members||[]).map(({id,name})=>({id,name}))}));
+    if(group==='agents')result.items=result.items.map(item=>({...item,runtime:keyFields(item.runtime||{},['profileId','extensionSelection'])}));
+    return result;
+  }
   if (operation === 'list' && ['plugins','mcps'].includes(group)) {
     const query = new URLSearchParams({page:String(page),search:flags.search || ''});
     const readPage = async () => {
@@ -143,6 +158,13 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
   return client.request(`${path}${operation === 'update' ? '/' + resourceId : ''}`, { method: operation === 'update' ? 'PUT' : 'POST', body: input });
 }
 
+async function readDirectoryPages(client,path,key,query,all) {
+  const result=await client.request(`${path}?${query}`),{[key]:items,...pagination}=result;
+  if(!Array.isArray(items)||!Number.isSafeInteger(result.totalPages))throw new CliError('RESPONSE_UNCERTAIN','目录分页响应无法确认','检查 CLI 与服务版本。',5);
+  if(all){for(let page=result.page+1;page<=result.totalPages;page++){query.set('page',String(page));items.push(...(await client.request(`${path}?${query}`))[key]);}pagination.page=null;pagination.pageSize=null;pagination.hasMore=false;}
+  return {items,...pagination};
+}
+
 const reference = (id, name) => id ? { id, name: name || null } : null;
 function taskView(task, { summary = false } = {}) {
   const base = { id: task.id, title: task.title, status: task.status, workflow: {id: task.workflowTemplateId || null, name: task.workflowSnapshot?.name || "默认协作"}, memberCount: task.memberAgentIds?.length || (task.memberSnapshots?.length || 0) + (task.managerSnapshot ? 1 : 0), updatedAt: task.updatedAt, archivedAt: task.archivedAt };
@@ -184,24 +206,18 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
   }
   if (operation === 'list') {
     if (flags.status && !['backlog','planning','running','awaiting_human','review','awaiting_acceptance','paused','blocked','failed','done','cancelled'].includes(flags.status)) throw usage('任务状态无效，请查看 tasks list --help');
-    const { tasks, workflowTemplates = [] } = await client.request('/api/bootstrap');
-    if (!Array.isArray(tasks)) throw new CliError('RESPONSE_UNCERTAIN', '任务列表响应无法确认', '检查服务版本后重新查询。', 5);
-    let workflowId;
-    if (flags.workflow) {
-      const candidates = [...workflowTemplates, ...tasks.map(task => ({ id: task.workflowTemplateId, name: task.workflowSnapshot?.name }))].filter(item => item.id);
-      const exact = candidates.find(item => item.id === flags.workflow);
-      const matches = [...new Set(candidates.filter(item => item.name === flags.workflow).map(item => item.id))];
-      if (!exact && matches.length !== 1) throw new CliError(matches.length ? 'AMBIGUOUS_REFERENCE' : 'NOT_FOUND', matches.length ? '工作流名称不唯一，请使用 ID' : '工作流不存在', '用 workflows list 或 tasks list 查询工作流 ID。', 4);
-      workflowId = exact?.id || matches[0];
+    const query=new URLSearchParams({page:String(page),search:flags.search||'',status:flags.status||'',archived:String(Boolean(flags.archived))});
+    if(flags.workflow){
+      const refs=await client.request('/api/catalog-references'), candidates=[...refs.workflowTemplates,...refs.taskWorkflows];
+      const exact=candidates.find(item=>item.id===flags.workflow), matches=[...new Set(candidates.filter(item=>item.name===flags.workflow).map(item=>item.id))];
+      if(!exact&&matches.length!==1)throw new CliError(matches.length?'AMBIGUOUS_REFERENCE':'NOT_FOUND','工作流名称无法唯一定位','用 workflows list 或 tasks list 查询 ID。',4);
+      query.set('workflow',exact?.id||matches[0]);
     }
-    return paginate(tasks.filter(task => (flags.archived ? Boolean(task.archivedAt) : !task.archivedAt)
-      && (!flags.search || task.title.toLocaleLowerCase().includes(flags.search.trim().toLocaleLowerCase()))
-      && (!flags.status || task.status === flags.status)
-      && (!workflowId || task.workflowTemplateId === workflowId)).sort((left, right) => Date.parse((flags.archived ? right.archivedAt : right.updatedAt) || 0) - Date.parse((flags.archived ? left.archivedAt : left.updatedAt) || 0)).map(task => taskView(task, { summary: true })));
+    const result=await readDirectoryPages(client,'/api/tasks','tasks',query,flags.all);
+    return {...result,items:result.items.map(task=>taskView(task,{summary:true}))};
   }
   if (operation === 'get') {
-    const { tasks } = await client.request('/api/tasks');
-    const task = tasks?.find(task => task.id === id);
+    const {task} = await client.request(`/api/tasks/${id}`);
     if (!task) throw new CliError('NOT_FOUND', '任务ID不存在', '用 tasks list 返回的精确ID查询。', 4);
     return taskView(task);
   }
@@ -209,10 +225,9 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     const { run } = await client.request(`/api/tasks/${id}/run`, { method: 'POST', body: {} });
     return { run: runReceipt(run) };
   }
-  const bootstrap = await client.request('/api/bootstrap');
-  const task = bootstrap.tasks?.find(task => task.id === id);
-  if (!task) throw new CliError('NOT_FOUND', '任务ID不存在', '用 tasks list 返回的精确ID查询。', 4);
-  const run = bootstrap.runs?.find(run => run.taskId === id && (!flags.run || run.id === flags.run));
+  const {task}=await client.request(`/api/tasks/${id}`);
+  if(!task)throw new CliError('NOT_FOUND','任务ID不存在','用 tasks list 查询精确ID。',4);
+  const run=task.runs?.find(run=>!flags.run||run.id===flags.run);
   if (!run && flags.run) throw new CliError('NOT_FOUND', '所选执行不属于此任务或不存在', '用 tasks progress 查看最新执行，不使用其他任务的 Run ID。', 4);
   if (!run && input) throw new CliError('RUN_REQUIRED', '任务尚未启动，无法发送协作消息', '先运行 agentforge tasks start 任务ID。', 4);
   if (operation === 'terminate') {
@@ -220,7 +235,17 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     const result = await client.request(`/api/runs/${run.id}/terminate`, { method: 'POST', body: { reason: '用户通过 CLI 终止任务' } });
     return { taskId: id, run: runReceipt(result.run) };
   }
-  const workspace = run ? await client.request(`/api/runs/${run.id}/workspace?view=summary`) : { run: null, pendingQuestions: [], traces: [], dispatches: [], artifacts: [], messages: [] };
+  if(run && ['collaboration','artifacts'].includes(operation)) {
+    const query=new URLSearchParams({limit:'20'});let result,items=[],current=1;
+    do {
+      result=await client.request(`/api/runs/${run.id}/${operation}?${query}`);
+      if(flags.all||current===page)items.push(...(operation==='collaboration'?result.items.slice().reverse().map(({tone,statusCode,...record})=>record):result.items));
+      if(!result.hasMore||!flags.all&&current>=page)break;
+      query.set('before',result.nextBefore);current++;
+    }while(true);
+    return {taskId:id,runId:run.id,items,total:result.total,page:flags.all?null:current,pageSize:flags.all?null:20,hasMore:!flags.all&&result.hasMore};
+  }
+  const workspace = run ? await client.request(`/api/runs/${run.id}/workspace?view=compact`) : { run: null, pendingQuestions: [], traces: [], dispatches: [], artifacts: [], messages: [] };
   if(operation==='members') {
     if(!run)throw new CliError('RUN_REQUIRED','任务尚未启动，暂不能修改执行成员','先启动任务。',4);
     if(flags.file){const patch=await readInput(flags.file,stdin);validateInput(patch,resources.tasks.operationInputs.members.schema);return client.request(`/api/runs/${run.id}/members`,{method:'PUT',body:patch});}
@@ -233,17 +258,14 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     if (paths.length + attachmentIds.length > 10) throw usage('每条消息最多 10 个附件');
     delete input.attachmentPaths;
     for (const path of paths) {
-      const file = await open(path, 'r'); let bytes;
+      const file=await open(path,'r');let stream;
       try {
-        const info = await file.stat();
-        if (!info.isFile() || info.size > 20*1024*1024) throw usage('附件必须是单个普通文件且不超过 20 MiB');
-        const chunks = []; let size = 0;
-        for await (const chunk of file.createReadStream({autoClose:false})) { size += chunk.length; if (size > 20*1024*1024) throw usage('附件超过 20 MiB'); chunks.push(chunk); }
-        bytes = Buffer.concat(chunks);
-      } finally { await file.close(); }
-      const name = path.split(/[\\/]/).at(-1);
-      const uploaded = await client.request(`/api/runs/${run.id}/attachments?name=${encodeURIComponent(name)}`, {method:'POST',body:Buffer.from(bytes)});
-      attachmentIds.push(uploaded.attachment.id);
+        const info=await file.stat();if(!info.isFile()||info.size>20*1024*1024)throw usage('附件必须是单个普通文件且不超过 20 MiB');
+        const name=path.split(/[\\/]/).at(-1);
+        stream=file.createReadStream({autoClose:false});
+        const uploaded=await client.request(`/api/runs/${run.id}/attachments?name=${encodeURIComponent(name)}`,{method:'POST',body:stream});attachmentIds.push(uploaded.attachment.id);
+      }finally{stream?.destroy();await file.close();}
+
     }
     if (attachmentIds.length) input.attachmentIds = attachmentIds;
     const result = await client.request(`/api/runs/${run.id}/messages`, { method: 'POST', body: input });

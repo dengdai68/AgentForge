@@ -1,6 +1,8 @@
 import { mkdir, lstat, readFile, writeFile, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { join, resolve, dirname, basename, relative } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { fileFingerprint } from '../file-fingerprints.mjs';
 import { parseMcpJson, createRuntimeConfiguration } from './configuration.mjs';
 import { diagnosticRedactor,diagnostic } from '../diagnostics.mjs';
 import { pluginExecutionPlan, parsePluginMarkdown, COMPATIBILITY_VERSION } from './plugin-compatibility.mjs';
@@ -39,8 +41,8 @@ async function tree(root, copyTo, sourceRoot = root) {
     if(!info.isFile()) throw fail(rel,'不支持套接字、管道或设备等特殊文件，请移出插件后重试');
     bytes += info.size;
     if (bytes > 128*1024*1024 || files.length >= 8192) throw new Error('插件超过 128 MB 或 8192 个文件');
-    const content=await readFile(actual);files.push([rel,digest(content)]);
-    if(copyTo) await writeFile(join(copyTo,rel),content,{flag:'wx',mode:info.mode&0o100?0o700:0o600});
+    if(copyTo) {const content=await readFile(actual);files.push([rel,digest(content)]);await writeFile(join(copyTo,rel),content,{flag:'wx',mode:info.mode&0o100?0o700:0o600});}
+    else files.push([rel,await fileFingerprint(actual)]);
   }
   await visit(root,'',new Set()); return digest(JSON.stringify(files));
 }
@@ -180,7 +182,11 @@ export function selectionIds(value) {
     return [key,[...value[key]]];
   }));
 }
-export async function readExtensionFile(ref) {
+const validationScope=new AsyncLocalStorage();
+export function withExtensionValidation(work){return validationScope.getStore()?work():validationScope.run(new Map(),work);}
+function validated(key,work){const cache=validationScope.getStore();if(!cache)return work();if(!cache.has(key))cache.set(key,Promise.resolve().then(work));return cache.get(key);}
+export function readExtensionFile(ref){return validated('file:'+JSON.stringify(ref),()=>verifyExtensionFile(ref));}
+async function verifyExtensionFile(ref) {
   try {
     const info=await lstat(ref.path);
     if(!info.isFile() || info.isSymbolicLink() || info.size>128*1024 || await realpath(ref.path)!==ref.path) throw new Error(`扩展清单不是有效的普通文件：${ref.path}`);
@@ -201,7 +207,8 @@ export async function readExtensionFile(ref) {
     throw error;
   }
 }
-export async function readPluginExecutionPlan(ref) {
+export function readPluginExecutionPlan(ref){return validated('plan:'+JSON.stringify(ref),()=>verifyPluginExecutionPlan(ref));}
+async function verifyPluginExecutionPlan(ref) {
   await readExtensionFile(ref);
   if(![2,COMPATIBILITY_VERSION].includes(ref.adapterVersion)) throw new Error('插件执行计划版本不支持');
   const root=dirname(dirname(ref.path));
@@ -213,6 +220,14 @@ export async function readPluginExecutionPlan(ref) {
 export function createMarketplace(root) {
   const configuredRoot=resolve(root);
   let managedRoot=configuredRoot, directory=join(managedRoot,'marketplace'), pluginDirectory=join(managedRoot,'installed-plugins'), canonicalRoot=null;
+  let locationStamp=null,locations=new Map(),locationWork;
+  async function locationIndex(){
+    const info=await lstat(pluginDirectory,{bigint:true}),stamp=[info.dev,info.ino,info.mtimeNs,info.ctimeNs].join(':');
+    if(stamp===locationStamp)return locations;
+    if(locationWork)return locationWork;
+    locationWork=(async()=>{const entries=await batches();locations=new Map(entries.map(item=>[item.kind+':'+item.id,item.directory]));locationStamp=stamp;return locations;})();
+    try{return await locationWork;}finally{locationWork=null;}
+  }
   async function batches() {
     const result=[];
     for(const id of (await readdir(pluginDirectory)).filter(uuid).sort()) {
@@ -239,7 +254,7 @@ export function createMarketplace(root) {
   }
   async function read(id, kind, installedDirectory) {
     if(!uuid(id)) throw new Error('扩展版本 ID 无效'); await ensure();
-    const location=installedDirectory || (await batches()).find(item=>item.id===id && item.kind===kind)?.directory || join(kind==='plugin'?pluginDirectory:directory,id);
+    const location=installedDirectory || (await locationIndex()).get(kind+':'+id) || join(kind==='plugin'?pluginDirectory:directory,id);
     const file=join(location,'entry.json');
     try {
       if(await realpath(file)!==file || (await lstat(file)).size>2*1024*1024) throw new Error();
@@ -249,7 +264,8 @@ export function createMarketplace(root) {
     } catch { throw new Error('已安装版本不可读取；请重新安装，不自动转换旧扩展协议'); }
   }
   const reference = (entry,provider) => ({id:entry.id,kind:entry.kind,name:entry.name,path:join(entry.directory || join(entry.kind==='plugin'?pluginDirectory:directory,entry.id),entry.kind==='plugin'?'plugin/.claude-plugin/plugin.json':'mcp.json'),sha256:entry.sha256,...(entry.protocol===3?{adapterVersion:1}:{}),...(entry.treeSha256?{treeSha256:entry.treeSha256,skills:entry.components.skills.map(item=>item.path)}:{}),...(entry.originalTreeSha256?{sourceRoot:join(entry.directory,'source'),sourceSha256:entry.originalTreeSha256}:{}),...(provider && entry.kind==='mcp'?{mcpAdapterVersion:2}:{}),...(provider && entry.plans?.[provider]?{adapterVersion:COMPATIBILITY_VERSION,planTarget:provider,sourceDialect:entry.plans[provider].plan.sourceDialect,planSha256:entry.plans[provider].digest}:{})});
-  async function currentCompatibility(entry) {
+  function currentCompatibility(entry){return validated('compatibility:'+entry.id,()=>parseCompatibility(entry));}
+  async function parseCompatibility(entry) {
     if(entry.kind==='mcp') {
       parseMcpJson(await readFile(reference(entry).path,'utf8'));
       return {...entry,providers:['claude-code','codex','dsh']};
@@ -436,19 +452,19 @@ export function createMarketplace(root) {
       const content=JSON.stringify(configuration,null,2), id=entryId || randomUUID(), entry={protocol:location?3:2,id,kind:'mcp',name:input.name.trim(),description:input.description.trim(),createdAt:new Date().toISOString(),providers:['claude-code','codex','dsh'],sha256:digest(content),visibility:'market'};
       await ensure();const target=location || join(directory,id);await mkdir(target,{recursive:true,mode:0o700});await writeFile(join(target,'mcp.json'),content,{flag:'wx',mode:0o600});await writeFile(join(target,'entry.json'),JSON.stringify(entry),{flag:'wx',mode:0o600});return location?entry:summary(entry);
     },
-    async resolveRole(selection) {
+    resolveRole(selection) { return withExtensionValidation(async()=>{
       const selected=selectionIds(selection);
       const entries=await Promise.all(['plugin','mcp'].flatMap(kind=>selected[kind==='plugin'?'pluginIds':'mcpIds'].map(id=>read(id,kind))));
       const providers=['claude-code','codex','dsh'].filter(provider=>entries.every(item=>item.providers.includes(provider)));
       if(!providers.length)throw new Error('所选角色扩展没有共同兼容的 Runtime');
       const extensionBindings=Object.fromEntries(await Promise.all(providers.map(async provider=>[provider,await this.resolve(selected,provider)])));
       return {extensionSelection:selected,extensionBindings};
-    },
+    }); },
     async resolveRoleReplacements(roles,replacements) {
       const maps=Object.fromEntries(['plugin','mcp'].map(kind=>[kind,new Map(replacements.filter(item=>(item.kind || 'plugin')===kind).map(item=>[item.previousId,item.id]))]));
       return Promise.all(roles.filter(role=>['plugin','mcp'].some(kind=>role.extensionSelection?.[kind==='plugin'?'pluginIds':'mcpIds']?.some(id=>maps[kind].has(id)))).map(async role=>({roleId:role.id,previousSelection:role.extensionSelection,...await this.resolveRole(Object.fromEntries(['plugin','mcp'].map(kind=>{const key=kind==='plugin'?'pluginIds':'mcpIds';return [key,[...new Set(role.extensionSelection[key].map(id=>maps[kind].get(id)||id))]];})))})));
     },
-    async resolve(selection,provider) {
+    resolve(selection,provider) { return withExtensionValidation(async()=>{
       const selected=selectionIds(selection), extensionManifest=[], names=new Set();
       for(const kind of ['plugin','mcp']) for(const id of selected[kind==='plugin'?'pluginIds':'mcpIds']) {
         const entry=await currentCompatibility(await read(id,kind));
@@ -465,6 +481,6 @@ export function createMarketplace(root) {
         extensionManifest.push(ref);
       }
       return {extensionSelection:selected,extensionManifest,skillPaths:extensionManifest.filter(ref=>ref.kind==='plugin').flatMap(ref=>ref.skills.map(path=>join(dirname(dirname(ref.path)),path))),pluginPaths:provider==='claude-code'?extensionManifest.filter(ref=>ref.kind==='plugin').map(ref=>dirname(dirname(ref.path))):[],mcpConfigPaths:extensionManifest.filter(ref=>ref.kind==='mcp').map(ref=>ref.path),pluginSources:[]};
-    }
+    }); }
   };
 }

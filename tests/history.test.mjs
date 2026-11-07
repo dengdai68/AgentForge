@@ -76,7 +76,7 @@ test("compact history metadata migrates old indexes and rolls back visibility/co
     state.communicationConversations[0].name="after";
     assert.throws(()=>h.historyQuery(peer,"read_context",{recordId:"compact-message"}),/compact rollback/);
     assert.equal(inspection.prepare("SELECT body FROM records WHERE key=?").get("compact-message").body,"原内容");
-    assert.equal(inspection.prepare("SELECT count(*) AS n FROM visibility WHERE record=?").get(before).n,state.agents.length);
+    assert.equal(inspection.prepare("SELECT count(*) AS n FROM visibility WHERE record=?").get(before).n,0,'known-employee visibility is checked at the query boundary, without a record × employee matrix');
     inspection.exec("DROP TRIGGER reject_compact");
     assert.equal(h.historyQuery(peer,"read_context",{recordId:"compact-message"}).content,"更新内容");
     assert.equal(h.historyQuery(employee,"read_context",{recordId:"compact-message"}).content,"更新内容");
@@ -350,4 +350,20 @@ test("reserved server name cannot be overridden and concurrent MCP invocations d
       }finally{await client.close();}
     })));
   }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('durable history watermark updates only new records and resumes after restart',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'af-history-watermark-')),databasePath=join(root,'state.sqlite');
+  let store=createStore({databasePath}),inspection;
+  try{
+    const chat=privateChat(store);send(store,chat.id,'first');query(store,'list_sessions');
+    inspection=new DatabaseSync(databasePath+'.history.sqlite');
+    inspection.exec("CREATE TRIGGER no_old_rewrite BEFORE UPDATE ON records BEGIN SELECT RAISE(ABORT,'unchanged history rewritten'); END");
+    const first=inspection.prepare('SELECT count(*) n FROM records').get().n;
+    send(store,chat.id,'second');assert.equal(query(store,'read_conversation',{conversationId:chat.id}).items.length,2);
+    assert.equal(inspection.prepare('SELECT count(*) n FROM records').get().n,first+1);
+    assert.ok(inspection.prepare('SELECT revision FROM history_watermark').get().revision>0);
+    store.close();store=createStore({databasePath});assert.equal(query(store,'read_conversation',{conversationId:chat.id}).items.length,2);
+    send(store,chat.id,'third');assert.equal(query(store,'read_conversation',{conversationId:chat.id}).items.length,3);
+  }finally{store.close();inspection?.close();await rm(root,{recursive:true,force:true});}
 });

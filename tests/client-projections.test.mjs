@@ -1,7 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { consoleContentTokens, editDiff, isShellTool, shellCommandText, shellTokens, toolCommandSummary, toolEditInput, toolFileInput, workingDirectoryIcon } from "../client/console-projections.mjs";
+import { consoleContentTokens, consoleEventWindow, editDiff, isShellTool, shellCommandText, shellTokens, toolCommandSummary, toolEditInput, toolFileInput, workingDirectoryIcon } from "../client/console-projections.mjs";
+
+test("console history keeps adjacent content, bounds both directions and never bridges a missed page", () => {
+  const rows = (from, to) => Array.from({ length: to - from }, (_, i) => ({ id: `event-${from + i}`, timestamp: '2026-11-07T00:00:00.000Z' }));
+  let window = consoleEventWindow(rows(250, 300), rows(200, 250), { older: true });
+  assert.deepEqual(window.events, rows(200, 300), 'older prompt does not remove the current text and tool results');
+  for (const start of [150, 100, 50]) window = consoleEventWindow(window.events, rows(start, start + 50), { older: true });
+  assert.deepEqual(window.events, rows(50, 250), 'old pages evict the newest tail at the 200-event boundary');
+  window = consoleEventWindow(window.events, rows(225, 275));
+  assert.equal(window.trimmedBefore, true);
+  assert.deepEqual(window.events, rows(75, 275), 'live overlap is deduplicated in stable server order even with equal timestamps');
+  window = consoleEventWindow(window.events, rows(500, 550));
+  assert.equal(window.reset, true);
+  assert.deepEqual(window.events, rows(500, 550), 'missing live pages reset coverage instead of joining unrelated windows');
+  assert.deepEqual(consoleEventWindow([], rows(600, 650)).events, rows(600, 650), 'return to latest starts from a fresh server page');
+});
 
 test("tool command summaries restate redacted input and never invent fragments", () => {
   assert.equal(toolCommandSummary("Bash", '{"command":"ls \\"/Users/a b/Library\\""}'), 'ls "/Users/a b/Library"');

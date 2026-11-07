@@ -1,10 +1,11 @@
 import { initializeWorkspaceGit, workspaceGitStatus, workspaceGitDiff, sourceControlPath, discoverWorkspaceRepositories, cloneComparisonBase } from "./workspace-git.mjs";
 import { createHash, randomUUID } from "node:crypto";
+import { fileFingerprint } from './file-fingerprints.mjs';
 import { execFile } from "node:child_process";
 import { diagnostic, diagnosticRedactor } from "./diagnostics.mjs";
 import { constants } from "node:fs";
 import { promisify } from "node:util";
-import { copyFile, lstat, mkdir, open, readFile, readdir, rm, stat, writeFile, appendFile, rename, mkdtemp } from "node:fs/promises";
+import { copyFile, lstat, mkdir, open, readFile, readdir, rm, stat, writeFile, appendFile, rename, mkdtemp, unlink } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const DEFAULT_MAX_FILES = 5000;
@@ -275,7 +276,7 @@ async function walk(root, current, entries, restrictedEntries, limits, excludedR
       await recordRestrictedEntry(root, filePath, restrictedEntries, limits);
       continue;
     }
-    entries.set(fileRelativePath, { hash: await digest(filePath), bytes: info.size });
+    entries.set(fileRelativePath, { hash: await fileFingerprint(filePath), bytes: info.size });
   }
 }
 
@@ -359,6 +360,21 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
   if (resolveGitCredential !== null && typeof resolveGitCredential !== "function") throw new Error("Git 授权解析器必须是函数");
   const runRoot = resolve(root);
   const limits = { maxFiles, maxFileBytes };
+  const directoryCache=new Map();let directoryCacheBytes=0;
+  async function directoryEntries(folder) {
+    const stamp=info=>[info.dev,info.ino,info.mtimeNs,info.ctimeNs].join(':');
+    const before=stamp(await lstat(folder,{bigint:true})),old=directoryCache.get(folder);
+    if(old?.stamp===before && old.expires>Date.now()){directoryCache.delete(folder);directoryCache.set(folder,old);return old.entries;}
+    if(old){directoryCache.delete(folder);directoryCacheBytes-=old.bytes;}
+    const entries=(await readdir(folder,{withFileTypes:true})).filter(child=>!privateWorkspaceEntry(child.name)&&!child.isSymbolicLink()&&(child.isDirectory()||child.isFile())).sort((a,b)=>Number(b.isDirectory())-Number(a.isDirectory())||a.name.localeCompare(b.name));
+    const bytes=entries.reduce((total,entry)=>total+Buffer.byteLength(entry.name)+96,0);
+    if(bytes<=4*1024*1024 && stamp(await lstat(folder,{bigint:true}))===before){
+      directoryCache.set(folder,{stamp:before,entries,bytes,expires:Date.now()+1000});directoryCacheBytes+=bytes;
+      while(directoryCacheBytes>4*1024*1024||directoryCache.size>128){const key=directoryCache.keys().next().value;directoryCacheBytes-=directoryCache.get(key).bytes;directoryCache.delete(key);}
+    }
+    return entries;
+  }
+
 
   const runIdSegment = (runId) => {
     if (typeof runId !== "string" || !runId || runId === "." || runId === ".." || runId.includes("/") || runId.includes("\\") || runId.includes("\0")) throw new Error("Run ID 不合法");
@@ -420,6 +436,21 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     return current;
   }
   const communicationDirectory = (key, parts = []) => { communicationPath(key); return privateDirectory(['communications', key, ...parts]); };
+  async function writeAttachment(directory,id,name,input) {
+    const file=await open(join(directory,name),'wx',0o600),hash=createHash('sha256');let bytes=0;
+    try {
+      for await(const chunk of Buffer.isBuffer(input)?[input]:input){
+        bytes+=chunk.length;if(bytes>DEFAULT_MAX_FILE_BYTES)throw Object.assign(new Error('附件最大 20 MiB'),{code:'ATTACHMENT_TOO_LARGE'});
+        hash.update(chunk);await file.writeFile(chunk);
+      }
+      return {id,name,path:`attachments/${id}/${name}`,bytes,sha256:hash.digest('hex')};
+    } catch(error){await rm(directory,{recursive:true,force:true});throw error;}finally{await file.close();}
+  }
+  function attachmentStoragePath(scope,key,record) {
+    if(scope==='runs')pathForRun(key);else if(scope==='communications')communicationPath(key);else throw new Error('附件范围无效');
+    attachmentName(record.name);if(!/^attachment_[a-f0-9-]{36}$/.test(record.id)||record.path!==`attachments/${record.id}/${record.name}`)throw new Error('附件路径无效');
+    return `${scope}/${key}/${record.path}`;
+  }
   const attachmentName = name => {
     if (typeof name !== 'string' || !name.trim() || ['.', '..'].includes(name) || /[/\\\0]/.test(name) || Buffer.byteLength(name) > 240) throw new Error('附件文件名无效：不能包含路径，最多 240 字节');
     return name;
@@ -478,10 +509,9 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     },
     async writeRunAttachment(runId, name, content) {
       pathForRun(runId); attachmentName(name);
-      if (!Buffer.isBuffer(content) || content.length > DEFAULT_MAX_FILE_BYTES) throw new Error('附件最大 20 MiB');
+      if (!Buffer.isBuffer(content) && !content?.[Symbol.asyncIterator]) throw new Error('附件内容无效');
       const id = `attachment_${randomUUID()}`, directory = await privateDirectory(['runs', runId, 'attachments', id]);
-      await writeFile(join(directory, name), content, {mode:0o600, flag:'wx'});
-      return {id, name, path:`attachments/${id}/${name}`, bytes:content.length, sha256:createHash('sha256').update(content).digest('hex')};
+      return writeAttachment(directory,id,name,content);
     },
     async readRunAttachment(runId, record) {
       this.runAttachmentPath(runId, record);
@@ -495,10 +525,27 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     },
     async writeCommunicationAttachment(key, name, content) {
       attachmentName(name);
-      if (!Buffer.isBuffer(content) || content.length > DEFAULT_MAX_FILE_BYTES) throw new Error('附件最大 20 MiB');
+      if (!Buffer.isBuffer(content) && !content?.[Symbol.asyncIterator]) throw new Error('附件内容无效');
       const id = `attachment_${randomUUID()}`, directory = await communicationDirectory(key, ['attachments', id]);
-      await writeFile(join(directory, name), content, { mode: 0o600, flag: 'wx' });
-      return { id, name, path: `attachments/${id}/${name}`, bytes: content.length, sha256: createHash('sha256').update(content).digest('hex') };
+      return writeAttachment(directory,id,name,content);
+    },
+    async validateAttachment(scope,key,record) {
+      const file=await artifactFile(runRoot,attachmentStoragePath(scope,key,record));
+      if(!file.info.isFile()||file.info.size!==record.bytes||file.info.size>DEFAULT_MAX_FILE_BYTES||await fileFingerprint(file.path)!==record.sha256)throw new Error('附件完整性校验失败');
+    },
+    async openAttachment(scope,key,record) {
+      const file=await artifactFile(runRoot,attachmentStoragePath(scope,key,record));
+      if(!file.info.isFile()||file.info.size!==record.bytes||file.info.size>DEFAULT_MAX_FILE_BYTES)throw new Error('附件完整性校验失败');
+      const source=await open(file.path,constants.O_RDONLY|constants.O_NOFOLLOW);let temporary;
+      try {
+        const info=await source.stat();if(info.dev!==file.info.dev||info.ino!==file.info.ino)throw new Error('附件完整性校验失败');
+        const directory=await privateDirectory(['.transfers']),path=join(directory,randomUUID());
+        temporary=await open(path,'wx+',0o600);await unlink(path);
+        const hash=createHash('sha256'),buffer=Buffer.allocUnsafe(64*1024);let bytes=0,head=Buffer.alloc(0);
+        while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,null);if(!bytesRead)break;bytes+=bytesRead;if(bytes>DEFAULT_MAX_FILE_BYTES)throw new Error('附件最大 20 MiB');const chunk=buffer.subarray(0,bytesRead);if(!head.length)head=Buffer.from(chunk.subarray(0,64));hash.update(chunk);await temporary.writeFile(chunk);}
+        if(bytes!==record.bytes||hash.digest('hex')!==record.sha256)throw new Error('附件完整性校验失败');
+        const stream=temporary.createReadStream({start:0,autoClose:true});temporary=null;return {stream,bytes,head};
+      }finally{await source.close();await temporary?.close();}
     },
     async discardCommunicationAttachment(key, record) {
       await this.readCommunicationAttachment(key, record);
@@ -595,7 +642,7 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       if(path){workspaceRelative(path);if(path.split('/').some(privateWorkspaceEntry))throw new Error('不能读取内部或敏感文件');}
       const folder=path?await workspaceFile(task.workspacePath,path):await workspaceRoot(task.workspacePath);
       if(!(await lstat(folder)).isDirectory())throw new Error('所选路径不是目录');
-      const children=(await readdir(folder,{withFileTypes:true})).filter(child=>!privateWorkspaceEntry(child.name) && !child.isSymbolicLink() && (child.isDirectory() || child.isFile())).sort((a,b)=>Number(b.isDirectory())-Number(a.isDirectory()) || a.name.localeCompare(b.name));
+      const children=await directoryEntries(folder);
       const entries=[];
       for(const child of children.slice(offset,offset+DIRECTORY_PAGE_SIZE)){
         const childPath=path?`${path}/${child.name}`:child.name;

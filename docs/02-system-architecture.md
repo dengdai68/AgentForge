@@ -104,3 +104,9 @@ Orchestrator 每轮按 removedParticipantIds 过滤当前派工名单；已有�
 插件/MCP 当前目录归 Store/SQLite；Runtime 只准备不可变文件并返回摘要。HTTP 在同一 Store 事务中登记目录、替换绑定与软删除旧版本。列表用数据库分页，详情/实际绑定按条读取 Runtime 文件；自动更新从数据库取活跃目录。见 docs/15 与 docs/07。
 
 长任务调度按需读取：getRunExecutionContext 只投影最近18个 Trace 状态、未结束投递、基线所需文件摘要、最近30条巡检消息和待答问题/决策；源消息和输入游标单独查询，不展开 UI 工作区或全量运行事件。工作目录/Artifact HTTP 查询同样使用 getRunTask/getRunArtifact。原生上下文压缩告警不等同于应用编排 RangeError；不同 runId 的日志按运行归属排查。
+
+## 有界读写与资源准入
+
+采用 [性能架构决策](28-performance-architecture.md)：Store 用可回滚实体变更集，SQLite 原子保存变化实体及水位，提交后通知；历史正文按需加载。目录服务端分页、协作消息游标分页，renderer 不加载全部历史再切页。任务/沟通共用实例总并发及 Provider 子额度，公平排队、取消与释放均属编排层；10 秒检测通过小批次触发异步执行。诊断 Worker、文件流及字节缓存管理资源，不新增领域状态所有者或第二数据库服务。
+
+协调拒收属于 Store 状态：单人与多人派工归一到同一原子命令，Orchestrator 不吞掉拒收异常。实际报告/文件与路由是否生效分别记录；routingError 将具体原因带回原成员当前输入，最多一次自动格式纠正，重复拒收转 failed，外部错误仍人工恢复。合法验收因其他执行/排队未结束而延后，不算协议错误；延后投递不阻塞其依赖的报告。详见 docs/03、22。

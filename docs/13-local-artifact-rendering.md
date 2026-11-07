@@ -39,3 +39,9 @@ Artifact 内容使用冻结 SHA-256 与字节信息验证；错误不冒充为�
 当前文件与 CHANGE 左侧目录树仅展示文件/目录及必要操作，移除空目录、展开后读取、无更改、仓库基准等提示段落及 CHANGE 解释副标题；实际读取错误移至树外，比较基准保留在右侧预览头部。仅展示变更，无 CLI/API 协议变化。
 
 任务协作附件保存于 runs/<runId>/attachments/<attachmentId>/<原文件名>，与交付快照分开。POST /api/runs/:id/attachments?name=... 接收 application/octet-stream，最多20 MiB；GET /api/runs/:id/attachments/:attachmentId 下载，?preview=1 仅允许按实际文件签名识别的位图。写入逐层拒绝符号链接与非法文件名，读取检查归属/大小/sha256，登记失败清理本次文件。任务删除复用 Run Files 暂存删除流程。
+
+## 文件查询预算
+
+摘要复用以设备/inode/大小/mode/mtimeNs/ctimeNs 为失效依据；读取前后校验，变化内容以 4 路流式哈希。Git 仓库发现缓存目录指纹和稳定比较基线，工具 Hook 合并并保留重扫；普通目录分页复用最多 1 秒的排序结果，目录变化即失效。新文件、删除、克隆登记和提交后差异仍检查实际工作树。
+
+任务/沟通附件上传下载使用有界流；原件下载经匿名临时快照完整验证后发送。图片列表使用 144 px 缩略图，点击全屏才读取原件；私有 ETag 必须通过归属和完整性校验。缩略图是可丢弃派生数据，不进入 SQLite/Artifact。像素/队列/缓存限制见 [docs/28](28-performance-architecture.md)。

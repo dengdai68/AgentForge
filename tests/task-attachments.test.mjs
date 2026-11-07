@@ -44,7 +44,7 @@ test('task uploads reject oversized, path traversal and symlink storage',async t
  const {root,run,files}=await fixture(t);
  for(const name of ['../secret','a/b','..',''])await assert.rejects(files.writeRunAttachment(run.id,name,Buffer.from('x')));
  await assert.rejects(files.writeRunAttachment(run.id,'large',Buffer.alloc(20*1024*1024+1)),/20 MiB/);
- const external=join(root,'external');await mkdir(external);await mkdir(join(root,'files','runs',run.id),{recursive:true});await symlink(external,join(root,'files','runs',run.id,'attachments'));
+ const external=join(root,'external');await mkdir(external);await mkdir(join(root,'files','runs',run.id),{recursive:true});await rm(join(root,'files','runs',run.id,'attachments'),{recursive:true,force:true});await symlink(external,join(root,'files','runs',run.id,'attachments'));
  await assert.rejects(files.writeRunAttachment(run.id,'x',Buffer.from('x')),/符号链接/);
 });
 test('long-run scheduling reads bounded facts without expanding employee prompts or audit history',async t=>{

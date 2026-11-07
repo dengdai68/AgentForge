@@ -149,14 +149,15 @@
       "path": "scripts/build-app-icon.cjs",
       "kind": "developer-tooling",
       "owner": "client-platform",
-      "purpose": "Preserve the owner PNG master; macOS Swift/CoreGraphics generates clean UI, inset Dock and 1x/2x monochrome menu-bar assets, then sips/iconutil builds matching ICNS. No browser, network or package dependency; optional developer tooling, not a release prerequisite.",
+      "purpose": "Preserve the owner PNG master and its complete composition without overscan; macOS Swift/CoreGraphics generates clean UI, inset Dock and 1x/2x monochrome menu-bar assets, then sips/iconutil builds matching ICNS. No browser, network or package dependency; optional developer tooling, not a release prerequisite.",
       "sourceOfTruth": [
         "docs/18-electron-client.md",
         "web/icons/README.md"
       ],
       "tests": [
         "tests/electron.test.mjs",
-        "scripts/test-packaged-electron.mjs"
+        "scripts/test-packaged-electron.mjs",
+        "scripts/test-brand-presentation.mjs"
       ],
       "allowedDependencies": [
         "node:*",
@@ -226,7 +227,8 @@
       "membershipContract": "Only the Run coordinator ID receives manager/workflow rules. Private replies stay reply-only; independent groups carry explicit mentionAgentIds and per-message peer delivery with per-member FIFO.",
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
       "communicationPrompt": "Keep chat entry and discussion/file-change boundary; remove fixed language and enumerated Git/publish/credential, self/manager and attachment reminder sentences.",
-      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
+      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries."
     },
     {
       "id": "cli.configuration",
@@ -473,7 +475,7 @@
     },
     {
       "id": "apps.electron",
-      "iconSource": "Unchanged owner master (SHA-256 46bb3c5165723bba5f63f070de19647fa6c6385366579d0d9a9a9bb1277e937e) generates a clean UI tile, an 824/1024 Dock tile and matching ICNS; separate 18/36px monochrome menu-bar templates follow native light/dark appearance.",
+      "iconSource": "Unchanged owner master (SHA-256 530b81a4b34e489a9886d289c27151d1359fa2d8ebc3118c8d3c89adf46f38c9) generates a clean UI tile, an 824/1024 Dock tile and matching ICNS; separate 18/36px monochrome menu-bar templates follow native light/dark appearance.",
       "brandPresentation": "Desktop Runtime and repository settings use compact secondary divider groups. Brand tokens for actions/state; saturated distinct violet/cyan/amber/green/blue generated avatars with white glyphs. All directories share directory-empty: full list/card-row width, zero margin, 14px 16px padding, one dashed token border and six-pixel radius; search, loading and failures remain distinct. Live sync moves from topbar to account footer with accessible compact narrow status. Fixed provider rows use enable switches and initially collapsed native inline disclosures with only model and effort; subordinate heading typography, six visible model options with continuous pointer traversal, capitalized display labels and exact raw values. Compact same-row model/effort, close-mode choices and repository token/actions; one normal Runtime hint, matched 4px popup gaps with pointer traversal.",
       "workbenchPolish": "Task topbar and same-row actions align with searchable Team/Workflow directories. Compact directory toolbar is 44px; the owner-supplied ribbon A master generates a clean sidebar tile and a 100/1024-inset Dock image/ICNS; a separate 18pt/2x monochrome A template follows native menu-bar appearance. Roles navigation supplies the same identity-badge SVG mask as the renderer icon, avoiding an unmasked solid square; shared preferences own visibility. No host/API expansion. Task search/actions and inventory container share both horizontal edges with 8px vertical separation, including empty search and archives; no duplicate full-panel horizontal inset.",
       "communicationWorkbench": "Shared authenticated attachments and half-width conversation console with compact spacing only; browser file input and HTTP, no general IPC. Isolated packaged and real-source acceptance protect operator instance data. Raster preview uses native renderer dialog and HTTP, no new IPC; trigger table compact minimum matches shared 820px.",
@@ -753,21 +755,23 @@
       "employeeTypeContract": "Current kind accepts only business/manager and repository writes reject. Explicit employee edits drop retired repository metadata; no startup migration or reset. New Tasks freeze no repository sources/bindings and use the shared Run root. Existing frozen repository snapshots keep their original preparation/cwd facts.",
       "membershipContract": "Tasks freeze independent memberAgentIds with exactly one active manager; no teamId input. Teams are employee collections and need no manager. Employee deletion marks status=deleted/deletedAt, hides current directories and detaches current memberships; frozen in-flight tasks/history remain. See docs/03-domain-model.md.",
       "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action.",
-      "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten."
+      "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
+      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries."
     },
     {
       "id": "server.sqlite-persistence",
       "path": "server/persistence.mjs",
       "kind": "runtime",
       "owner": "server",
-      "purpose": "Load persisted event JSON/position comparison baselines so restart saves avoid unchanged row rewrites while detecting in-place startup migration; atomically save metadata plus incremental immutable event rows, retain rollback and legacy snapshot replacement without changing Store contracts.",
+      "purpose": "Own atomic entity/event/catalog persistence, lazy row loading and SQL read models. Materialize every snapshot-backed collection before stripping its snapshot representation, even with a clean or partially dirty journal; advance collection baselines only after commit and retain frozen facts across restart.",
       "sourceOfTruth": [
         "docs/07-sqlite-persistence.md",
         "docs/02-system-architecture.md"
       ],
       "tests": [
         "tests/smoke.test.mjs",
-        "tests/extension-catalog.test.mjs"
+        "tests/extension-catalog.test.mjs",
+        "tests/state-journal.test.mjs"
       ],
       "allowedDependencies": [
         "node:sqlite",
@@ -1016,11 +1020,13 @@
           "output validation"
         ]
       },
-      "missingManagerDecision": "A manager reply without a decision/nextNodeId uses the existing routing correction dispatch, preserving the report and requesting an explicit decision rather than silently draining the run or inferring acceptance from prose. Worker text handoffs and inquiry replies remain valid.",
-      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
+      "missingManagerDecision": "Missing or invalid coordination fields roll back routing and produce precise persisted feedback to the same member; one automatic protocol correction, then explicit human continuation. The model output file is not a dispatch receipt; business reports and files remain historical facts.",
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
+      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries."
     },
     {
       "id": "client.console-projections",
+      "boundedConsoleWindow": "Task and Communication merge adjacent event pages in stable server order, cap history at 200, retain window Trace metadata and visible row anchors, pause live following while reading history, and reload the latest page explicitly; missed live windows are not bridged.",
       "collaborationReadability": "Role-to-role Messages only; no system, dispatch or lifecycle event rows. Explicit saved references associate delivery/history metadata. Trace.inputMessageId and Message.startMessageId identify each invocation prompt; one console link loads and focuses that prompt across pagination. Native member sessions remain isolated. Failed tasks reject new messages; manual retry resumes the failed member with transient continue input. CLI shares message records without visual metadata.",
       "collaborationFlow": "Role-to-role Messages only; no system, dispatch or lifecycle event rows. Explicit saved references associate delivery/history metadata. Trace.inputMessageId and Message.startMessageId identify each invocation prompt; one console link loads and focuses that prompt across pagination. Native member sessions remain isolated. Failed tasks reject new messages; manual retry resumes the failed member with transient continue input. CLI shares message records without visual metadata.",
       "promptPresentation": "Full prompt rendering uses immutable redacted audit text. Tool phases pair by Trace and native call ID; distinct calls stay separate. Empty tool_progress summaries are hidden, real content remains.",
@@ -1068,7 +1074,7 @@
     },
     {
       "id": "web.console",
-      "iconSource": "Unchanged owner master (SHA-256 46bb3c5165723bba5f63f070de19647fa6c6385366579d0d9a9a9bb1277e937e) generates a clean UI tile, an 824/1024 Dock tile and matching ICNS; separate 18/36px monochrome menu-bar templates follow native light/dark appearance.",
+      "iconSource": "Unchanged owner master (SHA-256 530b81a4b34e489a9886d289c27151d1359fa2d8ebc3118c8d3c89adf46f38c9) generates a clean UI tile, an 824/1024 Dock tile and matching ICNS; separate 18/36px monochrome menu-bar templates follow native light/dark appearance.",
       "brandPresentation": "Desktop Runtime and repository settings use compact secondary divider groups. Brand tokens for actions/state; saturated distinct violet/cyan/amber/green/blue generated avatars with white glyphs. All directories share directory-empty: full list/card-row width, zero margin, 14px 16px padding, one dashed token border and six-pixel radius; search, loading and failures remain distinct. Live sync moves from topbar to account footer with accessible compact narrow status. Fixed provider rows use enable switches and initially collapsed native inline disclosures with only model and effort; subordinate heading typography, six visible model options with continuous pointer traversal, capitalized display labels and exact raw values. Compact same-row model/effort, close-mode choices and repository token/actions; one normal Runtime hint, matched 4px popup gaps with pointer traversal.",
       "collaborationReadability": "Role-to-role Messages only; no system, dispatch or lifecycle event rows. Explicit saved references associate delivery/history metadata. Trace.inputMessageId and Message.startMessageId identify each invocation prompt; one console link loads and focuses that prompt across pagination. Native member sessions remain isolated. Failed tasks reject new messages; manual retry resumes the failed member with transient continue input. CLI shares message records without visual metadata.",
       "collaborationFlow": "Role-to-role Messages only; no system, dispatch or lifecycle event rows. Explicit saved references associate delivery/history metadata. Trace.inputMessageId and Message.startMessageId identify each invocation prompt; one console link loads and focuses that prompt across pagination. Native member sessions remain isolated. Failed tasks reject new messages; manual retry resumes the failed member with transient continue input. CLI shares message records without visual metadata.",
@@ -1103,7 +1109,8 @@
         "scripts/test-task-creation.mjs",
         "scripts/test-communication-media.mjs",
         "scripts/test-task-drafts.mjs",
-        "scripts/test-market-catalog.mjs"
+        "scripts/test-market-catalog.mjs",
+        "scripts/test-collaboration-flow.mjs"
       ],
       "allowedDependencies": [
         "/api/*",
@@ -1136,7 +1143,7 @@
       "extensionPresentation": "Employee/plugin/MCP cards with same-row search and create/install actions; source-wide plugin installation, lazy component/redacted JSON details with confirmed deletion, and searchable multi-select employee chips. Cards/details/pickers label Claude/Codex support, component applicability and exact incompatibility reasons; Runtime switching preserves but rejects incompatible choices. Empty/loading/no-match/error states occupy a separate full-width region outside the card grid. Human collaboration and communication messages align right based on sender identity only; employees stay left without changing shared projection/CLI fields. Compatibility is static, not a claim of executed account/dependency validation. Removal rules and immutable history belong to Store. Plugin details use one bounded body scroller with sticky component tabs and fixed title/actions, including long overviews; employee/plugin/MCP cards reserve stable heading/description geometry with complete fields available in details/edit. Employee plugin/MCP pickers dismiss on mouse leave, form-outside pointerdown or focus leaving the combo; repeated input clicks reopen, keyboard and candidate traversal remain available, hidden option focus returns to input. Listeners belong to the form, not global per-open document handlers; HTTP/CLI/loading contracts are unchanged.",
       "cliPresentation": "CLI category always belongs to the client; unavailable host methods report a client error rather than selecting a browser product mode. Task workspace text does not select a Web/Desktop target.",
       "rolePresentation": "The BUILD group has a standalone Roles directory with the shared search toolbar, 20-per-page pagination and employee-card styling; role create/edit uses name plus plain-text prompt only; empty/no-match messages reuse the full-width MCP/plugin region outside the grid with only the toolbar create action; all three directories share theme surface-soft backgrounds and 6px corners, deletion shows reference errors in place, and the employee form offers an optional multi-role picker using the same inline-chip control as plugins and MCP, without priority UI. Cards use the avatar column so titles keep full width and show the role ID; same-name roles are distinguished by ID in the employee selector. Roles is registered in NAVIGATION for persisted visibility, empty-group hiding and default restore. Its currentColor SVG identity-badge icon remains legible across themes and narrow navigation without font glyphs; no CLI change.",
-      "incrementalReading": "Stable event/Trace rows append or update in place; workspace summary reconciliation preserves the current console subtree, hydrated content, selection and scroll. History pagination preserves the reading anchor.",
+      "incrementalReading": "Stable event/Trace rows append or update in place; workspace summary reconciliation preserves the current console subtree, hydrated content, selection and scroll. History pagination preserves the reading anchor. Collaboration panel replacements preserve scroll independently of full-workspace rendering, including send-start and send-finally. Successful replies leave historical browsing and follow the latest page; failed replies retain history, draft and reading position. The explicit latest action follows the same rule; no API/CLI changes.",
       "applicationUpdates": "One Settings/updates tab directly contains application and plugin configuration sections using the standard settings heading level, without a repeated Updates title. Application state/progress/actions are inline only; download percent follows the native progress bar on one unboxed row and the separate note is hidden while downloading; a compact GitHub text link follows the current version and survives status refreshes. Plugin settings preserve drafts and pause hidden-page polling. No notification cards, renderer URL/path arguments or CLI expansion.",
       "employeeMultiSelect": "marketplace.mjs createEmployeeMultiSelect is shared by roles/plugins/MCP: removable chips and searchable input share one field border, wrap inside it, and use continuous hover/focus/keyboard behavior; no role numbering or priority/reorder controls. HTTP/CLI binding arrays and frozen facts unchanged.",
       "employeeConfiguration": "Employee forms offer ordinary workers and managers only, without repository inputs; cards do not show a developer/bound-repository badge. Chat renders direct replies without handoff labels; saved history is not rewritten.",
@@ -1650,6 +1657,197 @@
         "reviewIf": [
           "release permissions",
           "checksum validation"
+        ]
+      }
+    },
+    {
+      "id": "server.state-journal",
+      "path": "server/state-journal.mjs",
+      "kind": "runtime",
+      "owner": "server",
+      "purpose": "Track entity mutations, incremental indexes and rollback journals without cloning the complete workspace. No business decisions.",
+      "sourceOfTruth": [
+        "docs/28-performance-architecture.md",
+        "docs/07-sqlite-persistence.md"
+      ],
+      "tests": [
+        "tests/state-journal.test.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*"
+      ],
+      "forbiddenDependencies": [
+        "HTTP",
+        "Provider"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "server/README.md",
+          "docs/28-performance-architecture.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "persistence",
+          "rollback"
+        ]
+      }
+    },
+    {
+      "id": "client.byte-cache",
+      "path": "client/byte-cache.mjs",
+      "kind": "runtime",
+      "owner": "client-platform",
+      "purpose": "Bound resource usage with explicit lifecycle, cancellation and size budgets; preserve execution and presentation semantics.",
+      "sourceOfTruth": [
+        "docs/28-performance-architecture.md"
+      ],
+      "tests": [
+        "tests/byte-cache.test.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*"
+      ],
+      "forbiddenDependencies": [
+        "business quality decisions"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/28-performance-architecture.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "memory",
+          "cancellation"
+        ]
+      }
+    },
+    {
+      "id": "server.execution-budget",
+      "path": "server/execution-budget.mjs",
+      "kind": "runtime",
+      "owner": "server",
+      "purpose": "Bound resource usage with explicit lifecycle, cancellation and size budgets; preserve execution and presentation semantics.",
+      "sourceOfTruth": [
+        "docs/28-performance-architecture.md"
+      ],
+      "tests": [
+        "tests/execution-budget.test.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*"
+      ],
+      "forbiddenDependencies": [
+        "business quality decisions"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/28-performance-architecture.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "memory",
+          "cancellation"
+        ]
+      }
+    },
+    {
+      "id": "server.file-fingerprints",
+      "path": "server/file-fingerprints.mjs",
+      "kind": "runtime",
+      "owner": "server",
+      "purpose": "Stream and bound file hashing; cache by file identity and nanosecond modification metadata while preserving tamper checks.",
+      "sourceOfTruth": [
+        "docs/28-performance-architecture.md"
+      ],
+      "tests": [
+        "tests/file-fingerprints.test.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*"
+      ],
+      "forbiddenDependencies": [
+        "business quality decisions"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/28-performance-architecture.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "memory",
+          "cancellation"
+        ]
+      }
+    },
+    {
+      "id": "server.diagnostic-writer",
+      "path": "server/diagnostic-writer.mjs",
+      "kind": "runtime",
+      "owner": "server",
+      "purpose": "Write redacted diagnostic batches off the service thread with a bounded queue, flush barrier and retention.",
+      "sourceOfTruth": [
+        "docs/28-performance-architecture.md"
+      ],
+      "tests": [
+        "tests/diagnostics.test.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*"
+      ],
+      "forbiddenDependencies": [
+        "business quality decisions"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/28-performance-architecture.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "memory",
+          "cancellation"
+        ]
+      }
+    },
+    {
+      "id": "server.attachment-thumbnails",
+      "path": "server/attachment-thumbnails.mjs",
+      "kind": "runtime",
+      "owner": "server",
+      "purpose": "Generate bounded authenticated image derivatives from verified attachment streams.",
+      "sourceOfTruth": [
+        "docs/28-performance-architecture.md"
+      ],
+      "tests": [
+        "tests/attachment-thumbnails.test.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "sharp",
+        "../client/byte-cache.mjs"
+      ],
+      "forbiddenDependencies": [
+        "business quality decisions"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/28-performance-architecture.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "memory",
+          "cancellation"
         ]
       }
     }

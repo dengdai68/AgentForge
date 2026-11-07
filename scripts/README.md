@@ -1,5 +1,7 @@
 # 工程脚本
 
+性能改造验收：`test-task-creation.mjs` 验证服务端分页后的 App/CLI 管理功能；`test-communication-workbench.mjs` 检查有界历史、附件和窄屏控制台（保留标题，隐藏消息正文）。`test-packaged-electron.mjs` 在隔离 HOME 中额外验证真实 ASAR 的 sharp 原生缩略图解码与诊断 Worker 写入；`AGENTFORGE_PACKAGED_APP` 可指向临时构建包，不安装到操作者实例。`AGENTFORGE_TASK_PARALLEL_REAL=1 node scripts/test-task-parallel-real.mjs` 验证真实并行、续接与人类验收。合成基准结果和逐项闭环见性能审查报告及 docs/28。
+
 仓库更名为 `dengdai68/AgentForge`：应用更新 API、严格附件来源、设置 GitHub 链接与打包发布配置使用新地址；应用身份、数据目录和 CLI 业务协议保持不变。README 仅介绍能力，安装/开发入口见 CONTRIBUTING。
 
 test-task-creation.mjs 同时验收核心 App/CLI 对齐：真实 CLI 子进程与认证 HTTP 操作角色、团队、工作流、员工、MCP、插件和任务；验证团队合并选人、无额外验收标准、工作流独立交接来源、员工能力/角色往返、团队启停，以及两主题宽窄编辑。该展示/协议验收不启动 Provider；--start 成功/失败和不重试语义由 configuration-cli 测试覆盖。
@@ -34,7 +36,7 @@ AGENTFORGE_PROMPT_E2E_REAL=1 AGENTFORGE_NATIVE_SKILLS_REAL=1 node scripts/test-p
 
 AGENTFORGE_PROMPT_E2E_REAL=1 AGENTFORGE_PROMPT_E2E_PACKAGED=1 node scripts/test-prompt-e2e.mjs 使用当前安装包的隔离 Electron（不与 WEB 模式混用）。两个真实 Provider 在续接时实际调用平台历史 search_private_chat/read_context 取回未放入提示词的随机资料；再完成 Claude 团队代码开发、澄清、独立测试、人类确认、完成后历史答疑和归档拒绝。调用使用现有模型登录，不读取/复制凭据，不覆盖操作者实例；证据明确 packaged surface。package:mac:check 另用受控 Provider 消费实际 Codex 参数，连接真正的打包历史 MCP，断言 Node 标记仅在子进程且十工具及记录可读，不冒充模型。
 
-build-app-icon.cjs 保留用户原始 application.png，使用 macOS Swift/CoreGraphics 生成干净圆角 UI 图、透明边距 100/1024 的 Dock 图及 18/36px 单色菜单栏模板，sips/iconutil 从 Dock 图生成同尺度 ICNS。临时文件使用专用 mkdtemp；无浏览器、网络、新包依赖或操作者配置访问。按 web/icons/README.md 重生成并验证，发布读取已生成资源。
+build-app-icon.cjs 保留用户原始 application.png 字节与完整构图，不做放大裁切，使用 macOS Swift/CoreGraphics 生成标准圆角 UI 图、透明边距 100/1024 的 Dock 图及 18/36px 单色菜单栏模板，sips/iconutil 从 Dock 图生成同尺度 ICNS。临时文件使用专用 mkdtemp；无浏览器、网络、新包依赖或操作者配置访问。按 web/icons/README.md 重生成并验证，发布读取已生成资源。
 
 test-directory-headers.mjs 覆盖任务操作顺序、任务/归档顶栏名称、无占位的内部语义标题、归档往返搜索保留、团队/工作流跨页搜索/空态/清空与宽窄 客户端布局；test-electron.mjs 对真实 DOM 验证完整脱敏系统/本轮输入、会话 ID、无工具审计详情、人类气泡外元信息与 @成员。使用隔离数据与明确标记的展示夹具。
 
@@ -126,7 +128,7 @@ test-roles-ui 覆盖角色/插件/MCP 框内多选添加/移除、无排序操�
 
 `AGENTFORGE_DIRECT_COMMUNICATION_REAL=1 node scripts/test-communication-direct-real.mjs`：在隔离 Store 中实际调用三种 Runtime，先产生旧 schema 会话，再用 reply-only 重试并核对原生 ID 不变、群聊仅处理人类接收者且不新增子投递；不读写操作者沟通。test-dsh-real 同时核对新任务没有仓库绑定并到可见人类确认。开发/CLI E2E 的仓库说明改写在 systemPrompt 中，由员工依目标准备，不通过旧 developer/repository 输入。
 
-`AGENTFORGE_TASK_COLLABORATION_REAL=1 node scripts/test-task-collaboration-real.mjs` 使用隔离 Electron 和真实 Claude：首轮真实经理输出注入丢失协调字段，验证正式 10 秒巡检接续；真实员工首轮结束后注入鉴权错误，验证 failed 锁定、原员工/会话重试、完成交付和界面人类确认。故障是验收注入，不冒充 Provider 实际故障。证据保存在 .data/task-collaboration-real-*；可用 AGENTFORGE_TASK_COLLABORATION_RESUME 指定该脚本失败的隔离目录续验。`test-collaboration-flow.mjs` 覆盖角色消息过滤和跨日志分页的提示词定位。
+`AGENTFORGE_TASK_COLLABORATION_REAL=1 node scripts/test-task-collaboration-real.mjs` 使用隔离 Electron 和真实 Claude：首轮真实经理输出注入丢失协调字段，验证原会话收到具体拒收原因并纠正，真实经理使用含 instruction 的单人派工并实际送达员工；真实员工首轮结束后注入鉴权错误，验证 failed 锁定、原员工/会话重试、完成交付和界面人类确认。故障是验收注入，不冒充 Provider 实际故障。证据保存在 .data/task-collaboration-real-*；可用 AGENTFORGE_TASK_COLLABORATION_RESUME 指定该脚本失败的隔离目录续验。`test-collaboration-flow.mjs` 覆盖角色消息过滤和跨日志分页的提示词定位。
 
 协作 UI 验收额外检查任务详情无独立问题面板；真实任务验收要求员工在交接正文报告问题、处理过程和验证结果。Provider 夹具不再输出已移除的问题清单字段。
 
@@ -169,3 +171,7 @@ test-task-attachments.mjs：隔离 Electron 宽窄主题下上传图片/文件�
 test-roles-ui 验证角色扩展选择及多选控件固定高度；test-automations 验证成员/模板随正文滚动及停用自动化级联删除，均使用隔离实例。
 
 `AGENTFORGE_ATTACHMENTS_REAL=1 AGENTFORGE_ROLE_EXTENSIONS_REAL=1 node scripts/test-task-attachments.mjs`：隔离真实 Claude 任务通过角色继承 Skill 读取随机验证串、处理人类附件并在客户端最终验收，验证执行配置实际生效。
+
+`AGENTFORGE_COLLABORATION_SCROLL_ONLY=1 node scripts/test-collaboration-flow.mjs` 定向验证协作发送的阅读状态：1320/760px、历史页回复成功切回最新并滚到底部、失败保留历史/草稿/位置，以及“最新”按钮定位。使用暂停 Run 的真实澄清 HTTP 回复，核对仍暂停且 Trace 为零，不调用 Provider；失败为明确的 HTTP 拒绝夹具。
+
+`AGENTFORGE_BRAND_ICONS_ONLY=1 node scripts/test-brand-presentation.mjs` 专项验证应用图标：极简/暖白主题、1320/760px 侧栏、透明圆角、无 CSS 边框与白色底板、原生 18/36px 模板及 Dock 留白。复用综合品牌脚本的图标断言，跳过员工/市场/目录/弹窗等非图标场景；`AGENTFORGE_BRAND_APP` 可指定构建包，数据、登录与截图仍全部隔离。

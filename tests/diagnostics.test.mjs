@@ -164,3 +164,27 @@ test('test entry isolates fixture Git commands from a hook caller worktree', asy
     assert.equal(hook.GIT_DIR, join(caller, '.git'));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('async diagnostics bound pending bytes, report overload and flush critical errors before close', async () => {
+  const {createAsyncDiagnosticLog}=await import('../server/diagnostics.mjs');
+  const {root}=await fixture(),directory=join(root,'queued'),log=createAsyncDiagnosticLog({directory});
+  try {
+    const message='x'.repeat(400000);
+    for(let i=0;i<20;i++)log.write('provider.stdout',{message},value=>value);
+    assert.ok(log.status().dropped>0);assert.ok(log.status().pendingBytes<=log.status().queueLimitBytes);
+    log.write('task.failed',{error:new Error('critical retained')});
+    assert.equal(log.flushSync(10000),true);
+  } finally {await log.close();}
+  const lines=(await Promise.all((await readdir(directory)).map(name=>readFile(join(directory,name),'utf8')))).join('\n');
+  assert.match(lines,/critical retained/);assert.match(lines,/diagnostics.dropped/);
+});
+
+test('diagnostic retention removes only owned rotated logs, keeping the current part and unrelated files',async()=>{
+  const {root}=await fixture(),directory=join(root,'retention');
+  await mkdir(directory,{mode:0o700});await writeFile(join(directory,'keep.jsonl'),'operator file');
+  const log=createDiagnosticLog({directory,maxBytes:150,retentionBytes:600,retentionDays:30});
+  for(let i=0;i<20;i++)assert.equal(log.write('retention',{content:'x'.repeat(140)}),true);
+  const files=await readdir(directory),owned=files.filter(name=>name!=='keep.jsonl');
+  assert.ok(owned.length<=3);assert.equal(await readFile(join(directory,'keep.jsonl'),'utf8'),'operator file');
+  assert.ok((await stat(log.status().filePath)).size>0);
+});

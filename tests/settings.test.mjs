@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { ByteCache } from "../client/byte-cache.mjs";
 import { applyPreferences, NAVIGATION, normalizePreferences, PREFERENCES_KEY, readPreferences, savePreferences } from "../web/preferences.mjs";
 import { SETTINGS_PAGES, createClosePreferenceUI, createCliInstallationUI, createPluginUpdateSettingsUI } from "../web/settings.mjs";
 import { createCatalogFixtureStore as createStore } from "./fixture-store.mjs";
@@ -33,7 +34,7 @@ test('plugin update settings preserve draft during refresh, validate, save, run 
 });
 test('task console defaults to the latest executed known member, not the last finished long call',async()=>{
   const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8');
-  const select=vm.runInNewContext(source.slice(source.indexOf('function latestExecutedAgentId('),source.indexOf('function workspaceDirectoryDetails('))+';latestExecutedAgentId');
+  const select=runWithCache(source.slice(source.indexOf('function latestExecutedAgentId('),source.indexOf('function workspaceDirectoryDetails('))+';latestExecutedAgentId');
   const agents=[{id:'manager'},{id:'worker'}];
   assert.equal(select(agents,[]),null);
   assert.equal(select(agents,[{agentId:'worker',startedAt:'2026-10-01',endedAt:'2026-10-05'},{agentId:'manager',startedAt:'2026-10-02',endedAt:'2026-10-03'},{agentId:'unknown',startedAt:'2026-10-06'}]),'manager');
@@ -44,7 +45,7 @@ test('workspace HTTP save creates missing directories, preserves existing files 
   await mkdir('.data',{recursive:true});const root=await mkdtemp(resolve('.data/workspace-create-'));t.after(()=>rm(root,{recursive:true,force:true}));
   const source=await readFile(new URL('../server/index.mjs',import.meta.url),'utf8'),start=source.indexOf('  if (pathname === "/api/settings/workspace" && request.method === "PUT")'),end=source.indexOf('  // CLI paths',start);
   let saved=null,writes=0;
-  async function save(workspaceRoot){let result;await vm.runInNewContext(`(async()=>{${source.slice(start,end)}})()`,{pathname:'/api/settings/workspace',request:{method:'PUT'},response:{},readJson:async()=>({workspaceRoot}),isAbsolute,normalize,parse,mkdir,realpath,stat,access,constants,version:'test',store:{updateWorkspaceSettings(input){saved=input.workspaceRoot;writes++;return input;}},sendJson(response,status,value){assert.equal(status,200);result=value;}});return result;}
+  async function save(workspaceRoot){let result;await runWithCache(`(async()=>{${source.slice(start,end)}})()`,{pathname:'/api/settings/workspace',request:{method:'PUT'},response:{},readJson:async()=>({workspaceRoot}),isAbsolute,normalize,parse,mkdir,realpath,stat,access,constants,version:'test',store:{updateWorkspaceSettings(input){saved=input.workspaceRoot;writes++;return input;}},sendJson(response,status,value){assert.equal(status,200);result=value;}});return result;}
   for(const invalid of ['/',root+'/../'.repeat(root.split('/').length),'relative','',null,'/bad\0path'])await assert.rejects(save(invalid));
   assert.equal(writes,0);
   const target=join(root,'任务 根','nested');assert.equal((await save(target)).workspaceRoot,await realpath(target));assert.equal((await stat(target)).isDirectory(),true);
@@ -52,9 +53,9 @@ test('workspace HTTP save creates missing directories, preserves existing files 
   const blocker=join(root,'file');await writeFile(blocker,'file');await assert.rejects(save(join(blocker,'child')),error=>/目录无法创建/.test(error.message)&&Boolean(error.cause));assert.equal(saved,await realpath(target));assert.equal(writes,2);
 });
 test('collaboration aligns by sender, never by the human recipient or human filter',async()=>{
-  const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8'),start=source.indexOf('function renderCollaboration('),end=source.indexOf('/* ---------- 任务空间数据与动作',start),dock={};
+  const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8'),start=source.indexOf('function renderCollaboration('),end=source.indexOf('/* ---------- 任务空间数据与动作',start),dock={querySelector(){return null;}};
   const messages=[{id:'human',createdAt:'2026-01-01T00:00:00Z',sender:{type:'human',name:'操作者'},recipient:{type:'agent',name:'员工'},content:'HUMAN-CONTENT'},{id:'employee',createdAt:'2026-01-01T00:00:01Z',sender:{type:'agent',name:'员工'},recipient:{type:'human',name:'操作者'},content:'AGENT-TO-HUMAN'}];
-  const render=vm.runInNewContext(`${source.slice(start,end)};renderCollaboration`,{$:selector=>selector==='#collaboration-panel'?dock:{addEventListener(){}},state:{workspace:{pendingQuestions:[]}},workspaceView:()=>({draft:''}),collaborationRecords,acceptanceReview:()=>null,esc:String,exactTime:String,collaborationMessageMarkup:content=>content,sendInstruction(){},refreshCollaborationBodies(){},messageAttachments(){return "";},draftAttachments(){return "";},attachmentControls(){return "";},bindTaskAttachments(){}});
+  const render=runWithCache(`${source.slice(start,end)};renderCollaboration`,{$:selector=>selector==='#collaboration-panel'?dock:{addEventListener(){}},state:{workspace:{pendingQuestions:[]}},workspaceView:()=>({draft:'',collaborationItems:collaborationRecords({messages})}),collaborationRecords,acceptanceReview:()=>null,esc:String,exactTime:String,collaborationMessageMarkup:content=>content,sendInstruction(){},refreshCollaborationBodies(){},messageAttachments(){return "";},draftAttachments(){return "";},attachmentControls(){return "";},bindTaskAttachments(){},requestAnimationFrame:callback=>callback()});
   render({run:{id:'run',status:'paused',task:{}},messages},[]);
   const articles=dock.innerHTML.match(/<article[\s\S]*?<\/article>/g);assert.equal(articles.length,2);assert.match(articles[0],/class="collaboration-row from-human/);assert.match(articles[1],/AGENT-TO-HUMAN/);assert.doesNotMatch(articles[1],/from-human/);
 });
@@ -139,12 +140,12 @@ test("Runtime headings stay subordinate and General uses an explicit native radi
 
 test("team edits preserve inactive members and allow an empty manager-free roster", async () => {
   const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8');
-  const controller=source.slice(source.indexOf('function teamModal('),source.indexOf('const newTeamModal ='));
+  const controller=source.slice(source.indexOf('async function teamModal('),source.indexOf('const newTeamModal ='));
   const agents=[{id:'active',status:'active',kind:'business',name:'员工'},{id:'inactive',status:'inactive',kind:'business',name:'停用员工'}];
   const handlers={},calls=[],errors=[];let selected=['active','inactive'],picker;
   const form={name:{value:'更新团队名'},mission:{value:'使命'},elements:{status:{value:'inactive'}},closest:()=>({classList:{add(){}}}),addEventListener:(name,handler)=>{handlers[name]=handler;}};
-  const context={state:{agents},esc:String,openModal(){},$:selector=>selector==='#team-form'?form:{},createEmployeeMultiSelect:(host,options)=>{picker=options;return{value:()=>selected};},clearInvalid(){},setInvalid:(field,error)=>errors.push(error),api:async(path,options)=>calls.push({path,input:JSON.parse(options.body)}),closeModal(){},toast(){},refresh:async()=>{}};
-  vm.runInNewContext(`${controller};teamModal({id:'team',memberAgentIds:['active','inactive']});`,context);
+  const context={loadCatalogReferences:async()=>{},state:{agents},esc:String,openModal(){},$:selector=>selector==='#team-form'?form:{},createEmployeeMultiSelect:(host,options)=>{picker=options;return{value:()=>selected};},clearInvalid(){},setInvalid:(field,error)=>errors.push(error),api:async(path,options)=>calls.push({path,input:JSON.parse(options.body)}),closeModal(){},toast(){},refresh:async()=>{}};
+  await runWithCache(`${controller};teamModal({id:'team',memberAgentIds:['active','inactive']});`,context);
   assert.deepEqual(Array.from(picker.selectedIds),['active','inactive']);assert.equal(picker.items,agents);
   await handlers.submit({preventDefault(){}});assert.deepEqual(calls[0],{path:'/api/teams/team',input:{name:'更新团队名',mission:'使命',status:'inactive',memberAgentIds:['active','inactive']}});
   selected=[];await handlers.submit({preventDefault(){}});assert.deepEqual(calls[1].input.memberAgentIds,[]);
@@ -153,7 +154,7 @@ test("team edits preserve inactive members and allow an empty manager-free roste
 
 test("configuration deletion responses cannot close or contaminate a replacement modal", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const controller = source.slice(source.indexOf("function configurationDeletionModal("), source.indexOf("function teamModal("));
+  const controller = source.slice(source.indexOf("function configurationDeletionModal("), source.indexOf("async function teamModal("));
   const fixture = () => {
     const button = { isConnected: true, disabled: false }, originalError = {}, replacementError = {}, requests = [], notices = [];
     let callback, resolve, reject, closed = 0, refreshed = 0, currentError = originalError;
@@ -164,7 +165,7 @@ test("configuration deletion responses cannot close or contaminate a replacement
       api: (path, options) => { requests.push({ path, options }); return new Promise((yes, no) => { resolve = yes; reject = no; }); },
       closeModal: () => { closed++; }, refresh: async () => { refreshed++; },
     };
-    vm.runInNewContext(`${controller}; configurationDeletionModal('agent','employee/1');`, context);
+    runWithCache(`${controller}; configurationDeletionModal('agent','employee/1');`, context);
     return { button, originalError, replacementError, requests, notices,
       click: () => callback(), resolve: () => resolve({}), reject: () => reject(new Error("仍被团队使用")),
       replace() { button.isConnected = false; currentError = replacementError; }, closed: () => closed, refreshed: () => refreshed };
@@ -197,13 +198,13 @@ test("sidebar counts only human attention and unread replies rather than invento
   const nodes = new Map();
   const context = { state: { currentView: "tasks", communicationUnreadCount: 3, runs: [{ taskId: "a", status: "running" }, { taskId: "b", status: "paused" }, { taskId: "b", status: "failed" }, { taskId: "archived", status: "failed", task: { archivedAt: "yesterday" } }] }, taskNeedsAttention,
     $: selector => { if (!nodes.has(selector)) nodes.set(selector, { style: {}, setAttribute() {} }); return nodes.get(selector); } };
-  vm.runInNewContext(`${shell}; renderShell();`, context);
+  runWithCache(`${shell}; renderShell();`, context);
   assert.equal(nodes.get("#nav-task-count").textContent, 1);
   assert.equal(nodes.get("#nav-ws-hint").textContent, "待你处理");
   assert.equal(nodes.get("#nav-communication-count").textContent, 3);
   for (const id of ["team", "workflow", "agent"]) assert.equal(nodes.has(`#nav-${id}-count`), false);
   context.state.navigationNotifications = { taskAttentionCount: 0, communicationUnreadCount: 0 };
-  vm.runInNewContext("renderShell();", context);
+  runWithCache("renderShell();", context);
   assert.equal(nodes.get("#nav-task-count").hidden, true);
   assert.equal(nodes.get("#nav-communication-count").hidden, true);
 });
@@ -215,13 +216,13 @@ test("overview presents execution facts without inferred completion percentages"
   function render(runs, tasks = []) {
     const panels = new Map();
     const context = {
-      state: { runs, tasks, agents: [], events: [], teams: [] },
+      state: { runs, tasks, agents: [], events: [], teams: [],overviewCounts:{tasks:Object.fromEntries([...new Set(tasks.map(t=>t.status))].map(status=>[status,tasks.filter(t=>t.status===status).length])),runs:Object.fromEntries([...new Set(runs.map(r=>r.status))].map(status=>[status,runs.filter(r=>r.status===status).length])),artifacts:runs.reduce((total,r)=>total+(r.artifactCount||0),0)} },
       $: selector => { if (!panels.has(selector)) panels.set(selector, { innerHTML: "" }); return panels.get(selector); },
       taskMatchesFilter, taskNeedsAttention, taskActionLabel, statusText: STATUS_TEXT, esc: escape,
       pill: status => `<span class="status-pill">${STATUS_TEXT[status]}</span>`,
       workspaceSummary: () => "系统受管目录", timeAgo: () => "刚刚",
     };
-    vm.runInNewContext(`${renderSource}; renderOverview();`, context);
+    runWithCache(`${renderSource}; renderOverview();`, context);
     assert.doesNotMatch(panels.get("#stats-grid").innerHTML, /已验收/);
     assert.match(panels.get("#stats-grid").innerHTML, /已接纳的 Run 内快照/);
     return { active: panels.get("#active-run-panel").innerHTML, stats: panels.get("#stats-grid").innerHTML };
@@ -280,7 +281,7 @@ test("acceptance and deletion counts do not claim human-approved Artifacts and r
     ["function openCompletionModal(", "async function retryScheduledWorkspace(", "openCompletionModal('run')", "#ack-completion", "#confirm-completion"],
     ["function openDeleteTaskModal(", "function openTerminateModal(", "openDeleteTaskModal('task')", "#delete-task-acknowledged", "#confirm-delete-task"],
   ]) {
-    vm.runInNewContext(`${slice(start, end)}; ${invocation};`, context);
+    runWithCache(`${slice(start, end)}; ${invocation};`, context);
     assert.doesNotMatch(context.html, /已验收/);
     assert.match(context.html, /2 项已接纳交付快照/);
     assert.match(context.html, /id="confirm-[^"]+" disabled/);
@@ -294,7 +295,7 @@ test("acceptance and deletion counts do not claim human-approved Artifacts and r
   }
   // The completion dialog keeps the frozen standards text for the human's
   // final check against real delivered Artifacts.
-  vm.runInNewContext(`${slice("function openCompletionModal(", "async function retryScheduledWorkspace(")}; openCompletionModal('run');`, context);
+  runWithCache(`${slice("function openCompletionModal(", "async function retryScheduledWorkspace(")}; openCompletionModal('run');`, context);
   assert.match(context.html, /任务验收标准/);
   assert.match(context.html, /criteria/);
 });
@@ -306,7 +307,7 @@ test("console rendering keeps chronological events separate from directory sorti
   const slice = source.slice(source.indexOf("function renderChatStream("), source.indexOf("function rememberDirectoryReading("));
   const stream = { innerHTML: "", scrollHeight: 120, scrollTop: 0 };
   const context = { queueMicrotask: () => {}, updateConsoleRows: (stream, rows) => { stream.innerHTML = rows.map(row => row.html).join(""); stream.scrollTop = stream.scrollHeight; }, $: () => stream, isTransportFrame: () => false, summarizeHistoricalAuditEntries: entries => entries, buildConsoleEntries: events => events.map(event => ({ type: "event", event })), renderChatEvent: event => event.id, state: { selectedRunId: "run", workspace: null } };
-  vm.runInNewContext(`${slice}; renderChatStream([{id:'later',timestamp:'2026-01-02',actor:{id:'a'}},{id:'earlier',timestamp:'2026-01-01',actor:{id:'a'}}],{id:'a'});`, context);
+  runWithCache(`${slice}; renderChatStream([{id:'later',timestamp:'2026-01-02',actor:{id:'a'}},{id:'earlier',timestamp:'2026-01-01',actor:{id:'a'}}],{id:'a'});`, context);
   assert.equal(stream.innerHTML, "earlierlater");
   assert.equal(stream.scrollTop, 120);
 });
@@ -322,7 +323,7 @@ test("console does not echo collaboration messages as a second system result", a
       { id: 'failure', type: 'trace.failed', actor: { id }, timestamp: '2026-01-03' },
     ];
     const context = { queueMicrotask: () => {}, updateConsoleRows: (stream, rows) => { stream.innerHTML = rows.map(row => row.html).join(""); stream.scrollTop = stream.scrollHeight; }, $: () => stream, isTransportFrame: () => false, summarizeHistoricalAuditEntries: rows => rows, buildConsoleEntries: rows => rows.map(event => ({ type: 'event', event })), renderChatEvent: event => `[${event.id}]`, state: { selectedRunId: 'run', workspace: null }, events, agent: { id } };
-    vm.runInNewContext(`${slice}; renderChatStream(events, agent);`, context);
+    runWithCache(`${slice}; renderChatStream(events, agent);`, context);
     assert.equal(stream.innerHTML, '[provider-text][failure]');
     assert.equal(events.length, 3, 'stored collaboration facts are not mutated');
   }
@@ -351,7 +352,7 @@ test('CHANGE shares complete workspace hierarchy and retains deleted files and g
 test('CHANGE is independent of the current-file directory page and can show deleted paths', async () => {
   const source = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
   const view = { changesRequest: 0, changes: null };
-  const load = vm.runInNewContext(`${source.slice(source.indexOf('async function loadWorkingChanges('), source.indexOf('async function loadWorkingDiff('))}; loadWorkingChanges`, {
+  const load = runWithCache(`${source.slice(source.indexOf('async function loadWorkingChanges('), source.indexOf('async function loadWorkingDiff('))}; loadWorkingChanges`, {
     workspaceView: () => view, renderWorkingChanges: () => {}, api: async () => ({ repositories: [] }), loadWorkingDirectory: async () => { view.directoryError = '工作目录不可读取'; }
   });
   await load('run');
@@ -362,7 +363,7 @@ test('CHANGE keeps its tree free of explanatory text and surfaces read errors ou
   const source = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
   const view = { changes: { repositories: [] } }, tree = { scrollTop: 0 };
   const host = { innerHTML: '', dataset: {}, querySelector: () => tree };
-  const render = vm.runInNewContext(`${source.slice(source.indexOf('function renderWorkingChanges('), source.indexOf('async function loadWorkingChanges('))}; renderWorkingChanges;`, {
+  const render = runWithCache(`${source.slice(source.indexOf('function renderWorkingChanges('), source.indexOf('async function loadWorkingChanges('))}; renderWorkingChanges;`, {
     state: { selectedRunId: 'run' }, $: () => host, workspaceView: () => view,
     syncWorkingRefresh: () => {}, rememberDiffReading: () => {}, presentationPreferences: {}, esc: String,
     workingChangesTree: repo => `<ul>${repo.path || 'docs'}</ul>`, workingDiffMarkup: () => ''
@@ -397,7 +398,7 @@ test('file downloads capture the selected path, avoid duplicate clicks and surfa
     setTimeout: fn => { cleanup = fn; },
     document: { body: { append: link => links.push(link) }, createElement: () => ({ click() { this.clicked = true; }, remove() { this.removed = true; } }) }
   };
-  const download = vm.runInNewContext(`${body}; downloadWorkingFile;`, context);
+  const download = runWithCache(`${body}; downloadWorkingFile;`, context);
   await download('run'); assert.equal(fetches, 0);
   view.selectedPath = 'docs/原文.md';
   const pending = download('run');
@@ -433,7 +434,7 @@ test("console timeline binds a prompt entry to each invocation's own Trace", asy
     state: { selectedRunId: "run-1", workspace: { run: { id: "run-1" }, traces } },
     esc: String, exactTime: value => value,
   };
-  vm.runInNewContext(`${slice}; renderChatStream([
+  runWithCache(`${slice}; renderChatStream([
     { id: "e1", timestamp: "2026-01-01", actor: { id: "a" }, data: { traceId: "trace-old" } },
     { id: "e2", timestamp: "2026-01-02", actor: { id: "a" }, data: { traceId: "trace-new" } },
     { id: "e3", timestamp: "2026-01-03", actor: { id: "a" }, data: { traceId: "trace-missing" } },
@@ -468,7 +469,7 @@ test("prompt entries follow invocation records and tool groups respect Trace bou
   // A running invocation that has not emitted any visible event yet still
   // exposes its own prompt entry; entries come from Trace records, not events.
   const streamA = { innerHTML: "", scrollHeight: 0, scrollTop: 0 };
-  vm.runInNewContext(`${slice}; renderChatStream([
+  runWithCache(`${slice}; renderChatStream([
     { id: "e1", type: "runtime.event", timestamp: "2026-01-01T00:10:00Z", actor: { id: "a" }, data: { traceId: "trace-done", providerEventType: "assistant" } },
   ], { id: "a" });`, mkContext(streamA, [
     { id: "trace-done", agentId: "a", workflowNodeId: "requirements", startedAt: "2026-01-01T00:00:00Z", status: "completed", promptRef: { storagePath: "runs/run-1/traces/trace-done/prompt-snapshot.json" } },
@@ -481,7 +482,7 @@ test("prompt entries follow invocation records and tool groups respect Trace bou
   // A silent call can be recovered as failed on startup without producing a
   // member event. It must remain visible even though it started after the last event.
   const streamRecovered = { innerHTML: "", scrollHeight: 0, scrollTop: 0 };
-  vm.runInNewContext(`${slice}; renderChatStream([
+  runWithCache(`${slice}; renderChatStream([
     { id: "prior", timestamp: "2026-01-01T00:10:00Z", actor: { id: "a" }, data: { traceId: "older" } },
   ], { id: "a" }, { hasMore: true });`, mkContext(streamRecovered, [
     { id: "older", agentId: "a", startedAt: "2026-01-01T00:00:00Z" },
@@ -491,7 +492,7 @@ test("prompt entries follow invocation records and tool groups respect Trace bou
   // Two consecutive same-name tools from different invocations: no merged
   // group, and each invocation keeps its own prompt entry before its tool.
   const streamB = { innerHTML: "", scrollHeight: 0, scrollTop: 0 };
-  vm.runInNewContext(`${slice}; renderChatStream([
+  runWithCache(`${slice}; renderChatStream([
     { id: "u1", type: "runtime.event", timestamp: "2026-01-01T00:05:00Z", actor: { id: "a" }, data: { traceId: "t1", presentation: "tool", toolName: "Bash", toolUseId: "u1" } },
     { id: "u2", type: "runtime.event", timestamp: "2026-01-01T01:05:00Z", actor: { id: "a" }, data: { traceId: "t2", presentation: "tool", toolName: "Bash", toolUseId: "u2" } },
   ], { id: "a" });`, mkContext(streamB, [
@@ -517,21 +518,21 @@ test("prompt is a paginated chronological entry, including interleaved invocatio
     state: { selectedRunId: "r", workspace: { run: { id: "r" }, traces } }, esc: String, exactTime: String };
   const event = (id, minute, traceId, type = "runtime.event") => ({ id, type, actor: { id: "a" }, timestamp: `2026-01-01T00:0${minute}:00Z`, data: { traceId } });
   context.events = [event("tail", 5, "long")];
-  vm.runInNewContext(`${slice}; renderChatStream(events, {id:"a"}, {hasMore:true})`, context);
+  runWithCache(`${slice}; renderChatStream(events, {id:"a"}, {hasMore:true})`, context);
   assert.doesNotMatch(stream.innerHTML, /prompt:/, "even a running call's start is not pinned above a partial tail");
   context.events = [event("before", 2), event("first", 4, "long"), event("other", 4, "short"), event("last", 5, "long")];
-  vm.runInNewContext(`renderChatStream(events, {id:"a"}, {hasMore:true})`, context);
+  runWithCache(`renderChatStream(events, {id:"a"}, {hasMore:true})`, context);
   assert.doesNotMatch(stream.innerHTML, /prompt:long/);
   assert.ok(stream.innerHTML.indexOf("before") < stream.innerHTML.indexOf("prompt:short"));
   context.events.unshift(event("start", 0, "long"));
   context.events.unshift({ id: "pre-call", type: "runtime.event", actor: { id: "a" }, timestamp: "2025-12-31T23:59:00Z", data: {} });
-  vm.runInNewContext(`renderChatStream(events, {id:"a"}, {hasMore:false})`, context);
+  runWithCache(`renderChatStream(events, {id:"a"}, {hasMore:false})`, context);
   const html = stream.innerHTML;
   assert.equal((html.match(/data-console-key="prompt:long"/g) || []).length, 1, "interleaving never duplicates a prompt");
   const order = ['<row>pre-call</row>', 'data-console-key="prompt:long"', '<row>start</row>', '<row>before</row>', 'data-console-key="prompt:short"', '<row>first</row>', '<row>last</row>'];
   assert.ok(order.every((value, index) => html.indexOf(value) >= 0 && (!index || html.indexOf(value) > html.indexOf(order[index - 1]))));
   context.events = [event("transport-boundary", 0, "long", "transport"), event("tail", 5, "long")];
-  vm.runInNewContext(`renderChatStream(events, {id:"a"}, {hasMore:true})`, context);
+  runWithCache(`renderChatStream(events, {id:"a"}, {hasMore:true})`, context);
   assert.match(stream.innerHTML, /prompt:long/, "hidden transport frames still establish the loaded page boundary");
 });
 
@@ -626,7 +627,7 @@ test("Runtime settings keep the shared card spacing container during loading fai
     escape: value => value,
   };
   const start = source.indexOf("  async function loadRuntimes()"), end = source.indexOf("  async function loadWorkspace()", start);
-  await vm.runInNewContext(`${source.slice(start, end)}; loadRuntimes()`, context);
+  await runWithCache(`${source.slice(start, end)}; loadRuntimes()`, context);
   assert.equal(container.className, "repository-access-grid");
   assert.match(container.innerHTML, /role="alert">unavailable/);
   assert.match(container.innerHTML, /data-retry-runtime/);
@@ -635,7 +636,7 @@ test("Runtime settings keep the shared card spacing container during loading fai
 
 test("task search combines name and exact status without a team relation", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const matches = vm.runInNewContext(`${source.slice(source.indexOf("function taskMatchesSearch("), source.indexOf("function renderTasks()"))}; taskMatchesSearch`);
+  const matches = runWithCache(`${source.slice(source.indexOf("function taskMatchesSearch("), source.indexOf("function renderTasks()"))}; taskMatchesSearch`);
   const task = { title: "验收 Alpha 门户", status: "awaiting_acceptance" };
   assert.equal(matches(task, { name: " ALPHA ", status: "awaiting_acceptance" }), true);
   for (const query of [{ name: "不存在" }, { status: "done" }, { name: "门户", status: "running" }]) assert.equal(matches(task, query), false);
@@ -711,12 +712,12 @@ test("settings categories are refreshable routes and configuration leaves the em
   const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const routeSource = app.slice(app.indexOf("function routeFromLocation()"), app.indexOf("const initialRoute"));
   for (const page of Object.keys(SETTINGS_PAGES)) {
-    const route = vm.runInNewContext(`${routeSource}\nrouteFromLocation()`, { location: { pathname: `/settings/${page}`, hash: "" } });
+    const route = runWithCache(`${routeSource}\nrouteFromLocation()`, { location: { pathname: `/settings/${page}`, hash: "" } });
     assert.equal(route.view, "settings"); assert.equal(route.settingsPage, page);
-    const hosted = vm.runInNewContext(`${routeSource}\nrouteFromLocation()`, { location: { pathname: `/settings/${page}`, hash: "" }, window: { agentforgeDesktop: {} } });
+    const hosted = runWithCache(`${routeSource}\nrouteFromLocation()`, { location: { pathname: `/settings/${page}`, hash: "" }, window: { agentforgeDesktop: {} } });
     assert.equal(hosted.settingsPage, page);
   }
-  assert.equal(vm.runInNewContext(`${routeSource}\nrouteFromLocation()`, { location: { pathname: "/settings", hash: "" } }).settingsPage, "general");
+  assert.equal(runWithCache(`${routeSource}\nrouteFromLocation()`, { location: { pathname: "/settings", hash: "" } }).settingsPage, "general");
   const shell = await readFile(new URL("../web/index.html", import.meta.url), "utf8");
   assert.match(shell, /data-view="settings" aria-label="设置"/);
   assert.doesNotMatch(shell, /class="runtime-card"|manage-git-credentials|bypass/);
@@ -727,7 +728,7 @@ test("Console initializes Settings with ready validation helpers", async () => {
   const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const initialization = app.slice(0, app.indexOf("/* ---------- 壳层 ---------- */")).replace(/^import .*;\n/gm, "");
   let dependencies;
-  vm.runInNewContext(initialization, {
+  runWithCache(initialization, {
     location: { pathname: "/settings/repositories", hash: "" },
     document: {}, window: { addEventListener() {} },
     createCommunicationUI: () => ({}), readPreferences: () => normalizePreferences(null), applyPreferences() {},
@@ -756,7 +757,7 @@ test("in-app confirm dialog resolves on buttons and cancels on modal close", asy
       return null;
     },
   };
-  const run = vm.runInNewContext(`${slice}\n({ confirmDialog, closeModal })`, {
+  const run = runWithCache(`${slice}\n({ confirmDialog, closeModal })`, {
     disposeWorkflowGraphs() {}, resetRequestActive: false,
     document: { activeElement:null, body:{classList:classList()}, querySelector(){return null;} },
     closeFloatingLists() {},
@@ -875,7 +876,7 @@ test('Edit diff separates block rows without extra newline text nodes, retaining
 test('file tool bodies show Write text rather than its JSON envelope and preserve fallback', async () => {
   const source = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
   const { toolFileInput } = await import('../client/console-projections.mjs');
-  const render = vm.runInNewContext(`${source.slice(source.indexOf('function fileToolFieldMarkup('), source.indexOf('// Git-style diff for a real Edit'))}; fileToolFieldMarkup`, {
+  const render = runWithCache(`${source.slice(source.indexOf('function fileToolFieldMarkup('), source.indexOf('// Git-style diff for a real Edit'))}; fileToolFieldMarkup`, {
     toolFileInput, esc: value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
   });
   const field = { text: JSON.stringify({ file_path: 'a.js', content: '<script>\nconst answer = 42;\n' }), redacted: true, truncated: true };
@@ -927,7 +928,7 @@ test('console bodies defer closed disclosures and stop queued reads after leavin
   const source = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
   const start = source.indexOf('function consoleContentVisible('), end = source.indexOf('let consoleContentObserver', start);
   const state = { currentView: 'workspace' }, view = { tab: 'console' };
-  const visible = vm.runInNewContext(`${source.slice(start, end)}; consoleContentVisible`, { state, workspaceView: () => view });
+  const visible = runWithCache(`${source.slice(start, end)}; consoleContentVisible`, { state, workspaceView: () => view });
   const group = { tagName: 'DETAILS', open: false }, tool = { tagName: 'DETAILS', open: true, parentElement: group };
   const node = { isConnected: true, parentElement: tool };
   assert.equal(visible(node), false, 'nested content must wait for outer group');
@@ -952,7 +953,7 @@ test('tool summaries load without opening bodies, deduplicate reads and bound co
   const { toolCommandSummary } = await import('../client/console-projections.mjs');
   let reads = 0, active = 0, peak = 0;
   const cache = new Map();
-  const hydrate = vm.runInNewContext(`${source.slice(source.indexOf('async function hydrateConsoleContent('), source.indexOf('const promptSnapshotCache'))}; hydrateConsoleContent`, {
+  const hydrate = runWithCache(`${source.slice(source.indexOf('async function hydrateConsoleContent('), source.indexOf('const promptSnapshotCache'))}; hydrateConsoleContent`, {
     consoleContentVisible: node => node.isConnected, consoleContentCache: cache, toolCommandSummary,
     api: async url => {
       reads++; peak = Math.max(peak, ++active); await Promise.resolve(); active--;
@@ -974,7 +975,7 @@ test('tool summaries load without opening bodies, deduplicate reads and bound co
 test('command and file tool groups expose their rows by default but other groups stay closed', async () => {
   const source = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
   const { isShellTool } = await import('../client/console-projections.mjs');
-  const render = vm.runInNewContext(`${source.slice(source.indexOf('function renderToolGroup('), source.indexOf('function consoleSessionMarkup('))}; renderToolGroup`, {
+  const render = runWithCache(`${source.slice(source.indexOf('function renderToolGroup('), source.indexOf('function consoleSessionMarkup('))}; renderToolGroup`, {
     isCurrentRuntimeAudit: event => event.data.auditVersion === 2, isShellTool, exactTime: String, esc: String, renderToolCall: () => '<tool-row>'
   });
   const group = name => ({ toolName: name, tools: [{ event: { id: 'one', data: { auditVersion: 2 } } }] });
@@ -985,7 +986,7 @@ test('command and file tool groups expose their rows by default but other groups
 test('employee search limits large directories and excludes selected or inactive employees', async () => {
   const source = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
   const start = source.indexOf('function employeeSearchResults('), end = source.indexOf('function mountEmployeePicker(', start);
-  const search = vm.runInNewContext(`${source.slice(start, end)}; employeeSearchResults`);
+  const search = runWithCache(`${source.slice(start, end)}; employeeSearchResults`);
   const agents = Array.from({ length: 5000 }, (_, i) => ({ id: String(i), name: `员工 ${i}`, description: '媒体制作', capabilities: ['字幕'], status: i === 1 ? 'inactive' : 'active' }));
   assert.equal(search(agents, '', new Set()).length, 0);
   const results = search(agents, ' 媒体 ', new Set(['0']));
@@ -1000,7 +1001,7 @@ test('employee search limits large directories and excludes selected or inactive
 test("thinking hydration displays recorded public text and explains empty historical records", async () => {
   const source = await readFile(new URL('../web/app.js',import.meta.url),'utf8');
   const fields = new Map([['body',{text:'公开思考 <script>unsafe()</script>',redacted:false}],['filtered',{text:'先检查输入\n[REDACTED]\n继续核对',redacted:true}],['empty',{text:'',redacted:true}],['whitespace',{text:' \n ',redacted:false}]]);
-  const hydrate = vm.runInNewContext(`${source.slice(source.indexOf('async function hydrateConsoleContent('),source.indexOf('const promptSnapshotCache'))};hydrateConsoleContent`,{
+  const hydrate = runWithCache(`${source.slice(source.indexOf('async function hydrateConsoleContent('),source.indexOf('const promptSnapshotCache'))};hydrateConsoleContent`,{
     consoleContentVisible:()=>true,consoleContentCache:new Map(),isShellTool:()=>false,
     esc:text=>String(text).replaceAll('<','&lt;').replaceAll('>','&gt;'),
     api:async url=>({fields:{thinking:fields.get(url.split('/').at(-1))}})
@@ -1011,3 +1012,5 @@ test("thinking hydration displays recorded public text and explains empty histor
   assert.match(nodes[1].innerHTML,/先检查输入/);assert.match(nodes[1].innerHTML,/继续核对/);assert.match(nodes[1].innerHTML,/敏感片段已隐藏/);
   for(const node of nodes.slice(2)){assert.match(node.innerHTML,/未保存可显示的思考正文/);assert.doesNotMatch(node.innerHTML,/已脱敏|敏感片段已隐藏/);}
 });
+
+function runWithCache(source,context={},...options){context.ByteCache=ByteCache;return vm.runInNewContext(source,context,...options);}

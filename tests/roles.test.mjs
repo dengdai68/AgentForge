@@ -191,14 +191,15 @@ test('role CLI runs authenticated CRUD over HTTP with reference-style output', a
     calls.push({ path, method: options.method || 'GET', body });
     if (path === '/api/auth/login') return new Response(JSON.stringify({ username: 'operator', expiresAt: null }), { headers: { 'set-cookie': cookie + '; Path=/; HttpOnly' } });
     assert.equal(options.headers.Cookie, cookie, 'every resource request is authenticated');
-    if (path === '/api/roles' && (!options.method || options.method === 'GET')) return new Response(JSON.stringify({ roles: state.roles }));
+    if (options.method==='GET' && path==='/api/roles/role_one')return new Response(JSON.stringify({role:state.roles[0]}));
+    if (options.method==='GET' && path.startsWith('/api/roles?')) {const search=new URL(url).searchParams.get('search')||'',roles=state.roles.filter(r=>(r.name+r.prompt).includes(search));return new Response(JSON.stringify({roles,total:roles.length,page:1,pageSize:20,totalPages:1,hasMore:false}));}
     return new Response(JSON.stringify(body || { deleted: true }));
   };
   const invoke = (args, stdin) => executeCommand([...args, '--session-file', sessionFile, '--endpoint-file', endpointFile], { fetcher, stdin: input(stdin) });
   await invoke(['auth', 'login', '--username', 'operator', '--password-stdin'], 'synthetic-password\n');
   const list = await invoke(['roles', 'list']);
   assert.equal(list.items[0].id, 'role_one');
-  assert.deepEqual(calls.at(-1), { path: '/api/roles', method: 'GET', body: null });
+  assert.deepEqual(calls.at(-1), { path: '/api/roles?page=1&search=', method: 'GET', body: null });
   assert.equal((await invoke(['roles', 'list', '--search', 'ROLE_ONE'])).items.length, 1, 'search matches the prompt text like the UI');
   assert.deepEqual((await invoke(['roles', 'list', '--search', '没有匹配'])).items, []);
   assert.equal((await invoke(['roles', 'get', 'role_one'])).prompt, 'ROLE_ONE');

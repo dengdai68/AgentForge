@@ -1,3 +1,6 @@
+import { closeExecutionBudget } from './execution-budget.mjs';
+import { attachmentThumbnail } from './attachment-thumbnails.mjs';
+import { collaborationRecords } from "../client/console-projections.mjs";
 import { createAutomationScheduler } from "./automation-scheduler.mjs";
 import { previewSchedule } from "./automation-schedule.mjs";
 import { createServer } from "node:http";
@@ -68,7 +71,7 @@ let runtimeTestActive = false;
 let resettingData = false, resetCommitted = false, writeRequests = 0;
 let updateRestartLease = null;
 try {
-  const recovery = await runFiles.recoverStagedTaskDeletions((runId) => store.listRuns().some((run) => run.id === runId));
+  const recovery = await runFiles.recoverStagedTaskDeletions((runId) => store.hasRun(runId));
   if (recovery.failed) console.error(`Task deletion recovery retained ${recovery.failed} invalid or inaccessible staging record(s).`);
 } catch {
   console.error("Task deletion staging recovery could not complete; retained files were not removed.");
@@ -230,7 +233,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     const input = await readJson(request);
     if (input.confirmation !== "清除所有数据") throw new Error("请输入「清除所有数据」确认");
     await auth.reauthenticate(request, input.password);
-    if (resettingData || writeRequests !== 1 || runtimeTestActive || pluginUpdates.status().running || communications.isActive() || taskDeletionLocks.size || store.listRuns().some(run => hasActiveExecution(run.id))) { sendJson(response, 409, { error: "仍有执行或保存操作，请停止后重试" }); return true; }
+    if (resettingData || writeRequests !== 1 || runtimeTestActive || pluginUpdates.status().running || communications.isActive() || taskDeletionLocks.size || store.listRecoveryRunIds().some(hasActiveExecution)) { sendJson(response, 409, { error: "仍有执行或保存操作，请停止后重试" }); return true; }
     const workspaces = store.prepareDataReset();
     resettingData = true;
     try {
@@ -238,7 +241,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
       resetCommitted = true;
       for (const stream of eventStreams) stream.end();
       eventStreams.clear();
-      store.close(); auth.close();
+      closeExecutionBudget(store);store.close(); auth.close();
       await dataReset.recover();
       store = createStore(storeOptions); auth = createAuth(authOptions);
       pluginUpdates.reset();
@@ -259,33 +262,33 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   if (chatAttachment && request.method === 'POST' && !chatAttachment[2]) {
     if (!/^application\/octet-stream(?:;|$)/i.test(request.headers['content-type'] || '')) throw new Error('附件上传需要 application/octet-stream');
     const key = chatAttachment[1]; if (taskAttachment) store.assertRunAttachmentUpload(key); else store.getCommunication(key, { limit: 1 });
-    const chunks = []; let bytes = 0;
-    try {
-      for await (const chunk of request.iterator({ destroyOnReturn: false })) {
-        bytes += chunk.length;
-        if (bytes > 20 * 1024 * 1024) throw new RequestBodyTooLargeError('附件最大 20 MiB');
-        chunks.push(chunk);
-      }
-    } finally { if (!request.readableEnded) request.resume(); }
-    const record = await runFiles[taskAttachment ? 'writeRunAttachment' : 'writeCommunicationAttachment'](key, searchParams.get('name'), Buffer.concat(chunks));
+    let record;
+    try { record=await runFiles[taskAttachment?'writeRunAttachment':'writeCommunicationAttachment'](key,searchParams.get('name'),request.iterator({destroyOnReturn:false})); }
+    catch(error){if(error.code==='ATTACHMENT_TOO_LARGE')throw new RequestBodyTooLargeError(error.message);throw error;}
+    finally{if(!request.readableEnded)request.resume();}
     try { sendJson(response, 201, { attachment: store[taskAttachment ? 'registerRunAttachment' : 'registerCommunicationAttachment'](key, record) }); }
     catch (error) { await runFiles[taskAttachment ? 'discardRunAttachment' : 'discardCommunicationAttachment'](key, record).catch(cleanup => diagnostic('communication.attachment_cleanup_failed', { error: cleanup })); throw error; }
     return true;
   }
-  if (chatAttachment && request.method === 'GET' && chatAttachment[2]) {
-    const record = store[taskAttachment ? 'getRunAttachment' : 'getCommunicationAttachment'](chatAttachment[1], chatAttachment[2]);
-    let content;
-    try { content = await runFiles[taskAttachment ? 'readRunAttachment' : 'readCommunicationAttachment'](chatAttachment[1], record); }
-    catch (error) { diagnostic('communication.attachment_read_failed', { error }); sendJson(response, 409, { error: '附件不可读取或完整性校验失败；请核对原文件。' }); return true; }
-    if (searchParams.get('preview') === '1') {
-      const mediaType = attachmentImageType(content);
-      if (!mediaType) { sendJson(response, 415, { error: '此附件不是可预览的图片，请下载原文件。' }); return true; }
-      response.writeHead(200, { 'Content-Type': mediaType, 'Content-Disposition': 'inline', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" });
-      response.end(content); return true;
+  if (chatAttachment && ['GET','HEAD'].includes(request.method) && chatAttachment[2]) {
+    const key=chatAttachment[1],scope=taskAttachment?'runs':'communications',record=store[taskAttachment?'getRunAttachment':'getCommunicationAttachment'](key,chatAttachment[2]);
+    const preview=searchParams.get('preview')==='1',thumbnail=preview&&searchParams.get('thumbnail')==='1';
+    const etag='"'+record.sha256+(thumbnail?'-thumbnail-v1':'')+'"';
+    try{await runFiles.validateAttachment(scope,key,record);}catch(error){diagnostic('communication.attachment_read_failed',{error});sendJson(response,409,{error:'附件不可读取或完整性校验失败；请核对原文件。'});return true;}
+    const headers={'Cache-Control':'private, no-cache',ETag:etag,'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox"};
+    if(request.headers['if-none-match']===etag){response.writeHead(304,headers);response.end();return true;}
+    if(request.method==='HEAD'){response.writeHead(200,{...headers,'Content-Length':record.bytes});response.end();return true;}
+    if(thumbnail){
+      try{const content=await attachmentThumbnail(record.sha256,()=>runFiles.openAttachment(scope,key,record));response.writeHead(200,{...headers,'Content-Type':'image/png','Content-Length':content.length});response.end(content);}
+      catch(error){diagnostic('attachment.thumbnail_failed',{error});sendJson(response,415,{error:'此图片无法生成缩略图，请打开或下载原文件。'});}
+      return true;
     }
-    const filename = encodeURIComponent(record.name).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
-    response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="download"; filename*=UTF-8''${filename}`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" });
-    response.end(content); return true;
+    let file;try{file=await runFiles.openAttachment(scope,key,record);}catch(error){diagnostic('communication.attachment_read_failed',{error});sendJson(response,409,{error:'附件不可读取或完整性校验失败；请核对原文件。'});return true;}
+    const mediaType=preview?attachmentImageType(file.head):'application/octet-stream';
+    if(!mediaType){file.stream.destroy();sendJson(response,415,{error:'此附件不是可预览的图片，请下载原文件。'});return true;}
+    const filename=encodeURIComponent(record.name).replace(/['()*]/g,char=>`%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+    response.writeHead(200,{...headers,'Content-Type':mediaType,'Content-Length':file.bytes,'Content-Disposition':preview?'inline':`attachment; filename="download"; filename*=UTF-8''${filename}`});
+    try{await pipeline(file.stream,response);}catch(error){if(!response.destroyed)response.destroy(error);}return true;
   }
   const chatConsole = pathname.match(/^\/api\/communications\/([^/]+)\/console$/);
   if (chatConsole && request.method === 'GET') {
@@ -309,12 +312,12 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     sendJson(response, 200, store.getExecutionLogs({ source: searchParams.get("source") || "all", level: searchParams.get("level") || "all", before: searchParams.get("before"), limit: Number(searchParams.get("limit") || 100) }));
     return true;
   }
-  if (pathname === "/api/communications" && request.method === "GET") { sendJson(response, 200, { conversations: store.listCommunications() }); return true; }
+  if (pathname === "/api/communications" && request.method === "GET") { sendJson(response, 200, (()=>{const {items,...page}=store.listCommunications({page:Number(searchParams.get('page')||1)});return {conversations:items,...page};})()); return true; }
   if (pathname === "/api/communications" && request.method === "POST") { sendJson(response, 200, { conversation: store.openCommunication(await readJson(request)) }); return true; }
   const chat = pathname.match(/^\/api\/communications\/([^/]+)(?:\/(messages|deliveries)(?:\/([^/]+)\/(retry|cancel|events))?)?$/);
   if (chat) {
     const [, key, action, deliveryId, operation] = chat;
-    const pagination = { before: searchParams.get("before"), limit: Number(searchParams.get("limit") || 100) };
+    const pagination = { before: searchParams.get("before"), limit: Number(searchParams.get("limit") || 100), since:searchParams.get("since") };
     if (!action && request.method === "GET") { sendJson(response, 200, store.getCommunication(key, pagination)); return true; }
     if (!action && request.method === "PUT") { sendJson(response, 200, { conversation: store.updateCommunication(key, await readJson(request)) }); return true; }
     if (action === "messages" && request.method === "POST") {
@@ -330,8 +333,24 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     response.end();
     return true;
   }
+  if(request.method==='GET' && pathname==='/api/catalog-references'){sendJson(response,200,store.getCatalogReferences());return true;}
+  if(request.method==='GET' && pathname==='/api/overview'){sendJson(response,200,store.getOverview());return true;}
+  const directoryPaths={'/api/tasks':['tasks','tasks'],'/api/agents':['agents','agents'],'/api/roles':['roles','roles'],'/api/teams':['teams','teams'],'/api/workflow-templates':['workflowTemplates','workflowTemplates']};
+  if(request.method==='GET' && directoryPaths[pathname] && searchParams.has('page')) {
+    const [name,key]=directoryPaths[pathname],query=Object.fromEntries(searchParams);
+    const allowed=['page','pageSize','search','status','role','workflow','archived'];
+    if(Object.keys(query).some(key=>!allowed.includes(key)))throw new Error('目录查询参数无效');
+    if(query.archived!==undefined && !['true','false'].includes(query.archived))throw new Error('archived 必须为 true 或 false');
+    const {items,...pagination}=store.queryDirectory(name,{...query,archived:query.archived==='true'});
+    sendJson(response,200,{[key]:items,...pagination});return true;
+  }
+  const directoryDetail=pathname.match(/^\/api\/(tasks|agents|roles|teams|workflow-templates)\/([^/]+)$/);
+  if(request.method==='GET' && directoryDetail){
+    const names={tasks:['tasks','task'],agents:['agents','agent'],roles:['roles','role'],teams:['teams','team'],'workflow-templates':['workflowTemplates','workflowTemplate']};
+    const [name,key]=names[directoryDetail[1]];sendJson(response,200,{[key]:store.getDirectoryItem(name,directoryDetail[2])});return true;
+  }
   if (request.method === "GET" && pathname === "/api/bootstrap") {
-    sendJson(response, 200, { ...store.getBootstrap(), settings: store.getWorkspaceSettings() });
+    sendJson(response, 200, { ...store.getBootstrap({light:searchParams.get("view")==="shell"}), settings: store.getWorkspaceSettings() });
     return true;
   }
   if (request.method === "GET" && pathname === "/api/workflow-templates") {
@@ -404,7 +423,8 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     if (!["claude-code", "codex", "dsh"].includes(provider)) throw new Error("provider 必须是 claude-code、codex 或 dsh");
     if (searchParams.has("executable")) throw new Error("固定 Runtime 不接受自定义 executable");
     if (!runtimeInstalled(provider)) throw new Error("Runtime 未安装或当前客户端找不到可执行文件；安装并配置 PATH 后重新打开客户端");
-    sendJson(response, 200, await runtimeModelCatalog({ provider }));
+    if(searchParams.has('refresh') && searchParams.get('refresh')!=='true')throw new Error('refresh 必须为 true');
+    sendJson(response, 200, await runtimeModelCatalog({ provider },{refresh:searchParams.get('refresh')==='true'}));
     return true;
   }
   if (pathname === "/api/settings/runtime-profiles" && request.method === "GET") {
@@ -611,7 +631,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     const taskId = taskMatch[1];
     return withTaskDeletionLock(taskDeletionLocks, taskId, async () => {
       store.assertTaskDeletionAllowed(taskId);
-      const relatedRuns = store.listRuns().filter((run) => run.taskId === taskId);
+      const relatedRuns = store.taskRunIds(taskId).map(id=>({id}));
       const staged = await runFiles.stageRunsForDeletion(relatedRuns.map((run) => run.id));
       let deleted;
       try { deleted = store.deleteTask(taskId); }
@@ -646,12 +666,21 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   }
   const timelineMatch = pathname.match(/^\/api\/runs\/([^/]+)\/timeline$/);
   if (request.method === "GET" && timelineMatch) {
-    sendJson(response, 200, { events: store.timeline(timelineMatch[1]), run: store.listRuns().find((run) => run.id === timelineMatch[1]) || null });
+    sendJson(response, 200, { events: store.timeline(timelineMatch[1]), run: store.getRunSummary(timelineMatch[1]).run });
     return true;
   }
+  const artifactList=pathname.match(/^\/api\/runs\/([^/]+)\/artifacts$/);
+  if(request.method==='GET'&&artifactList){sendJson(response,200,store.getRunArtifacts(artifactList[1],{before:searchParams.get('before'),limit:Number(searchParams.get('limit')||20)}));return true;}
+  const collaborationMatch=pathname.match(/^\/api\/runs\/([^/]+)\/collaboration$/);
+  if(request.method==='GET'&&collaborationMatch){
+    const {workspace,selected,...pagination}=store.getRunCollaboration(collaborationMatch[1],{before:searchParams.get('before'),limit:Number(searchParams.get('limit')||30),human:searchParams.get('human')==='true'});
+    const ids=new Set(selected);sendJson(response,200,{...pagination,items:collaborationRecords(workspace).filter(item=>ids.has(item.id))});return true;
+  }
+  const traceDetail=pathname.match(/^\/api\/runs\/([^/]+)\/traces\/([^/]+)$/);
+  if(request.method==='GET'&&traceDetail){sendJson(response,200,{trace:store.getRunTrace(traceDetail[1],traceDetail[2])});return true;}
   const workspaceMatch = pathname.match(/^\/api\/runs\/([^/]+)\/workspace$/);
   if (request.method === "GET" && workspaceMatch) {
-    sendJson(response, 200, store.getRunWorkspace(workspaceMatch[1], { summary: searchParams.get("view") === "summary" }));
+    sendJson(response, 200, searchParams.get("view")==="compact" ? store.getRunSummary(workspaceMatch[1]) : store.getRunWorkspace(workspaceMatch[1], { summary: searchParams.get("view") === "summary" }));
     return true;
   }
   const consoleContentMatch = pathname.match(/^\/api\/runs\/([^/]+)\/console-content\/([^/]+)$/);
@@ -797,9 +826,18 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     response.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     eventStreams.add(response);
     response.write(`event: ready\ndata: ${JSON.stringify({ runId })}\n\n`);
+    // A slow reader reconnects and reads persisted pages; never accumulate an
+    // unbounded per-client queue in the control-plane process.
+    let congested=false;
+    const write=chunk=>{
+      if(response.writableEnded||response.destroyed)return;
+      if(congested||response.writableLength+Buffer.byteLength(chunk)>256*1024){response.destroy();return;}
+      congested=!response.write(chunk);
+    };
+    response.on('drain',()=>{congested=false;});
     const authorized = () => { if (response.writableEnded) return false; if (auth.session(request)) return true; response.write("event: auth-expired\ndata: {}\n\n"); response.end(); return false; };
-    const unsubscribe = store.subscribe((event) => { if (event.runId === runId && authorized()) response.write(`event: run-event\ndata: ${JSON.stringify(event)}\n\n`); });
-    const heartbeat = setInterval(() => { if (authorized()) response.write(": heartbeat\n\n"); }, 15000);
+    const unsubscribe = store.subscribe((event) => { if (event.runId === runId && authorized()) write(`event: run-event\ndata: ${JSON.stringify(event)}\n\n`); });
+    const heartbeat = setInterval(() => { if (authorized()) write(": heartbeat\n\n"); }, 15000);
     request.on("close", () => { eventStreams.delete(response); clearInterval(heartbeat); unsubscribe(); });
     return true;
   }
@@ -881,7 +919,8 @@ server.listen(port, host, () => {
   communications.recover();
   pluginUpdates.start();
   communications.poll().catch(error => diagnostic("communication.recovery_error", { error }));
-  for (const run of store.listRuns()) {
+  for (const runId of store.listRecoveryRunIds()) {
+    const run=store.getRunSummary(runId).run;
     const plan = store.getRunRecoveryPlan(run.id);
     if (plan.interruptedTraceIds.length || plan.recoveredDispatchIds.length) store.recoverInterruptedRun(run.id);
     if (!store.getRunRecoveryPlan(run.id).shouldExecute) continue;
@@ -893,6 +932,7 @@ server.listen(port, host, () => {
 server.on('close',()=>pluginUpdates.stop());
 process.once('disconnect',()=>process.kill(process.pid,'SIGTERM'));
 for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{
+  closeExecutionBudget(store);
   // Abort owned Git work before preserving the service's exit semantics.
   const finish=()=>process.exit(signal==='SIGINT'?130:143);
   setTimeout(finish,3000).unref();
@@ -908,8 +948,7 @@ process.on('message', message => {
   }
   if (message.type !== 'agentforge-update-prepare') return;
   const busy = Boolean(updateRestartLease || resettingData || writeRequests || runtimeTestActive || taskDeletionLocks.size || pluginUpdates.status().running || communications.isActive()
-    || store.listRuns().some(run => ['planning','running','review'].includes(run.status) || hasActiveExecution(run.id)
-      || store.listDispatches(run.id).some(delivery => delivery.status === 'claimed' || (delivery.interactionOnly && delivery.status === 'queued'))));
+    || store.listPatrolRunIds().length || store.listRecoveryRunIds().some(hasActiveExecution));
   if (!busy) {
     const timer = setTimeout(() => { updateRestartLease = null; }, 30000); timer.unref();
     updateRestartLease = { id: message.id, timer };

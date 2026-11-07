@@ -122,3 +122,9 @@ PUT /api/runs/:id/members 经认证交给 Store 更新当前成员投影，不�
 任务协作上传共用认证二进制入口与位图预览；Run Files 保存原字节，Store 保存同 Run 引用，orchestrator 在投递前核验附件并传递绝对路径。调度上下文和工作目录/Artifact 查询不再构建全量 getRunWorkspace；深拷贝移除 JSON 字符串中间结果，避免长任务重复展开员工配置导致 Invalid string length。
 
 角色扩展内部保存按Provider解析引用，配置API仅返回选择ID；Store在任务和沟通快照中合并员工直接扩展与角色扩展。市场替换及删除同步当前角色关联。停用自动化删除先退出执行并暂存Run文件，再原子删除相关记录。
+
+性能路径：Store → state-journal 实体逆操作/脏集合 → persistence 同步原子小事务。历史内容按 ID 延迟加载，目录/协作/日志使用索引分页；history 派生库以提交水位增量同步。execution-budget 只在编排层管理任务与沟通资源准入，diagnostic-writer 负责有界异步日志，file-fingerprints/attachment-thumbnails 负责文件摘要和派生图片。边界与缓存规则见 [docs/28](../docs/28-performance-architecture.md)。
+
+派工协议：单人 nextNodeId/nextAgentId/instruction 与 assignments 共用 enqueueManagerAssignments。原子路由拒收只回滚投递/咨询/验收，实际报告与文件仍记录；rejectDispatchRouting 保存具体错误到原投递，允许一次原会话纠正，重复拒收失败并由人类继续。Provider 故障不走此纠正。合法验收遇到在途工作使用 deferredRevisit，领取须等待其他工作结束且不阻塞后续经理消息。
+
+首次保存快照内集合时先完整物化，不能把“脏日志为空”当成“集合已落盘”；实体/事件初始化标记与主快照删除数组同事务提交。`state-journal` 回归覆盖已有安装 ID 的冷启动与再次重启。

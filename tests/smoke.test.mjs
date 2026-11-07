@@ -199,7 +199,7 @@ test("Store save diagnostic callback failure cannot revert committed domain stat
     const store = createStore({ databasePath: path, workspaceRoot: join(root, "work"), onSaveDiagnostic(record) { records.push(record); throw new Error("diagnostic sink unavailable"); } });
     const run = store.createRun(fixtureTaskInput(store).id);
     database = new DatabaseSync(path, { readOnly: true });
-    const disk = JSON.parse(database.prepare("SELECT state_json FROM workspace_snapshots").get().state_json);
+    const disk = {runs:database.prepare("SELECT value_json FROM workspace_entities WHERE collection='runs' ORDER BY position").all().map(row=>JSON.parse(row.value_json))};
     assert.deepEqual(disk.runs, store.snapshot().runs);
     assert.equal(disk.runs.some(item => item.id === run.id), true);
     assert.ok(records.length >= 2);
@@ -360,7 +360,7 @@ test("bootstrap Task lists use workspace labels instead of host paths", async ()
   assert.doesNotMatch(source.slice(source.indexOf("function renderTasks()"), source.indexOf("/* ---------- 团队 ---------- */")), /col-path/);
 });
 
-test("Task freezes explicit acceptance criteria, rejects malformed input, and migrates legacy scalars", async () => {
+test("Task freezes explicit acceptance criteria, rejects malformed input, and preserves criteria across restarts", async () => {
   const root = await mkdtemp(join(tmpdir(), "agentforge-acceptance-"));
   let database;
   try {
@@ -376,9 +376,7 @@ test("Task freezes explicit acceptance criteria, rejects malformed input, and mi
     assert.throws(() => store.createTask({ ...base, title: "过长验收标准", acceptanceCriteria: ["x".repeat(501)] }), /不能超过 500 字符/);
 
     database = new DatabaseSync(db);
-    const snapshot = JSON.parse(database.prepare("SELECT state_json FROM workspace_snapshots WHERE id = 1").get().state_json);
-    snapshot.tasks.find((item) => item.id === base.id).acceptanceCriteria = "历史任务的单条验收标准";
-    database.prepare("UPDATE workspace_snapshots SET state_json = ?, updated_at = ? WHERE id = 1").run(JSON.stringify(snapshot), new Date().toISOString());
+    database.prepare("UPDATE workspace_entities SET value_json=json_set(value_json,'$.acceptanceCriteria',json(?)) WHERE collection='tasks' AND id=?").run(JSON.stringify(['历史任务的单条验收标准']),base.id);
     database.close(); database = null;
     const reopened = createStore({ databasePath: db });
     assert.deepEqual(reopened.getTask(base.id).acceptanceCriteria, ["历史任务的单条验收标准"]);
@@ -612,11 +610,11 @@ test("console subscription invalidates stale visits and preserves history during
   page.events = Array.from({ length: 1000 }, (_, index) => ({ id: `event_${index}` }));
   const live = { id: "new", type: "runtime.event", runId: "run", actor: { id: "agent" }, data: {} };
   state.eventSource.emit(live); state.eventSource.emit(live);
-  assert.equal(page.events.length, 1001); assert.equal(page.events[0].id, "event_0");
-  assert.equal(timers.length, 1, "runtime frames only schedule console painting, not metadata/global requests");
+  assert.equal(page.events.length, 1000, "live events never grow or reanchor a historical window"); assert.equal(page.events[0].id, "event_0");
+  assert.equal(timers.length, 0, "a historical window is not repainted by live frames");
   state.eventSource.emit({ ...live, id: "status", type: "trace.accepted" });
   state.eventSource.emit({ ...live, id: "status2", type: "message.sent" });
-  assert.equal(timers.length, 2, "domain changes share one coalesced refresh");
+  assert.equal(timers.length, 1, "domain changes share one coalesced refresh");
   state.eventSource.close(); state.eventSource = null;
   connect("run"); assert.equal(page.loaded, false); assert.deepEqual(page.events, []);
 });
@@ -754,10 +752,10 @@ test("custom workflow deletion preserves Task template references", async () => 
   const host = {};
   const render = new Function("state", "disposeWorkflowGraphs", "$", "esc", "paginate", "renderListPager", `${source.slice(start, end)}; return renderWorkflows;`)({
     tasks: [{ workflowTemplateId: "referenced" }], listPages: { workflows: 1 },
-    workflowTemplates: [
-      { id: "referenced", name: "受引用", system: false, description: "", nodes: [{ id: "node", dependsOn: [] }] },
+    directoryPages:{workflows:{page:1,items:[
+      { id: "referenced", referenceCount:1, name: "受引用", system: false, description: "", nodes: [{ id: "node", dependsOn: [] }] },
       { id: "available", name: "可删除", system: false, description: "", nodes: [{ id: "node", dependsOn: [] }] }
-    ]
+    ]}}
   }, () => {}, () => host, (value) => String(value), (items) => ({items, page:1}), () => {});
   render();
   assert.match(host.innerHTML, /已被 1 个任务引用/);
@@ -784,6 +782,7 @@ test("task center exposes deletion only when the Store says it is safe", async (
     ],
     workflowTemplates: []
   };
+  state.directoryPages={tasks:{items:state.tasks,page:1,total:state.tasks.length,totalPages:1}};
   const render = new Function("state", "$", "TASK_FILTERS", "taskNeedsAttention", "taskMatchesFilter", "runOfTask", "taskActionLabel", "pill", "esc", "exactTime", "timeAgo", "workspaceSummary", "statusText", "paginate", "paginationMarkup", "window", `${source.slice(start, end)}; return renderTasks;`)(
     state,
     (selector) => hosts[selector],
@@ -1790,10 +1789,10 @@ test("collaboration is chronological without pinned acceptance duplicates and un
   const view = { draft: "", collaborationFilter: "all" };
   const elements = new Map();
   const select = (id) => {
-    if (!elements.has(id)) elements.set(id, { innerHTML: "", addEventListener() {} });
+    if (!elements.has(id)) elements.set(id, { innerHTML: "", addEventListener() {}, querySelector(){return null;} });
     return elements.get(id);
   };
-  const render = new Function("$", "state", "workspaceView", "collaborationRecords", "collaborationMessageMarkup", "exactTime", "esc", "sendInstruction", "refreshCollaborationBodies", "messageAttachments", "bindTaskAttachments", "draftAttachments", "attachmentControls", `${renderSource}; return renderCollaboration;`)(select, { workspace }, () => view, collaborationRecords, text => `<p>${esc(text)}</p>`, String, esc, () => {}, () => {}, () => "", () => {}, () => "", () => "");
+  const render = new Function("$", "state", "workspaceView", "collaborationRecords", "collaborationMessageMarkup", "exactTime", "esc", "sendInstruction", "refreshCollaborationBodies", "messageAttachments", "bindTaskAttachments", "draftAttachments", "attachmentControls", "requestAnimationFrame", `${renderSource}; return renderCollaboration;`)(select, { workspace }, () => view, collaborationRecords, text => `<p>${esc(text)}</p>`, String, esc, () => {}, () => {}, () => "", () => {}, () => "", () => "", callback=>callback());
   workspace.run.task.archivedAt = null;
   workspace.messages = [
     { id: 'manager-final', kind: 'manager_decision', sender: { type: 'agent', name: '经理' }, recipient: { type: 'team', name: '团队' }, content: '最终交接结论', createdAt: '2026-10-19T00:00:00Z' },
@@ -1803,6 +1802,7 @@ test("collaboration is chronological without pinned acceptance duplicates and un
   workspace.events = [{ id: "review-event", type: "run.awaiting_acceptance", timestamp: "2026-10-19T00:00:00Z", message: "等待人类确认" }];
   for (const status of ["planning", "running", "awaiting_human", "review", "awaiting_acceptance", "paused", "failed", "cancelled", "completed"]) {
     workspace.run.status = status;
+    view.collaborationItems=collaborationRecords(workspace);
     render(workspace, []);
     const html = select("#collaboration-panel").innerHTML;
     assert.equal((html.match(/最终交接结论/g) || []).length, 1);
@@ -1814,6 +1814,7 @@ test("collaboration is chronological without pinned acceptance duplicates and un
     assert.doesNotMatch(html, /data-open-completion-confirm|workspace-acceptance/);
   }
   view.collaborationFilter = "human";
+  view.collaborationItems=collaborationRecords(workspace).filter(record=>record.human);
   render(workspace, []);
   assert.match(select("#collaboration-panel").innerHTML, /新的提问/);
   assert.doesNotMatch(select("#collaboration-panel").innerHTML, /最终交接结论/);
@@ -1943,13 +1944,13 @@ console.log(JSON.stringify({type:"result",result}));
 });
 
 for (const malformed of [false, true]) {
-  test(`manager ${malformed ? 'incomplete' : 'missing'} decision is resumed by the idle patrol without a system message`, async () => {
+  test(`manager ${malformed ? 'incomplete' : 'missing'} decision receives precise same-dispatch correction without a system message`, async () => {
     const root = await directory('agentforge-manager-decision-');
     try {
       const executable = join(root, 'provider.mjs');
       await writeFile(executable, `#!${process.execPath}
 const input = process.argv.at(-1) || '';
-const corrected = input.includes('当前任务仍在进行');
+const corrected = input.includes('协调纠错反馈') && input.includes('本次没有建立派工、咨询或验收');
 const result = corrected ? JSON.stringify({summary:'补齐明确的验收决定',managerDecision:{nextNodeId:null,nextAgentId:null,rationale:'经理明确提交人类验收'}}) : ${malformed ? "JSON.stringify({summary:'正文说已提交验收',managerDecision:{rationale:'缺少必填字段'}})" : "'正文说已提交验收'"};
 console.log(JSON.stringify({type:'result',subtype:'success',result}));
 `,{mode:0o755});
@@ -1957,14 +1958,14 @@ console.log(JSON.stringify({type:'result',subtype:'success',result}));
       const task = store.createTask({...fixtureTaskInput(store),workspacePath:root,managerRuntime:{provider:'claude-code',executable}});
       const run = store.createRun(task.id);
       await executeRun(store,run.id,{runFilesRoot:join(root,'audit')});
-      assert.equal(store.getRun(run.id).status,'running');
-      assert.equal(store.listDispatches(run.id).filter(d=>d.status==='queued').length,0);
-      assert.equal(store.prepareRunPatrol(run.id),true);
-      await executeRun(store,run.id,{runFilesRoot:join(root,'audit')});
       const workspace = store.getRunWorkspace(run.id), dispatches=store.listDispatches(run.id);
+      assert.equal(store.prepareRunPatrol(run.id),false);
       assert.equal(workspace.run.status,'awaiting_acceptance');
       assert.equal(workspace.traces.length,2);
-      assert.ok(dispatches.some(d=>d.dedupeKey.startsWith('patrol:') && d.coordinationFollowup && d.status==='done'));
+      assert.equal(dispatches.length,1);assert.equal(dispatches[0].status,'done');assert.equal(dispatches[0].attempts,2);
+      assert.equal(workspace.traces[0].status,'failed');assert.equal(workspace.traces[0].dispatchId,workspace.traces[1].dispatchId);
+      assert.equal(workspace.traces[0].providerSessionId,workspace.traces[1].providerSessionId);
+      assert.ok(workspace.events.some(e=>e.type==='run.routing_incomplete'&&e.data.correctionScheduled));
       assert.ok(workspace.messages.some(m=>m.content==='正文说已提交验收'),'original report is preserved');
       assert.ok(workspace.messages.every(m=>m.sender.type!=='system'));
       assert.equal(workspace.run.acceptanceRequest.traceId,workspace.traces.at(-1).id,'acceptance comes from the explicit corrected decision');

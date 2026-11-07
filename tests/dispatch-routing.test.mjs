@@ -43,9 +43,10 @@ test('dispatch provenance is same-Run metadata and does not deliver or consume t
     const task = store.listTasks()[0], run = store.createRun(task.id);
     store.updateRun(run.id, { status: 'running' }); store.setTaskStatus(task.id, 'running');
     const message = store.addMessage({ runId: run.id, sender: { type: 'agent', id: run.manager.id, name: run.manager.name }, kind: 'manager_decision', content: '请分析需求' });
-    scheduleManagerFollowup(store, run.id, { id: 'source-delivery' }, { nextNodeId: 'requirements', nextAgentId: 'agent_analyst', rationale: '交给需求分析' }, message.id);
+    scheduleManagerFollowup(store, run.id, { id: 'source-delivery', recipientAgentId: run.manager.id }, { nextNodeId: 'requirements', nextAgentId: 'agent_analyst', rationale: '交给需求分析' }, message.id);
     const delivery = store.listDispatches(run.id)[0];
-    assert.equal(delivery.sourceMessageId, message.id); assert.deepEqual(delivery.messageIds, []);
+    const directed = store.getRunMessage(run.id, delivery.sourceMessageId);
+    assert.equal(directed.content, message.content); assert.equal(directed.recipient.id, 'agent_analyst'); assert.deepEqual(delivery.messageIds, [directed.id]);
     assert.equal(store.getRunWorkspace(run.id).messages.find(item => item.id === message.id).recipient.type, 'team');
     assert.ok(store.memberInputMessages(delivery.id).some(item => item.id === message.id));
     const otherTask = store.createTask({ title: "其他任务", objective: "来源隔离", memberAgentIds: task.memberAgentIds, workflowTemplateId: task.workflowTemplateId, workspacePath: task.workspacePath });
@@ -352,7 +353,7 @@ test("manager redispatch materializes during retry backoff while failed evidence
 
   const result = scheduleManagerFollowup(store, run.id, managerDelivery, { nextNodeId: "requirements", nextAgentId: "agent_analyst", rationale: "返工重派产品" });
   assert.equal(result.scheduled, "handoff");
-  const handoff = store.listDispatches(run.id).find((item) => item.dedupeKey === "handoff:" + managerDelivery.id);
+  const handoff = store.listDispatches(run.id).find((item) => item.dedupeKey === "assignment:" + managerDelivery.id + ":0");
   assert.ok(handoff, "the redispatch dispatch really exists");
   assert.equal(handoff.purpose, "node");
   assert.equal(handoff.recipientAgentId, "agent_analyst");
@@ -452,7 +453,7 @@ test("formal routing chain: direct @ → manager dispatch → node delivery → 
   store.claimDispatch(run.id);
   store.completeDispatch(managerDelivery.id);
   assert.equal(scheduleManagerFollowup(store, run.id, managerDelivery, { nextNodeId: "testing", nextAgentId: "agent_tester", rationale: "正式派发独立测试" }).scheduled, "handoff");
-  const nodeDelivery = store.listDispatches(run.id).find((item) => item.dedupeKey === "handoff:" + managerDelivery.id);
+  const nodeDelivery = store.listDispatches(run.id).find((item) => item.dedupeKey === "assignment:" + managerDelivery.id + ":0");
   assert.equal(nodeDelivery.purpose, "node");
   assert.equal(nodeDelivery.recipientAgentId, "agent_tester");
   assert.equal(nodeDelivery.workflowNodeId, "testing");
@@ -520,6 +521,7 @@ if (prompt.includes("任务：失败重试代码")) {
   else if (prompt.includes('"workflowNodeId":"testing"')) { mkdirSync("docs/testing", { recursive: true }); writeFileSync("docs/testing/review.md", "# 独立测试报告\\n"); out.summary = "独立测试已完成"; }
   else { writeFileSync("FEATURE.md", "# 真实研发交付\\nPROMPT_SHA256:" + promptHash + "\\n"); out.summary = "已在绑定仓库完成研发交付"; }
 }
+if(out.managerDecision?.nextNodeId === null) out.managerDecision.nextAgentId = null;
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) out.managerDecision.nextAgentId = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[out.managerDecision.nextNodeId] || "agent_analyst";
 console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 `);
@@ -553,7 +555,8 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
   assert.equal(workspace.run.status, "awaiting_acceptance", "manager controls the handoff to the human");
   const workerDelivery = workspace.dispatches.find(item => item.recipientAgentId === "agent_engineer" && item.purpose === "node");
   const decisionMessage = workspace.messages.find(item => item.id === workerDelivery.sourceMessageId);
-  assert.equal(decisionMessage.kind, "manager_decision");
+  assert.equal(decisionMessage.kind, "handoff");
+  assert.equal(decisionMessage.recipient.id, "agent_engineer");
   assert.equal(decisionMessage.sender.id, run.manager.id);
   const handoffMessage = workspace.messages.find(item => item.kind === "handoff" && item.sender.id === "agent_engineer");
   assert.equal(workspace.dispatches.find(item => item.sourceMessageId === handoffMessage.id).recipientAgentId, run.manager.id);
@@ -710,6 +713,7 @@ if (prompt.includes('"purpose":"delivery_review"')) {
   console.log(JSON.stringify({ type: "result", result: "这不是合法JSON" }));
   process.exit(0);
 }
+if(out.managerDecision?.nextNodeId === null) out.managerDecision.nextAgentId = null;
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) out.managerDecision.nextAgentId = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[out.managerDecision.nextNodeId] || "agent_analyst";
 console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 `);
@@ -833,3 +837,78 @@ test('employee consultation waits for B and queues the original A delivery with 
   assert.equal(store.claimDispatch(run.id).id,a.id);
  }finally{store.close();}
 });
+
+// Exercise the real dispatch/persistence/prompt path with a controlled CLI;
+// this is protocol regression coverage, not real-model acceptance.
+for (const scenario of ['single', 'corrected', 'repeated', 'mixed', 'consultation']) {
+  test(`routing feedback: ${scenario} preserves work and never silently loses a handoff`, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'af-routing-feedback-'));
+    let store = createCatalogFixtureStore({ databasePath: join(root, 'state.sqlite'), workspaceRoot: join(root, 'work') });
+    t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });
+    const executable = join(root, 'provider.mjs'), fixed = join(root, 'fixed');
+    await writeFile(executable, `#!/usr/bin/env node
+import {readFileSync,writeFileSync,existsSync} from 'node:fs';
+const system=readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file')+1],'utf8'),prompt=process.argv.at(-1);
+const manager=JSON.parse(system.match(/可咨询角色：(.*)/)[1]).find(x=>x.kind==='manager').id;
+const isManager=system.includes('任务级项目经理'),scenario=${JSON.stringify(scenario)};
+let result;
+if(isManager){
+ const correction=prompt.includes('协调纠错反馈'),done=existsSync('delivery.txt');
+ if(correction&&!prompt.includes('本次没有建立派工、咨询或验收'))throw Error('missing precise rejection');
+ if(!done)writeFileSync('manager-note.txt','真实文件事实保留');
+ const decision={nextNodeId:'requirements',nextAgentId:'agent_analyst',instruction:'EXACT_WORKER_INSTRUCTION: 仅写 delivery.txt 内容 delivered',rationale:'独立准备'};
+ if(done)result={summary:'员工已交接',managerDecision:{nextNodeId:null,nextAgentId:null}};
+ else if(scenario==='repeated'&&!existsSync(${JSON.stringify(fixed)})||scenario==='corrected'&&!correction)result={summary:'派工报告仍保留',managerDecision:{...decision,unexpected:true}};
+ else if(scenario==='mixed'&&!correction)result={summary:'混用决定',managerDecision:decision,consultation:{audience:'human',question:'不得真的创建此问题'}};
+ else if(scenario==='consultation'&&!correction)result={summary:'咨询目标无效',consultation:{audience:'agent',recipientAgentId:'missing',question:'不得真的创建此问题'}};
+ else result={summary:'概要不替代完整定向指令',managerDecision:decision};
+}else{
+ if(!prompt.includes('EXACT_WORKER_INSTRUCTION'))throw Error('instruction was lost');
+ writeFileSync('delivery.txt','delivered');result={summary:'员工结果',handoff:{recipientAgentId:manager}};
+}
+console.log(JSON.stringify({type:'result',is_error:false,result:JSON.stringify(result)}));
+`, { mode: 0o700 });
+    for (const agent of store.listAgents()) store.updateAgent(agent.id, { runtime: { provider: 'claude-code', executable } });
+    const task = store.createTask({ title: '派工协议验收', objective: '验证完整指令及拒收反馈', memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: 'software_delivery' });
+    const run = store.createRun(task.id), options = { runFilesRoot: join(root, 'audit') };
+    await executeRun(store, run.id, options);
+    let w = store.getRunWorkspace(run.id);
+    if (scenario === 'repeated') {
+      assert.equal(w.run.status, 'failed'); assert.equal(w.traces.length, 2);
+      assert.equal(w.dispatches.length, 1); assert.equal(w.dispatches[0].status, 'cancelled');
+      assert.ok(w.traces.every(trace => trace.status === 'failed' && trace.agentId === run.manager.id));
+      assert.equal(store.prepareRunPatrol(run.id), false);
+      await executeRun(store, run.id, options); assert.equal(store.getRunWorkspace(run.id).traces.length, 2);
+      const d = w.dispatches[0]; assert.equal(d.routingCorrectionCount, 1);
+      // Reopening the Store must not erase feedback or permit a patrol loop.
+      store.close(); store = createCatalogFixtureStore({ databasePath: join(root, 'state.sqlite'), workspaceRoot: join(root, 'work') });
+      assert.deepEqual(store.getDispatch(d.id).routingError, d.routingError);
+      assert.equal(store.prepareRunPatrol(run.id), false);
+      assert.throws(() => store.submitHumanMessage(run.id, { content: '无关新指令' }), /错误中断/);
+      await writeFile(fixed, 'allow correction');
+      store.retryFailedOrchestration(run.id);
+      assert.equal(store.getDispatch(d.id).routingCorrectionCount, 0);
+      await executeRun(store, run.id, options); w = store.getRunWorkspace(run.id);
+    }
+    assert.equal(w.run.status, 'awaiting_acceptance'); assert.equal(w.pendingQuestions.length, 0);
+    const managerTraces = w.traces.filter(trace => trace.agentId === run.manager.id);
+    if (scenario !== 'single') {
+      assert.equal(managerTraces[0].status, 'failed');
+      assert.equal(managerTraces[1].dispatchId, managerTraces[0].dispatchId);
+      assert.equal(managerTraces[1].providerSessionId, managerTraces[0].providerSessionId);
+      assert.equal(managerTraces[1].sessionMode, 'resume');
+      const errors = w.events.filter(event => event.type === 'run.routing_incomplete');
+      assert.equal(errors.length, scenario === 'repeated' ? 2 : 1);
+      assert.equal(errors[0].data.correctionScheduled, true);
+      if (scenario === 'repeated') assert.equal(errors[1].data.correctionScheduled, false);
+      assert.ok(w.artifacts.some(artifact => artifact.traceId === managerTraces[0].id && artifact.name === 'manager-note.txt'));
+      assert.ok(w.messages.some(message => message.traceId === managerTraces[0].id));
+    }
+    const workers = w.traces.filter(trace => trace.agentId !== run.manager.id);
+    assert.equal(workers.length, 1); assert.equal(workers[0].status, 'completed');
+    assert.ok(w.messages.every(message => message.sender.type !== 'system'));
+    assert.ok(w.dispatches.every(item => ['done','cancelled'].includes(item.status)));
+    assert.equal((await readFile(join(w.run.task.workspacePath, 'delivery.txt'), 'utf8')), 'delivered');
+    store.confirmRunCompletion(run.id); assert.equal(store.getRun(run.id).status, 'completed');
+  });
+}

@@ -15,13 +15,18 @@ async function repository(root) {
   const info = await lstat(join(root,'.git')).catch(e => { if (e.code !== 'ENOENT') throw e; });
   return Boolean(info?.isDirectory() && !info.isSymbolicLink());
 }
+const directoryEntries=new Map(),comparisonBases=new Map();
 // Discover ordinary nested repositories without following filesystem links.
 export async function discoverWorkspaceRepositories(root) {
   const found = [], excluded = new Set(['.git','.agentforge','node_modules','.data','.cache','.venv','__pycache__','coverage']);
   let visited = 0;
   async function walk(directory, prefix = '') {
     if (++visited > 10000) throw new Error('仓库发现目录过多，无法完整读取');
-    for (const entry of await readdir(directory, {withFileTypes:true})) {
+    const info=await lstat(directory,{bigint:true});if(!info.isDirectory()||info.isSymbolicLink())throw new Error('仓库目录发生变化，请刷新');
+    const stamp=[info.dev,info.ino,info.mtimeNs,info.ctimeNs].join(':');
+    let cached=directoryEntries.get(directory);
+    if(cached?.stamp!==stamp){cached={stamp,entries:await readdir(directory,{withFileTypes:true})};directoryEntries.set(directory,cached);while(directoryEntries.size>10000)directoryEntries.delete(directoryEntries.keys().next().value);}
+    for (const entry of cached.entries) {
       if (!entry.isDirectory() || excluded.has(entry.name) || entry.name.startsWith('.env')) continue;
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       await sourceControlPath(root,path);
@@ -68,9 +73,14 @@ export async function initializeWorkspaceGit(root, sources = []) {
 }
 // Read the original gitlink, not the child HEAD (which advances when employees commit).
 // An absent baseline is explicitly labelled as HEAD-only; never guess from remote main.
-async function comparisonBase(root, repositoryPath, registered) {
+async function comparisonBase(root,repositoryPath,registered){
+  if(registered?.baseRef)return {ref:registered.baseRef,label:'仓库克隆初始版本'};
+  const info=await lstat(join(root,'.git')).catch(()=>null),key=[root,repositoryPath,info?.dev,info?.ino].join('\0');
+  if(comparisonBases.has(key))return comparisonBases.get(key);
+  const base=await findComparisonBase(root,repositoryPath,registered);if(base.ref!=='HEAD'){comparisonBases.set(key,base);while(comparisonBases.size>1000)comparisonBases.delete(comparisonBases.keys().next().value);}return base;
+}
+async function findComparisonBase(root, repositoryPath, registered) {
   if (registered?.baseRef) {
-    await git(join(root,repositoryPath),['cat-file','-e',`${registered.baseRef}^{commit}`]);
     return {ref:registered.baseRef,label:'仓库克隆初始版本'};
   }
   if (repositoryPath && await repository(root)) {

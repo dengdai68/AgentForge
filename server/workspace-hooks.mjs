@@ -15,12 +15,12 @@ export async function withWorkspaceHooks(files, task, input, invoke) {
     try { await files.registerWorkingRepositories(task); return true; }
     catch(error) { diagnostic('workspace.registration_failed',{error}); return false; }
   };
-  let pending = Promise.resolve();
+  let pending=null,dirty=false;
+  const schedule=()=>{dirty=true;if(!pending)pending=(async()=>{let ok=true;do{dirty=false;ok=await scan()&&ok;}while(dirty);return ok;})().finally(()=>{pending=null;});return pending;};
   const server = http.createServer(async (request,response)=>{
     if (request.method!=='POST' || request.url!=='/register') { response.writeHead(404).end(); return; }
     request.resume();
-    pending = pending.then(scan);
-    const ok = await pending;
+    const ok = await schedule();
     response.writeHead(ok?204:503).end();
   });
   server.requestTimeout=10000;

@@ -1,3 +1,4 @@
+import { executionBudget } from "./execution-budget.mjs";
 import { withWorkspaceHooks } from './workspace-hooks.mjs';
 import { join, resolve } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
@@ -5,7 +6,7 @@ import { desktopServiceDataRoot } from "./data-home.mjs";
 import { createRunFiles } from "./run-files.mjs";
 import { runClaudeCodeCli, runCodexCli, runDshCli, promptSnapshot, RuntimeCancelledError, RuntimeSessionMissingError, runtimeFailureDetail, separateRuntimeSession } from "./runtime/local-cli.mjs";
 import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
-import { terminateExecution } from "./runtime/registry.mjs";
+import { terminateExecution, registerExecution } from "./runtime/registry.mjs";
 import { taskPrompt } from "./prompts.mjs";
 
 // Interpret coordination fields without accepting/rejecting the employee's work.
@@ -62,6 +63,13 @@ class RuntimeInvocationError extends Error {
     this.name = "RuntimeInvocationError";
     this.code = error?.code;
   }
+}
+class RoutingError extends Error {
+  constructor(error) { super(error.message); this.name = 'RoutingError'; }
+}
+function applyRouting(command) {
+  try { return command(); }
+  catch (error) { throw new RoutingError(error); }
 }
 export function failureKindOf(error) {
   if (error instanceof RuntimeInvocationError) return "provider";
@@ -126,17 +134,16 @@ export function scheduleManagerFollowup(store, runId, delivery, decision, source
     if (!store.listDispatches(runId).some(item => item.id !== delivery.id && !['done', 'cancelled'].includes(item.status))) throw new Error('没有未完成工作可等待，请明确派工或提交验收');
     return { scheduled: 'waiting' };
   }
-  if (Object.keys(decision).some(key => !['nextNodeId', 'nextAgentId', 'rationale'].includes(key))) throw new Error('managerDecision 仅接受 nextNodeId、nextAgentId、rationale，或 assignments / wait；咨询必须使用顶层 consultation');
+  if (Object.keys(decision).some(key => !['nextNodeId', 'nextAgentId', 'instruction', 'rationale'].includes(key))) throw new Error('managerDecision 仅接受 nextNodeId、nextAgentId、instruction、rationale，或 assignments / wait；咨询必须使用顶层 consultation');
   const next = decision.nextNodeId;
   if (next !== null) {
-    const recipientId = decision.nextAgentId;
-    if (recipientId === delivery.recipientAgentId) throw new Error("不能 @ 自己");
-    store.transaction(() => {
-      store.setCurrentFocus(runId, next, decision.rationale || "项目经理安排下一次协作");
-      store.enqueueDispatch(runId, { recipientAgentId: recipientId, workflowNodeId: next, purpose: "node", dedupeKey: "handoff:" + delivery.id, sourceMessageId });
-    });
-    return { scheduled: "handoff" };
+    const source = sourceMessageId ? store.getRunMessage(runId, sourceMessageId) : null;
+    if (sourceMessageId && !source) throw new Error('投递来源消息不属于 Run');
+    const instruction = Object.hasOwn(decision, 'instruction') ? decision.instruction : source?.content || decision.rationale || '请完成本次节点职责并向经理交接';
+    const deliveries = store.enqueueManagerAssignments(runId, delivery, [{ nextNodeId: next, nextAgentId: decision.nextAgentId, instruction }]);
+    return { scheduled: "handoff", dispatchIds: deliveries.map(item => item.id) };
   }
+  if (decision.nextAgentId != null || Object.hasOwn(decision, 'instruction')) throw new Error('提交验收时 nextAgentId 必须为 null 或省略，不能同时包含派工 instruction');
   store.requestHumanAcceptance(runId, { traceId: delivery.traceIds?.at(-1) || null, summary: decision.rationale || "项目经理已提交人类验收。" });
   return { scheduled: "acceptance" };
 }
@@ -150,20 +157,17 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
   }
   const agent = store.getRunAgent(runId, delivery.recipientAgentId);
   const sender = { type: "agent", id: agent.id, name: agent.name };
+  if ([output.handoff, output.consultation, output.managerDecision].filter(Boolean).length > 1) throw new RoutingError(new Error('handoff、consultation、managerDecision 不能同时使用；每轮只提交一种协调决定'));
   store.acceptNodeResult(runId, delivery.workflowNodeId, trace.id, output, artifacts);
   const content = output.summary || "本轮工作已返回。";
   if (output.handoff) {
-    store.handoffDispatch(delivery.id, output.handoff.recipientAgentId, content, trace.id);
+    applyRouting(() => store.handoffDispatch(delivery.id, output.handoff.recipientAgentId, content, trace.id));
     store.completeTrace(trace.id); store.syncWaiting(runId); return;
   }
   if (output.consultation) {
-    try {
-      store.askQuestion(delivery.id, output.consultation, trace.id);
-      store.completeTrace(trace.id);
-      return;
-    } catch (error) {
-      store.addMessage({ runId, traceId: trace.id, sender: { type: "system", id: "agentforge", name: "AgentForge" }, recipientAgentId: run.manager.id, kind: "coordination_notice", content: `消息未能投递：${error.message}。员工原文：${content}` });
-    }
+    applyRouting(() => store.askQuestion(delivery.id, output.consultation, trace.id));
+    store.completeTrace(trace.id);
+    return;
   }
   let resultMessage;
   if (delivery.purpose === "inquiry") {
@@ -172,12 +176,17 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
     const parent = store.getDispatch(delivery.parentDispatchId);
     store.answerQuestion(runId, parent.waitingMessageId, content, sender, trace.id);
   } else {
-    resultMessage = store.addMessage({ runId, workflowNodeId: delivery.workflowNodeId, traceId: trace.id, sender, kind: ["manager", "delivery_review"].includes(delivery.purpose) ? "manager_decision" : "handoff", content });
+    const single = ['manager', 'delivery_review'].includes(delivery.purpose) && output.managerDecision && Object.hasOwn(output.managerDecision, 'nextNodeId') && output.managerDecision.nextNodeId !== null;
+    const directedContent = single && (Object.hasOwn(output.managerDecision, 'instruction') ? output.managerDecision.instruction : content);
+    // A single dispatch already records its directed instruction. Keep a
+    // distinct summary, but don't broadcast that same instruction a second time.
+    if (directedContent !== content) resultMessage = store.addMessage({ runId, workflowNodeId: delivery.workflowNodeId, traceId: trace.id, sender, kind: ["manager", "delivery_review"].includes(delivery.purpose) ? "manager_decision" : "handoff", content });
   }
   store.completeTrace(trace.id); store.completeDispatch(delivery.id);
   if (["manager", "delivery_review"].includes(delivery.purpose)) {
     if (output.deliveryReview) store.recordDeliveryReview(runId, trace.id, output.deliveryReview);
-    const decision = output.managerDecision || (output.deliveryReview?.verdict === "pass" ? { nextNodeId: null, rationale: content } : null);
+    let decision = output.managerDecision || (output.deliveryReview?.verdict === "pass" ? { nextNodeId: null, rationale: content } : null);
+    if (decision && Object.hasOwn(decision, 'nextNodeId') && decision.nextNodeId !== null && !Object.hasOwn(decision, 'instruction')) decision = { ...decision, instruction: content };
     if (!decision && (output.deliveryReview?.verdict === "rework" || output.consultation)) {
       managerDispatch(store, runId, "followup:" + delivery.id, [], resultMessage?.id);
     } else {
@@ -185,7 +194,12 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
         if (!decision) throw new Error('本轮缺少 managerDecision，正文报告不能建立派工或提交验收。请返回 managerDecision（单人 nextNodeId/nextAgentId、批量 assignments 或 wait:true）；提交人类验收时前两项为 null，需要咨询则使用顶层 consultation');
         scheduleManagerFollowup(store, runId, { ...delivery, traceIds: [trace.id] }, decision, resultMessage?.id);
       } catch (error) {
-        store.addEvent({ type: "run.routing_incomplete", runId, actor: sender, message: error.message, data: { traceId: trace.id } });
+        if (error.code !== 'COORDINATION_PENDING') throw new RoutingError(error);
+        // A valid terminal decision may race a peer's still-unconsumed report.
+        // Wait behind that work; do not consume a protocol correction or block
+        // the report with a requeued manager at the head of its own FIFO.
+        managerDispatch(store, runId, 'redispatch:' + delivery.id, [], resultMessage?.id);
+        store.addEvent({ type: 'run.acceptance_deferred', runId, actor: sender, message: error.message, data: { traceId: trace.id, dispatchId: delivery.id } });
       }
     }
   } else if (!["consultation", "inquiry"].includes(delivery.purpose) || output.consultation) {
@@ -203,7 +217,12 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
   const agent = store.getRunAgent(runId, delivery.recipientAgentId), node = nodeInfo(task, delivery.workflowNodeId);
   const trace = store.createTrace(runId, { workflowNodeId: node.id, agentId: agent.id, type: delivery.purpose });
   store.attachDispatchTrace(delivery.id, trace.id);
+  const controller=new AbortController();let release, output, artifacts;
+  const unregister=registerExecution(`${runId}:${agent.id}:admission`,{terminate:reason=>controller.abort(new RuntimeCancelledError(reason))},runId);
   try {
+    release=await executionBudget(store).acquire({owner:runId,provider:agent.runtime.provider,signal:controller.signal,onWaiting:()=>store.addEvent({type:'runtime.event',runId,actor:{type:'agent',id:agent.id,name:agent.name},message:'等待实例执行资源',data:{auditVersion:2,traceId:trace.id,presentation:'system',providerEventType:'resource.waiting'}})});
+    unregister();
+    if(!store.canExecuteDispatch(delivery.id))throw new RuntimeCancelledError('执行等待已取消');
     const directory = await files.prepareTrace(runId, trace.id);
     const finalPath = await files.writeInternalTraceFile(runId, trace.id, "provider-final.json", "");
     const workspace = store.getRunExecutionContext(runId);
@@ -247,11 +266,23 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
     };
     // The runtime returns text; coordination fields are interpreted when present.
     const runtimeResult = await invokeRuntime(store, agent, { ...input, onPrompt, traceId: trace.id, session, executionKey: `${runId}:${agent.id}`, canStart: () => store.canExecuteDispatch(delivery.id), runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, finalPath, runId, onEvent }, files);
-    const output = parseEmployeeResponse(runtimeResult.finalText);
-    const artifacts = await capture(files, runId, trace.id, task.workspacePath, before, output, effectiveNode, delivery.purpose);
-    store.transaction(() => { acceptDelivery(store, delivery, trace, output, artifacts); acknowledgeInput(); });
+    output = parseEmployeeResponse(runtimeResult.finalText);
+    artifacts = await capture(files, runId, trace.id, task.workspacePath, before, output, effectiveNode, delivery.purpose);
+    acknowledgeInput();
+    store.transaction(() => acceptDelivery(store, delivery, trace, output, artifacts));
   } catch (error) {
-    const cancelled = error instanceof RuntimeCancelledError;
+    if (error instanceof RoutingError) {
+      // The rejected routing transaction has rolled back, including all partial
+      // messages/queues and completion. Preserve actual work independently from
+      // whether the coordination envelope could be applied.
+      store.transaction(() => {
+        store.acceptNodeResult(runId, node.id, trace.id, output, artifacts);
+        store.addMessage({ runId, workflowNodeId: node.id, traceId: trace.id, sender: { type: 'agent', id: agent.id, name: agent.name }, kind: agent.id === run.manager.id ? 'manager_decision' : 'handoff', content: output.summary || '本轮工作已返回。' });
+        store.rejectDispatchRouting(delivery.id, trace.id, error.message);
+      });
+      return;
+    }
+    const cancelled = error instanceof RuntimeCancelledError || error.name === 'AbortError';
     diagnostic("task.dispatch_failed", { error, traceId: trace.id, agentId: agent.id, workflowNodeId: node.id });
     const failure = traceFailureSummary(error);
     store.completeTrace(trace.id, { status: cancelled ? "cancelled" : "failed", error: failure });
@@ -269,7 +300,7 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
     }
     store.addEvent({ type: cancelled ? "trace.cancelled" : "trace.failed", runId, actor: { type: "agent", id: agent.id, name: agent.name }, message: (cancelled ? "Trace 已停止：" : "Trace 未完成：") + failure, data: { traceId: trace.id, dispatchId: delivery.id, workflowNodeId: node.id, ...(cancelled ? {} : { auditVersion: 2, failureKind: kind }) } });
     if (store.getRun(runId).status === "cancelled" && !delivery.interactionOnly) throw error;
-  }
+  } finally {unregister();release?.();}
 }
 
 // One dispatcher owns Run preparation; each employee has its own in-flight call.

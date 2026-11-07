@@ -17,6 +17,22 @@ async function setup(t) {
 const assignment = (id,node='requirements') => ({nextAgentId:id,nextNodeId:node,instruction:`请 ${id} 完成独立工作`});
 function claimTrace(store,run) {const d=store.claimDispatch(run.id);assert.ok(d);const trace=store.createTrace(run.id,{agentId:d.recipientAgentId,workflowNodeId:d.workflowNodeId,type:d.purpose});store.attachDispatchTrace(d.id,trace.id);return {d,trace};}
 
+test('single and batch instructions share validation, directed delivery and idempotency', async t => {
+ for (const single of [true,false]) {
+  const {store,run}=await setup(t),delivery={id:'manager-round',recipientAgentId:run.manager.id};
+  const instruction='媒体准备：下载源文件；保留完整路径与字幕。\n禁止重复下载，交接给经理。';
+  const item={nextNodeId:'requirements',nextAgentId:'agent_analyst',instruction};
+  const decision=single?{...item,rationale:'独立准备'}:{assignments:[item],rationale:'独立准备'};
+  scheduleManagerFollowup(store,run.id,delivery,decision);scheduleManagerFollowup(store,run.id,delivery,decision);
+  const [d]=store.listDispatches(run.id);assert.equal(store.listDispatches(run.id).length,1);
+  assert.deepEqual(store.memberInputMessages(d.id).map(m=>[m.content,m.recipient.id]),[[instruction,'agent_analyst']]);
+  const before=store.snapshot();
+  for(const value of ['',null,123,{}])assert.throws(()=>scheduleManagerFollowup(store,run.id,{...delivery,id:'invalid'},single?{...item,instruction:value}:{assignments:[{...item,instruction:value}]}),/派工指令/);
+  assert.throws(()=>scheduleManagerFollowup(store,run.id,delivery,{nextNodeId:null,nextAgentId:null,instruction}),/验收/);
+  assert.deepEqual(store.snapshot(),before);
+ }
+});
+
 test('manager batch is atomic, idempotent and creates separate directed instructions', async t => {
  const {store,run}=await setup(t),delivery={id:'manager-round',recipientAgentId:run.manager.id};
  for(const assignments of [[assignment('agent_analyst'),assignment('missing')],[assignment('agent_analyst'),assignment('agent_analyst')],[assignment(run.manager.id)]]){
@@ -100,6 +116,40 @@ test('unconsumed worker reports prevent early acceptance even after all workers 
  assert.throws(()=>store.requestHumanAcceptance(run.id),/仍有成员/);
  const d=store.claimDispatch(run.id);store.completeDispatch(d.id);
  store.requestHumanAcceptance(run.id);assert.equal(store.getRun(run.id).status,'awaiting_acceptance');
+});
+
+test('deferred acceptance waits behind worker reports without blocking the manager FIFO', async t => {
+ const {store,run}=await setup(t);
+ scheduleManagerFollowup(store,run.id,{id:'batch',recipientAgentId:run.manager.id},{assignments:[assignment('agent_analyst')]});
+ const a=claimTrace(store,run);
+ const deferred=store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager',coordinationFollowup:true,deferredRevisit:true});
+ assert.equal(store.claimDispatch(run.id),null);
+ store.handoffDispatch(a.d.id,run.manager.id,'员工结果',a.trace.id);store.completeTrace(a.trace.id);
+ const report=store.claimDispatch(run.id);assert.equal(report.recipientAgentId,run.manager.id);assert.notEqual(report.id,deferred.id);
+ store.completeDispatch(report.id);assert.equal(store.claimDispatch(run.id).id,deferred.id);
+ store.completeDispatch(deferred.id);store.requestHumanAcceptance(run.id);assert.equal(store.getRun(run.id).status,'awaiting_acceptance');
+});
+
+test('successful consultation clears routing feedback while preserving rejected trace history', async t => {
+ const {store,run}=await setup(t);
+ store.initializeDispatches(run.id);const first=claimTrace(store,run);
+ store.rejectDispatchRouting(first.d.id,first.trace.id,'咨询对象无效');
+ const before=store.getRunWorkspace(run.id).events.length;
+ store.rejectDispatchRouting(first.d.id,first.trace.id,'duplicate callback');assert.equal(store.getRunWorkspace(run.id).events.length,before);
+ const second=claimTrace(store,run);
+ store.askQuestion(second.d.id,{audience:'human',question:'确认业务范围'},second.trace.id);
+ const waiting=store.getDispatch(second.d.id);assert.equal(waiting.status,'waiting');assert.equal(waiting.routingError,undefined);assert.equal(waiting.routingCorrectionCount,undefined);
+ assert.equal(store.getRunWorkspace(run.id).traces.find(item=>item.id===first.trace.id).status,'failed');
+});
+
+test('manual retry of a failed deferred manager cannot deadlock behind unrelated queued work', async t => {
+ const {store,run}=await setup(t);
+ const deferred=store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager',coordinationFollowup:true,deferredRevisit:true});
+ const first=claimTrace(store,run);
+ const report=store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager'});
+ store.completeTrace(first.trace.id,{status:'failed',error:'401'});store.stopFailedDispatch(first.d.id,'401',{kind:'provider'});
+ store.retryFailedOrchestration(run.id);assert.equal(store.claimDispatch(run.id).id,deferred.id);
+ store.completeDispatch(deferred.id);assert.equal(store.claimDispatch(run.id).id,report.id);
 });
 
 test('human clarification holds new starts while already claimed peers finish', async t => {

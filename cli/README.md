@@ -90,3 +90,7 @@ tasks/automations create 的 workflowTemplateId 可省略、null 或空字符串
 tasks message/reply 支持 JSON attachmentPaths/attachmentIds，CLI 保留二进制原字节，经同一认证 HTTP 上传、发送并返回引用；content 有附件时可空，最多10个/单文件20 MiB，具体字段见 schema。client.request 仅对 Buffer 使用 octet-stream，普通命令仍发送 JSON。
 
 roles create/update 支持 extensionSelection，和 App 的角色插件/MCP选择一致；agents 返回 inheritedExtensionSelection 区分继承来源。automations delete ID --yes 仅接受停用自动化，删除全部对应任务和触发历史并先终止执行。
+
+配置和任务列表现在直接使用服务端分页/搜索/筛选；`--all` 显式逐页取得结果，精确 ID 详情不扫描目录。`tasks progress/questions` 读取 compact 状态，collaboration/artifacts 按游标取得对应页。角色/工作流名称通过轻量引用目录解析，仍拒绝歧义。`runtimes models PROVIDER --refresh` 重查本机目录；任务附件以流上传，仍限 20 MiB。App/CLI 字段、默认值与失败语义不变，最终确认仍只在客户端。
+
+任务协议纠错与客户端共用后端：progress 展示原成员的真实错误和状态；协调格式一次纠正后仍失败则由客户端恢复。没有新增 CLI 派工字段或重试/验收权限；角色协作记录不加入平台纠错消息。

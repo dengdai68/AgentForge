@@ -1,3 +1,4 @@
+import { createStateJournal, copyState } from "./state-journal.mjs";
 import { automationCommands } from "./automations.mjs";
 import { statSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
@@ -9,7 +10,7 @@ import { executionLogs } from "./execution-logs.mjs";
 
 const now = () => new Date().toISOString(); let sequence = 0;
 const id = (prefix) => `${prefix}_${Date.now().toString(36)}_${(++sequence).toString(36)}`;
-const clone = (value) => value === undefined ? undefined : structuredClone(value);
+const clone = copyState;
 function consoleAuditProjection(event) {
   const legacyAudit = ["runtime.event", "trace.failed"].includes(event?.type) && event.data?.auditVersion !== 2;
   if (!legacyAudit) return clone(event);
@@ -179,7 +180,8 @@ function runtimeConnection(value = {}) {
 
 export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || ":memory:", workspaceRoot = null, onSaveDiagnostic, runtimeInstalled = () => true } = {}) {
   if (workspaceRoot !== null && (!isAbsolute(workspaceRoot) || resolve(workspaceRoot) === "/")) throw new Error("系统工作根目录必须是非根绝对目录");
-  const persistence = createSqlitePersistence(databasePath, { onSaveDiagnostic }), loaded = persistence.load(); const state = migrate(loaded) || { agents: clone(agents), teams: [], tasks: [], workflowTemplates: [workflow(exampleWorkflow, { templateId: exampleWorkflow.id, current: true })], runs: [], traces: [], artifacts: [], messages: [], decisions: [], roles: [], events: [{ id: "evt_welcome", type: "workspace.ready", runId: null, timestamp: now(), actor: { type: "system", name: "AgentForge" }, message: "工作区已就绪。", data: {} }] };
+  const persistence = createSqlitePersistence(databasePath, { onSaveDiagnostic }), loaded = persistence.load({lazy:true}); const initialState = (loaded?.settings?.installationId ? loaded : migrate(loaded)) || { agents: clone(agents), teams: [], tasks: [], workflowTemplates: [workflow(exampleWorkflow, { templateId: exampleWorkflow.id, current: true })], runs: [], traces: [], artifacts: [], messages: [], decisions: [], roles: [], events: [{ id: "evt_welcome", type: "workspace.ready", runId: null, timestamp: now(), actor: { type: "system", name: "AgentForge" }, message: "工作区已就绪。", data: {} }] };
+  const journal = createStateJournal(initialState), state = journal.state;
   state.roles ||= [];
   const employeeConfiguration = item => !item ? item : {...baseEmployeeConfiguration(item),inheritedExtensionSelection:Object.fromEntries(['pluginIds','mcpIds'].map(key=>[key,[...new Set((item.roleIds || []).flatMap(id=>state.roles.find(role=>role.id===id)?.extensionSelection?.[key] || []))]]))};
   // Current configuration uses ordered roleIds. Immutable historical snapshots
@@ -266,17 +268,19 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     return { ...resolved, profileId: resolved.profileId || ensureProfile(runtimeConnection(resolved)).id };
   };
   for (const employee of state.agents.filter(item => item.status !== "deleted")) employee.runtime = bindRuntime(employee.runtime);
-  for (const employee of state.agents) { employee.kind ||= employee.system ? "manager" : "business"; employee.systemPrompt ??= employee.description || ""; employee.roleIds ??= []; delete employee.roleId; }
-  for (const current of state.runs) {
-    const task = state.tasks.find((item) => item.id === current.taskId), team = state.teams.find((item) => item.id === task?.teamId);
-    current.manager ||= clone(state.agents.find((item) => item.id === managerId));
-    current.participants ||= [...(team?.memberAgentIds || [...new Set(Object.values(task?.nodeAssignments || {}))]).map((memberId) => state.agents.find((item) => item.id === memberId)).filter(Boolean).map((item) => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...clone(current.manager), type: "agent", kind: "manager" }, ...(task?.kind === "automation" ? [] : [clone(humanMember)])];
+  for (const employee of state.agents) { employee.kind ||= employee.system ? "manager" : "business"; employee.systemPrompt ??= employee.description || ""; employee.roleIds ??= []; delete employee.roleId; delete employee.role; }
+  for (const current of loaded?.settings?.installationId ? [] : state.runs.filter(item => !item.manager || !item.participants || item.failure === undefined)) {
+    const task = journal.get("tasks", current.taskId), team = journal.get("teams", task?.teamId);
+    current.manager ||= clone(journal.get("agents", managerId));
+    current.participants ||= [...(team?.memberAgentIds || [...new Set(Object.values(task?.nodeAssignments || {}))]).map((memberId) => journal.get("agents", memberId)).filter(Boolean).map((item) => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...clone(current.manager), type: "agent", kind: "manager" }, ...(task?.kind === "automation" ? [] : [clone(humanMember)])];
     current.failure ??= null;
   }
-  persistence.save(state);
+  persistence.save(state, loaded?.settings?.installationId ? journal : null); journal.commit();
+  if(!loaded?.settings?.installationId)Object.assign(initialState,persistence.load({lazy:true}));
   let transactionDepth = 0;
   const pendingEvents = [];
-  const listeners = new Set(), save = () => { if (!transactionDepth) persistence.save(state); }, find = (collection, value) => collection.find((item) => item.id === value), getAgent = (value) => find(state.agents, value), getTeam = (value) => find(state.teams, value), getTask = (value) => find(state.tasks, value), getRun = (value) => find(state.runs, value), getTrace = (value) => find(state.traces, value), getRole = (value) => find(state.roles, value);
+  const listeners = new Set(), save = () => { if (!transactionDepth) { persistence.save(state, journal); journal.commit(); } }, getAgent = (value) => journal.get("agents", value), getTeam = (value) => journal.get("teams", value), getTask = (value) => journal.get("tasks", value), getRun = (value) => journal.get("runs", value), getTrace = (value) => journal.get("traces", value), getRole = (value) => journal.get("roles", value);
+  const taskRuns = taskId => journal.select('runs','taskId',taskId).sort((a,b)=>b.startedAt.localeCompare(a.startedAt)||(journal.entry('runs',b.id).position-journal.entry('runs',a.id).position));
   const runAgent = (current, agentId) => current?.participants?.find((item) => item.type === "agent" && item.id === agentId && !(current.removedParticipantIds || []).includes(item.id)) || (current?.manager?.id === agentId ? current.manager : null);
   const addEvent = ({ type, runId = null, actor = { type: "system", name: "AgentForge" }, message, data = {} }) => { const item = { id: id("evt"), type, runId, timestamp: now(), actor: clone(actor), message: text(message, "事件说明"), data: clone(data) }; state.events.push(item); save(); if (transactionDepth) pendingEvents.push(item); else listeners.forEach((listener) => listener(clone(item))); return item; };
   const definition = (current, nodeId) => getTask(current.taskId)?.workflowSnapshot?.nodes.find((item) => item.id === nodeId); const assertNode = (current, nodeId) => { if (!definition(current, nodeId)) throw new Error("工作流节点不存在"); };
@@ -297,9 +301,9 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   const taskReadModel = task => { const { teamId, team, priority, ...record } = task; return clone({ ...record, memberAgentIds: task.memberAgentIds || [...(task.memberSnapshots || []).map(member => member.id), task.managerSnapshot?.id || task.managerAgentId].filter(Boolean) }); };
   function recoverableFailedTraces(runId) {
     const current = getRun(runId);
-    return state.traces.filter(trace => {
+    return journal.select("traces", "runId", runId).filter(trace => {
       if (trace.runId !== runId || trace.status !== "failed" || trace.type === "inquiry") return false;
-      const delivery = state.dispatches.find(item => item.runId === runId && item.traceIds.includes(trace.id));
+      const delivery = journal.select("dispatches", "runId", runId).find(item => item.traceIds.includes(trace.id));
       if (current.failure?.dispatchId && delivery?.id !== current.failure.dispatchId) return false;
       return !delivery || (!delivery.interactionOnly && !delivery.escalatedAt && ["cancelled", "queued"].includes(delivery.status) && delivery.traceIds.at(-1) === trace.id);
     });
@@ -308,10 +312,10 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     return recoverableFailedTraces(runId).filter(trace => ["node", "instruction", "consultation"].includes(trace.type));
   }
   function taskDeletionBlock(taskId) {
-    const relatedRuns = state.runs.filter((run) => run.taskId === taskId);
-    if (relatedRuns.some((run) => ["planning", "running", "awaiting_human", "review", "awaiting_acceptance", "paused"].includes(run.status) || state.traces.some((trace) => trace.runId === run.id && trace.status === "running"))) return "active_run";
+    const relatedRuns = journal.select("runs", "taskId", taskId);
+    if (relatedRuns.some((run) => ["planning", "running", "awaiting_human", "review", "awaiting_acceptance", "paused"].includes(run.status) || journal.select("traces", "runId", run.id).some(trace => trace.status === "running"))) return "active_run";
     const runIds = new Set(relatedRuns.map((run) => run.id));
-    return state.dispatches.some((item) => runIds.has(item.runId) && item.interactionOnly && !["done", "cancelled"].includes(item.status)) ? "active_inquiries" : null;
+    return [...runIds].some(runId => journal.select("dispatches", "runId", runId).some(item => item.interactionOnly && !["done", "cancelled"].includes(item.status))) ? "active_inquiries" : null;
   }
   function taskDeletionError(blockedBy) {
     return blockedBy === "active_inquiries"
@@ -319,9 +323,9 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       : "存在活跃或暂停的 Run，不能删除 Task";
   }
   function resumeFailedRun(current, task, nodeId, dedupeKey, event, enqueue) {
-    if (state.traces.some((trace) => trace.runId === current.id && trace.status === "running") || state.dispatches.some((item) => item.runId === current.id && item.status === "claimed")) throw new Error("仍有活跃执行，不能重新启动失败 Run");
+    if (journal.select("traces", "runId", current.id).some(trace => trace.status === "running") || journal.select("dispatches", "runId", current.id).some(item => item.status === "claimed")) throw new Error("仍有活跃执行，不能重新启动失败 Run");
     const failedTrace = recoverableFailedTraces(current.id).filter(trace => trace.workflowNodeId === nodeId).at(-1);
-    const original = failedTrace && state.dispatches.find(item => item.traceIds.includes(failedTrace.id));
+    const original = failedTrace && journal.select("dispatches", "runId", current.id).find(item => item.traceIds.includes(failedTrace.id));
     current.completedAt = null; current.failure = null; current.status = "running";
     current.waitingConversationId = null; current.waitingNodeId = null; current.waitingAgentId = null;
     task.status = "running"; task.updatedAt = now();
@@ -330,10 +334,11 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     let dispatch = original;
     if (dispatch) {
       dispatch.status = "queued"; dispatch.nextRetryAt = null; dispatch.updatedAt = now();
+      dispatch.routingCorrectionCount = 0;
     } else if (failedTrace) {
       dispatch = enqueue(current.id, { recipientAgentId: failedTrace.agentId, workflowNodeId: nodeId, purpose: failedTrace.type, messageIds: current.pendingMessageIds || [], dedupeKey });
     } else {
-      dispatch = state.dispatches.find(item => item.runId === current.id && item.status === "queued" && !item.interactionOnly)
+      dispatch = journal.select("dispatches", "runId", current.id).find(item => item.status === "queued" && !item.interactionOnly)
         || enqueue(current.id, { recipientAgentId: current.manager.id, workflowNodeId: nodeId, purpose: "manager", messageIds: current.pendingMessageIds || [], dedupeKey });
     }
     dispatch.continueRequested = true;
@@ -342,21 +347,64 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     addEvent({ ...event, runId: current.id, actor: humanMember, data: { ...event.data, dispatchId: dispatch.id, recipientAgentId: dispatch.recipientAgentId, cancelledDispatchIds: [] } });
     return clone(current);
   }
+  let navigationCache,catalogCache;
   return {
-    ...communicationCommands(state, save, withRoleSnapshot),
-    ...automationCommands(state),
-    ...historyCommands(state, { databasePath, employeeConfiguration }),
+    ...communicationCommands(state, save, withRoleSnapshot, journal, persistence),
+    ...automationCommands(state, journal, persistence),
+    ...historyCommands(state, { databasePath, employeeConfiguration, journal, persistence }),
     close() { this.closeHistory(); listeners.clear(); persistence.close(); },
     prepareDataReset() {
       if (state.runs.some(run => ["planning", "running", "review"].includes(run.status)) || state.traces.some(trace => trace.status === "running") || state.dispatches.some(delivery => delivery.status === "claimed") || state.communicationDeliveries.some(delivery => ["claimed", "running"].includes(delivery.status))) throw new Error("请先停止正在执行的任务和沟通，再清除数据");
       return state.runs.filter(run => getTask(run.taskId)?.workspaceManaged).map(run => ({ taskId: run.taskId, runId: run.id, path: resolve(run.workspacePath) }));
     },
     getNavigationNotifications() {
-      const attention = new Set(["awaiting_human", "awaiting_acceptance", "paused", "blocked", "failed"]);
-      return { taskAttentionCount: new Set(state.runs.filter(run => getTask(run.taskId)?.kind !== "automation" && !getTask(run.taskId)?.archivedAt && attention.has(run.status)).map(run => run.taskId)).size, communicationUnreadCount: this.listCommunications().reduce((sum, item) => sum + item.unreadCount, 0) };
+      const version=['tasks','runs','communicationConversations','communicationMessages','communicationDeliveries','agents'].map(name=>journal.version(name)).join(':');
+      if(navigationCache?.version===version)return {...navigationCache.value};
+      const runs=['awaiting_human','awaiting_acceptance','paused','blocked','failed'].flatMap(status=>journal.select('runs','status',status));
+      const value={taskAttentionCount:new Set(runs.filter(run=>{const task=getTask(run.taskId);return task?.kind!=='automation'&&!task?.archivedAt;}).map(run=>run.taskId)).size,communicationUnreadCount:this.communicationUnreadCount()};
+      navigationCache={version,value};return {...value};
     },
-    getBootstrap() {
-      const tasks = state.tasks.filter(task => task.kind !== "automation").map((task) => ({ id: task.id, title: task.title, objective: task.objective.slice(0, 240), status: task.status, workspaceKind: task.workspaceManaged ? "managed" : "legacy", memberAgentIds: taskReadModel(task).memberAgentIds, workflowTemplateId: task.workflowTemplateId, workflowSnapshot: { name: task.workflowSnapshot.name }, archivedAt: task.archivedAt, deletionBlockedBy: taskDeletionBlock(task.id), createdAt: task.createdAt, updatedAt: task.updatedAt }));
+    getCatalogReferences() {
+      const version=['agents','roles','teams','workflowTemplates','tasks'].map(name=>journal.version(name)).join(':');if(catalogCache?.version===version)return clone(catalogCache.value);
+      const value={
+        agents:state.agents.filter(item=>item.status!=='deleted').map(({id,name,kind,status,description,color,initials,roleIds})=>({id,name,kind,status,description:description?.slice(0,240),color,initials,roleIds:clone(roleIds)})),
+        roles:state.roles.map(({id,name})=>({id,name})),
+        teams:state.teams.map(item=>({id:item.id,name:item.name,status:item.status,memberAgentIds:teamMembers(item)})),
+        workflowTemplates:state.workflowTemplates.map(({id,name})=>({id,name})),
+        taskWorkflows:persistence.taskWorkflowReferences()
+      };catalogCache={version,value};return clone(value);
+    },
+    getOverview() {
+      const statuses=['awaiting_human','awaiting_acceptance','paused','blocked','failed','planning','running','review'];
+      const runs=statuses.flatMap(status=>journal.select('runs','status',status).filter(run=>getTask(run.taskId)?.kind!=='automation').slice(0,1)).map(run=>this.getRunSummary(run.id).run);
+      const tasks=this.queryDirectory('tasks',{page:1,pageSize:3}).items;
+      const logs=this.getExecutionLogs({source:'task',limit:6}).items.reverse(),events=logs.map(row=>({id:row.id,timestamp:row.timestamp,type:row.type,message:row.message,actor:{name:row.name},data:{}}));
+      return {overviewCounts:persistence.overviewCounts(),runs,tasks,events,teams:state.teams.length?[this.getDirectoryItem('teams',state.teams[0].id)]:[]};
+    },
+    getDirectoryItem(name,id) {
+      const item=journal.get(name,id);if(!item || name==='agents' && item.status==='deleted')throw new Error('目录记录不存在');
+      if(name==='agents')return employeeConfiguration(item);
+      if(name==='roles')return roleView(item);
+      if(name==='tasks')return {...taskReadModel(item),runs:taskRuns(id).map(({id,taskId,status})=>({id,taskId,status}))};
+      if(name==='teams')return clone({...item,memberAgentIds:teamMembers(item),members:teamMembers(item).map(id=>employeeConfiguration(getAgent(id)))});
+      return clone(item);
+    },
+    queryDirectory(name,query={}) {
+      const page=persistence.queryEntities(name,query);
+      page.items=page.items.map(id=>{
+        if(name==='tasks') {
+          const task=getTask(id), runs=taskRuns(id);
+          return {id,title:task.title,objective:task.objective.slice(0,240),status:task.status,workspaceKind:task.workspaceManaged?'managed':'legacy',memberAgentIds:task.memberAgentIds,workflowTemplateId:task.workflowTemplateId,workflowSnapshot:{name:task.workflowSnapshot.name},archivedAt:task.archivedAt,createdAt:task.createdAt,updatedAt:task.updatedAt,deletionBlockedBy:taskDeletionBlock(id),runs:runs.map(({id,taskId,status})=>({id,taskId,status}))};
+        }
+        const item=this.getDirectoryItem(name,id);
+        if(name==='workflowTemplates')item.referenceCount=journal.select('tasks','workflowTemplateId',id).length;
+        return item;
+      });
+      return page;
+    },
+    getBootstrap({light=false}={}) {
+      if(light)return {installationId:state.settings.installationId,...this.getNavigationNotifications()};
+      const tasks = state.tasks.filter(task => task.kind !== "automation").map((task) => ({ id: task.id, title: task.title, objective: task.objective.slice(0, 240), status: task.status, workspaceKind: task.workspaceManaged ? "managed" : "legacy", memberAgentIds: task.memberAgentIds || [...(task.memberSnapshots || []).map(member => member.id), task.managerSnapshot?.id || task.managerAgentId].filter(Boolean), workflowTemplateId: task.workflowTemplateId, workflowSnapshot: { name: task.workflowSnapshot.name }, archivedAt: task.archivedAt, deletionBlockedBy: taskDeletionBlock(task.id), createdAt: task.createdAt, updatedAt: task.updatedAt }));
       const taskById = new Map(tasks.map((task) => [task.id, task]));
       const counts = new Map(state.runs.map((run) => [run.id, { traceCount: 0, artifactCount: 0 }]));
       for (const trace of state.traces) if (counts.has(trace.runId)) counts.get(trace.runId).traceCount++;
@@ -364,7 +412,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return { installationId: state.settings.installationId, communicationUnreadCount: this.listCommunications().reduce((sum, item) => sum + item.unreadCount, 0), tasks: clone(tasks), runs: state.runs.filter(run => taskById.has(run.taskId)).map((run) => ({ id: run.id, taskId: run.taskId, status: run.status, startedAt: run.startedAt, completedAt: run.completedAt, task: clone(taskById.get(run.taskId)), ...counts.get(run.id) })), agents: this.listAgents(), roles: this.listRoles(), teams: this.listTeams(), workflowTemplates: this.listWorkflowTemplates(), events: state.events.filter(event => !event.type.startsWith("automation.") && (!event.runId || taskById.has(getRun(event.runId)?.taskId))).slice(-6).map((event) => ({ id: event.id, type: event.type, runId: event.runId, actor: clone(event.actor), timestamp: event.timestamp, message: event.message.slice(0, 240), data: {} })) };
     },
     getConsoleContentReference(runId, eventId) {
-      const event = state.events.find(item => item.id === eventId && item.runId === runId && item.type === "runtime.event" && item.data?.auditVersion === 2);
+      const row = journal.get("events", eventId), event = row?.runId === runId && row.type === "runtime.event" && row.data?.auditVersion === 2 ? row : null;
       const trace = event && getTrace(event.data.traceId);
       const reference = event?.data?.contentRef;
       if (!getRun(runId) || !trace || trace.runId !== runId || trace.agentId !== event.actor?.id || !reference) throw new Error("执行内容不存在或当时未保存");
@@ -376,19 +424,18 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const current = getRun(runId);
       if (!current || !current.participants.some(member => member.type === "agent" && member.id === agentId)) throw new Error("Run 成员不存在");
       if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("日志页大小必须在 1 至 500 之间");
-      if (traceId && !state.traces.some((trace) => trace.id === traceId && trace.runId === runId && trace.agentId === agentId)) throw new Error("Trace 不属于当前成员");
-      const events = state.events.filter((event) => event.runId === runId && event.actor?.id === agentId && (!traceId || event.data?.traceId === traceId));
-      const end = before ? events.findIndex((event) => event.id === before) : events.length;
-      if (end < 0) throw new Error("日志游标无效，请刷新日志");
-      const start = Math.max(0, end - limit), page = events.slice(start, end);
-      return { events: page.map(consoleAuditProjection), total: events.length, hasMore: start > 0, nextBefore: page[0]?.id || null };
+      const trace = traceId ? getTrace(traceId) : null;
+      if (traceId && (!trace || trace.runId !== runId || trace.agentId !== agentId)) throw new Error("Trace 不属于当前成员");
+      const result=persistence.consolePage(runId,agentId,{traceId,before,limit});
+      return {...result,events:result.events.map(consoleAuditProjection),traces:[...new Set([...result.events.map(event=>event.data?.traceId),traceId].filter(Boolean))].map(id=>getTrace(id)).filter(Boolean).map(clone)};
+
     },
     transaction(command) {
       if (transactionDepth) return command();
-      const before = clone(state); transactionDepth = 1;
+      journal.begin(); transactionDepth = 1;
       let result;
-      try { result = command(); if (result?.then) throw new Error("Store 事务必须同步"); persistence.save(state); }
-      catch (error) { for (const key of Object.keys(state)) delete state[key]; Object.assign(state, before); pendingEvents.length = 0; throw error; }
+      try { result = command(); if (result?.then) throw new Error("Store 事务必须同步"); persistence.save(state, journal); journal.commit(); }
+      catch (error) { journal.rollback(); pendingEvents.length = 0; throw error; }
       finally { transactionDepth = 0; }
       const events = pendingEvents.splice(0); events.forEach((event) => listeners.forEach((listener) => { try { listener(clone(event)); } catch { /* A subscriber cannot roll back committed state. */ } }));
       return result;
@@ -422,22 +469,23 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         return this.getWorkspaceSettings();
       });
     },
-    listDispatches(runId) { return clone(state.dispatches.filter((item) => item.runId === runId)); },
+    listDispatches(runId) { return clone(journal.select("dispatches", "runId", runId)); },
     enqueueManagerAssignments(runId, delivery, assignments) {
       return this.transaction(() => {
         const current = getRun(runId);
-        if (delivery.recipientAgentId !== current.manager.id) throw new Error("只有当前经理可以批量派工");
+        if (delivery.recipientAgentId !== current.manager.id) throw new Error("只有当前经理可以派工");
         if (!Array.isArray(assignments) || !assignments.length) throw new Error("assignments 必须是非空派工数组");
         const recipients = new Set();
         for (const assignment of assignments) {
-          if (!assignment || Object.keys(assignment).some(key => !['nextNodeId', 'nextAgentId', 'instruction'].includes(key))) throw new Error("派工项仅接受 nextNodeId、nextAgentId、instruction");
+          if (!assignment || typeof assignment !== 'object' || Array.isArray(assignment) || Object.keys(assignment).some(key => !['nextNodeId', 'nextAgentId', 'instruction'].includes(key))) throw new Error("派工项仅接受 nextNodeId、nextAgentId、instruction");
           assertNode(current, assignment.nextNodeId);
           if (!runAgent(current, assignment.nextAgentId) || assignment.nextAgentId === current.manager.id || recipients.has(assignment.nextAgentId)) throw new Error("派工接收者必须是其他成员，且同批不能重复");
           text(assignment.instruction, "派工指令"); recipients.add(assignment.nextAgentId);
         }
+        if (assignments.length === 1) this.setCurrentFocus(runId, assignments[0].nextNodeId);
         return assignments.map((assignment, index) => {
           const dedupeKey = `assignment:${delivery.id}:${index}`;
-          const existing = state.dispatches.find(item => item.runId === runId && item.dedupeKey === dedupeKey);
+          const existing = journal.select("dispatches", "runId", runId).find(item => item.dedupeKey === dedupeKey);
           if (existing) return clone(existing);
           const message = this.addMessage({ runId, workflowNodeId: assignment.nextNodeId, traceId: delivery.traceIds?.at(-1), sender: { type: 'agent', id: current.manager.id, name: current.manager.name }, recipientAgentId: assignment.nextAgentId, kind: 'handoff', content: assignment.instruction });
           return this.enqueueDispatch(runId, { recipientAgentId: assignment.nextAgentId, workflowNodeId: assignment.nextNodeId, purpose: 'node', messageIds: [message.id], sourceMessageId: message.id, dedupeKey });
@@ -445,7 +493,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       });
     },
     memberResponsibility(runId, agentId) {
-      const item = state.dispatches.findLast(item => item.runId === runId && item.recipientAgentId === agentId && ["node", "instruction"].includes(item.purpose));
+      const item = journal.select("dispatches", "runId", runId).findLast(item => item.recipientAgentId === agentId && ["node", "instruction"].includes(item.purpose));
       return item?.workflowNodeId || null;
     },
     prepareMemberSession(dispatchId, traceId, cwd) {
@@ -474,7 +522,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     memberInputMessages(dispatchId) {
       const delivery = this.getDispatch(dispatchId), current = getRun(delivery.runId);
-      const messages = state.messages.filter(item => item.runId === current.id);
+      const messages = journal.select("messages", "runId", current.id);
       const through = current.memberSessions?.[delivery.recipientAgentId]?.inputThroughMessageId;
       const received = new Set(current.memberSessions?.[delivery.recipientAgentId]?.inputMessageIds || []);
       const previous = through ? messages.findIndex(item => item.id === through) : -1;
@@ -485,9 +533,9 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     confirmMemberInput(traceId, messageId, inputContext, messageIds) {
       const trace = getTrace(traceId), current = getRun(trace?.runId), session = current?.memberSessions?.[trace?.agentId];
       if (!session || session.lastTraceId !== traceId) throw new Error("不能确认其他成员会话的输入");
-      if (messageId && !state.messages.some(item => item.runId === current.id && item.id === messageId)) throw new Error("输入游标不属于 Run");
+      if (messageId && !journal.select("messages", "runId", current.id).some(item => item.id === messageId)) throw new Error("输入游标不属于 Run");
       const delivered = messageIds || this.memberInputMessages(trace.dispatchId).map(item => item.id);
-      if (delivered.some(id => !state.messages.some(item => item.runId === current.id && item.id === id))) throw new Error('输入消息不属于 Run');
+      if (delivered.some(id => !journal.select("messages", "runId", current.id).some(item => item.id === id))) throw new Error('输入消息不属于 Run');
       session.inputMessageIds = [...new Set([...(session.inputMessageIds || []), ...delivered])];
       session.inputThroughMessageId = messageId;
       if (inputContext) session.inputContext = clone(inputContext);
@@ -503,20 +551,27 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       save();
     },
     listPatrolRunIds() {
-      return state.runs.filter(run => !getTask(run.taskId).archivedAt && (["planning", "running", "review"].includes(run.status) || ["completed", "cancelled", "paused"].includes(run.status) && state.dispatches.some(item => item.runId === run.id && item.interactionOnly && item.status === "queued"))).map(run => run.id);
+      const candidates=new Map(['planning','running','review'].flatMap(status=>journal.select('runs','status',status)).map(run=>[run.id,run]));
+      for(const dispatch of journal.select('dispatches','status','queued')) if(dispatch.interactionOnly){const run=getRun(dispatch.runId);if(run && ['completed','cancelled','paused'].includes(run.status))candidates.set(run.id,run);}
+      return [...candidates.values()].filter(run=>!getTask(run.taskId)?.archivedAt).map(run=>run.id);
+    },
+    hasRun(runId) { return Boolean(getRun(runId)); },
+    taskRunIds(taskId) { return journal.select('runs','taskId',taskId,{idsOnly:true}); },
+    listRecoveryRunIds() {
+      return [...new Set([...this.listPatrolRunIds(),...journal.select('runs','status','awaiting_human',{idsOnly:true}),...journal.select('traces','status','running').map(row=>row.runId),...journal.select('dispatches','status','claimed').map(row=>row.runId)])];
     },
     prepareRunPatrol(runId) {
       // Detection only reads metadata; clone/persist only when creating work.
       const current = getRun(runId);
       if (!current || getTask(current.taskId).archivedAt || current.status === "failed" || this.hasPendingHumanQuestion(runId)) return false;
-      const deliveries = state.dispatches.filter(item => item.runId === runId);
-      if (deliveries.some(item => item.status === "claimed") || state.traces.some(trace => trace.runId === runId && trace.status === "running")) return false;
+      const deliveries = journal.select("dispatches", "runId", runId);
+      if (deliveries.some(item => item.status === "claimed") || journal.select("traces", "runId", runId).some(trace => trace.status === "running")) return false;
       const active = ["planning", "running", "review"].includes(current.status);
       const queued = deliveries.filter(item => item.status === "queued" && (active || item.interactionOnly));
       if (queued.length) return queued.some(item => !item.nextRetryAt || Date.parse(item.nextRetryAt) <= Date.now());
       if (!active) return false;
       return this.transaction(() => {
-        const lastTrace = state.traces.filter(trace => trace.runId === runId).at(-1);
+        const lastTrace = journal.select("traces", "runId", runId).at(-1);
         this.enqueueDispatch(runId, { recipientAgentId: current.manager.id, workflowNodeId: current.currentFocus?.nodeId || getTask(current.taskId).workflowSnapshot.nodes[0].id, purpose: "manager", dedupeKey: "patrol:" + (lastTrace?.id || "initial"), coordinationFollowup: true, patrol: true });
         addEvent({ type: "run.manager_patrol", runId, message: "运行中暂无执行者，已触发经理继续推进。", data: { trigger: "idle", intervalMs: 10000 } });
         return true;
@@ -525,47 +580,47 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     initializeDispatches(runId) {
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current.taskId);
-        if (state.dispatches.some((item) => item.runId === runId) || ["completed", "cancelled", "failed", "awaiting_acceptance"].includes(current.status)) return;
+        if (journal.select("dispatches", "runId", runId, {idsOnly:true}).length > 0 || ["completed", "cancelled", "failed", "awaiting_acceptance"].includes(current.status)) return;
         const nodeId = current.waitingNodeId || task.workflowSnapshot.nodes[0].id;
-        const question = state.messages.filter((item) => item.runId === runId && item.conversationId === current.waitingConversationId && ["agent_consultation", "clarification_question"].includes(item.kind)).at(-1);
+        const question = journal.select("messages", "runId", runId).filter(item => item.conversationId === current.waitingConversationId && ["agent_consultation", "clarification_question"].includes(item.kind)).at(-1);
         if (question) {
           const parent = this.enqueueDispatch(runId, { recipientAgentId: question.sender.id, workflowNodeId: nodeId, purpose: question.sender.id === current.manager.id ? "manager" : "node", messageIds: [question.id], dedupeKey: "legacy-wait:" + question.id });
-          const record = find(state.dispatches, parent.id); record.status = "waiting"; record.waitingMessageId = question.id;
+          const record = journal.get("dispatches", parent.id); record.status = "waiting"; record.waitingMessageId = question.id;
           if (question.recipient.type === "agent") this.enqueueDispatch(runId, { recipientAgentId: question.recipient.id, workflowNodeId: task.workflowSnapshot.nodes.find((node) => task.nodeAssignments[node.id] === question.recipient.id)?.id || nodeId, purpose: "consultation", messageIds: [question.id], parentDispatchId: parent.id, dedupeKey: "question:" + question.id });
         } else this.enqueueDispatch(runId, { recipientAgentId: current.manager.id, workflowNodeId: nodeId, purpose: "manager", messageIds: current.pendingMessageIds || [], dedupeKey: "initial-manager" });
         this.syncWaiting(runId);
       });
     },
-    getDispatch(dispatchId) { const item = find(state.dispatches, dispatchId); if (!item) throw new Error("Dispatch 不存在"); return clone(item); },
+    getDispatch(dispatchId) { const item = journal.get("dispatches", dispatchId); if (!item) throw new Error("Dispatch 不存在"); return clone(item); },
     enqueueDispatch(runId, input) {
       const current = getRun(runId);
-      if (input.parentDispatchId && find(state.dispatches, input.parentDispatchId)?.runId !== runId) throw new Error("父投递不属于当前 Run");
-      const interactionOnly = input.purpose === "inquiry" || Boolean(input.parentDispatchId && find(state.dispatches, input.parentDispatchId)?.interactionOnly);
+      if (input.parentDispatchId && journal.get("dispatches", input.parentDispatchId)?.runId !== runId) throw new Error("父投递不属于当前 Run");
+      const interactionOnly = input.purpose === "inquiry" || Boolean(input.parentDispatchId && journal.get("dispatches", input.parentDispatchId)?.interactionOnly);
       // A peer already in flight may finish after another peer fails. Preserve
       // its trace-backed handoff, but claimDispatch keeps this work stopped.
-      const source = input.sourceMessageId && find(state.messages, input.sourceMessageId);
+      const source = input.sourceMessageId && journal.get("messages", input.sourceMessageId);
       const settlingTrace = source?.traceId && getTrace(source.traceId);
       const settling = settlingTrace?.runId === runId && ['running', 'completed'].includes(settlingTrace.status);
       if (!current || getTask(current.taskId).archivedAt || (current.status === "failed" && !settling || ["completed", "cancelled"].includes(current.status) && !interactionOnly)) throw new Error("Run 不接受新投递");
       if (!runAgent(current, input.recipientAgentId)) throw new Error("投递收件人必须是 Run 数字员工");
       assertNode(current, input.workflowNodeId);
       if (!["manager", "node", "consultation", "instruction", "delivery_review", "inquiry"].includes(input.purpose)) throw new Error("投递用途无效");
-      if (input.sourceMessageId != null && find(state.messages, input.sourceMessageId)?.runId !== runId) throw new Error("投递来源消息不属于 Run");
-      const existing = input.dedupeKey && state.dispatches.find((item) => item.runId === runId && item.dedupeKey === input.dedupeKey);
+      if (input.sourceMessageId != null && journal.get("messages", input.sourceMessageId)?.runId !== runId) throw new Error("投递来源消息不属于 Run");
+      const existing = input.dedupeKey && journal.select("dispatches", "runId", runId).find(item => item.dedupeKey === input.dedupeKey);
       if (existing) return clone(existing);
       const messageIds = [...new Set(input.messageIds || [])];
-      if (messageIds.some((value) => find(state.messages, value)?.runId !== runId)) throw new Error("投递消息不属于 Run");
+      if (messageIds.some((value) => journal.get("messages", value)?.runId !== runId)) throw new Error("投递消息不属于 Run");
       const item = { id: id("dispatch"), runId, recipientAgentId: input.recipientAgentId, workflowNodeId: input.workflowNodeId, purpose: input.purpose, interactionOnly, messageIds, sourceMessageId: input.sourceMessageId || null, parentDispatchId: input.parentDispatchId || null, waitingMessageId: null, status: "queued", attempts: 0, nextRetryAt: null, traceIds: [], dedupeKey: input.dedupeKey || null, ...(input.patrol ? { patrol: true } : {}), ...(input.coordinationFollowup ? { coordinationFollowup: true } : {}), ...(input.deferredRevisit ? { deferredRevisit: true } : {}), createdAt: now(), updatedAt: now() };
       state.dispatches.push(item); save(); return clone(item);
     },
     hasPendingHumanQuestion(runId) { return this.pendingQuestions(runId).some((item) => item.recipient.type === "human"); },
     canExecuteDispatch(dispatchId) {
-      const item = find(state.dispatches, dispatchId), current = getRun(item?.runId);
+      const item = journal.get("dispatches", dispatchId), current = getRun(item?.runId);
       return Boolean(current && !getTask(current.taskId).archivedAt && item.status === "claimed" && (["running", "review", "failed", "awaiting_human"].includes(current.status) || item.interactionOnly));
     },
     cancelInquiries(runId) {
       if (!getRun(runId)) throw new Error("Run 不存在");
-      for (const item of state.dispatches.filter((item) => item.runId === runId && item.interactionOnly && !["done", "cancelled"].includes(item.status))) { item.status = "cancelled"; item.nextRetryAt = null; item.updatedAt = now(); }
+      for (const item of journal.select("dispatches", "runId", runId).filter(item => item.interactionOnly && !["done", "cancelled"].includes(item.status))) { item.status = "cancelled"; item.nextRetryAt = null; item.updatedAt = now(); }
       this.syncWaiting(runId);
       addEvent({ type: "run.inquiries_cancelled", runId, actor: humanMember, message: "人类已停止本轮答疑；原任务状态不变。", data: {} }); save();
     },
@@ -573,43 +628,64 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const current = getRun(runId);
       if (!current || current.status === "failed" || getTask(current.taskId).archivedAt) return null;
       if (this.hasPendingHumanQuestion(runId)) return null;
-      const deliveries = state.dispatches.filter(item => item.runId === runId);
+      const deliveries = journal.select("dispatches", "runId", runId);
       const busy = new Set(deliveries.filter(item => item.status === 'claimed').map(item => item.recipientAgentId));
       const belongsToRetry = item => {
         if (!current.retryingDispatchId) return true;
         const seen = new Set();
-        for (let parent = item; parent && !seen.has(parent.id); parent = find(state.dispatches, parent.parentDispatchId)) {
+        for (let parent = item; parent && !seen.has(parent.id); parent = journal.get("dispatches", parent.parentDispatchId)) {
           if (parent.id === current.retryingDispatchId) return true;
           seen.add(parent.id);
         }
         return false;
       };
+      const pendingWork = deliveries.some(item => !item.deferredRevisit && !['done', 'cancelled'].includes(item.status));
+      const deferredReady = item => !item.deferredRevisit || !pendingWork || current.retryingDispatchId === item.id;
       const ready = item => item.runId === runId && item.status === "queued" && !busy.has(item.recipientAgentId)
         && belongsToRetry(item)
-        && (current.pendingRetryDispatchId === item.id || !deliveries.some(earlier => earlier.recipientAgentId === item.recipientAgentId && earlier.status === 'queued' && belongsToRetry(earlier) && (['planning', 'running', 'review'].includes(current.status) || earlier.interactionOnly) && deliveries.indexOf(earlier) < deliveries.indexOf(item)))
+        && deferredReady(item)
+        && (current.pendingRetryDispatchId === item.id || !deliveries.some(earlier => earlier.recipientAgentId === item.recipientAgentId && earlier.status === 'queued' && deferredReady(earlier) && belongsToRetry(earlier) && (['planning', 'running', 'review'].includes(current.status) || earlier.interactionOnly) && deliveries.indexOf(earlier) < deliveries.indexOf(item)))
         && (["planning", "running", "review"].includes(current.status) || item.interactionOnly) && (!item.nextRetryAt || Date.parse(item.nextRetryAt) <= Date.now());
-      const requested = find(state.dispatches, current.pendingRetryDispatchId);
-      const item = requested && ready(requested) ? requested : state.dispatches.find(ready);
+      const requested = journal.get("dispatches", current.pendingRetryDispatchId);
+      const item = requested && ready(requested) ? requested : journal.select("dispatches", "runId", runId).find(ready);
       if (!item) return null;
       if (current.pendingRetryDispatchId === item.id) delete current.pendingRetryDispatchId;
       item.status = "claimed"; item.attempts += 1; item.updatedAt = now(); save(); return clone(item);
     },
     attachDispatchTrace(dispatchId, traceId) {
-      const item = find(state.dispatches, dispatchId), trace = getTrace(traceId);
+      const item = journal.get("dispatches", dispatchId), trace = getTrace(traceId);
       if (!item || item.status !== "claimed" || trace?.runId !== item.runId || trace.agentId !== item.recipientAgentId) throw new Error("投递与 Trace 不匹配");
       item.traceIds.push(traceId); trace.dispatchId = dispatchId; save();
     },
     retryDispatch(dispatchId, error, delayMs = 300000, failure = null) {
-      const item = find(state.dispatches, dispatchId);
+      const item = journal.get("dispatches", dispatchId);
       if (!item || item.status !== "claimed") return;
       item.status = "queued"; item.lastError = String(error); item.nextRetryAt = new Date(Date.now() + delayMs).toISOString(); item.updatedAt = now();
       if (failure) { item.lastErrorKind = failure.kind; item.lastErrorSignature = failure.signature; item.errorStreak = failure.streak || 1; }
       addEvent({ type: "dispatch.retry_scheduled", runId: item.runId, message: "调用未完成，投递已保留并安排重试。", data: { dispatchId, nextRetryAt: item.nextRetryAt, error: item.lastError, ...(failure ? { failureKind: failure.kind, errorStreak: item.errorStreak } : {}) } }); save();
       return clone(item);
     },
+    rejectDispatchRouting(dispatchId, traceId, reason) {
+      return this.transaction(() => {
+        const item = journal.get('dispatches', dispatchId), trace = getTrace(traceId);
+        if (item?.routingError?.traceId === traceId) return clone(item);
+        if (!item || item.status !== 'claimed' || trace?.dispatchId !== dispatchId || trace.status !== 'running') throw new Error('协调拒收必须关联当前执行的投递与 Trace');
+        const message = `协调指令未生效：${text(reason, '协调错误')}。本次没有建立派工、咨询或验收。`;
+        item.routingError = { traceId, message };
+        this.completeTrace(traceId, { status: 'failed', error: message });
+        const correctionScheduled = (item.routingCorrectionCount || 0) < 1;
+        const failure = { kind: 'routing', signature: 'routing', streak: (item.routingCorrectionCount || 0) + 1 };
+        if (correctionScheduled) {
+          item.routingCorrectionCount = 1;
+          this.retryDispatch(dispatchId, message, 0, failure);
+        } else this.stopFailedDispatch(dispatchId, message, failure);
+        addEvent({ type: 'run.routing_incomplete', runId: item.runId, message, data: { auditVersion: 2, traceId, dispatchId, failureKind: 'routing', correctionScheduled } });
+        return clone(item);
+      });
+    },
     stopFailedDispatch(dispatchId, error, failure) {
       return this.transaction(() => {
-        const item = find(state.dispatches, dispatchId), current = item && getRun(item.runId);
+        const item = journal.get("dispatches", dispatchId), current = item && getRun(item.runId);
         if (!item || item.status !== 'claimed') throw new Error('投递未领取，不能停止失败重试');
         item.status = 'cancelled'; item.nextRetryAt = null; item.updatedAt = now(); item.lastError = String(error);
         item.lastErrorKind = failure?.kind; item.lastErrorSignature = failure?.signature; item.errorStreak = failure?.streak || 1;
@@ -623,7 +699,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     escalateFailedDispatch(dispatchId, { error, kind, signature, streak } = {}) {
       return this.transaction(() => {
-        const item = find(state.dispatches, dispatchId), current = item && getRun(item.runId);
+        const item = journal.get("dispatches", dispatchId), current = item && getRun(item.runId);
         if (!item || item.status !== "claimed" || !current) throw new Error("投递未领取，不能升级");
         if (!["node", "instruction"].includes(item.purpose)) throw new Error("只有业务投递可以升级经理处置");
         const kindLabel = kind === "workspace_artifact" ? "工作区/Artifact 校验" : "协议/结果校验";
@@ -640,7 +716,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current?.taskId);
         if (!current || !task || task.archivedAt) throw new Error("Run 不存在或任务已归档");
-        const retries = state.dispatches.filter((item) => item.runId === runId && item.status === "queued" && item.nextRetryAt && (["planning", "running", "review"].includes(current.status) || item.interactionOnly));
+        const retries = journal.select("dispatches", "runId", runId).filter(item => item.status === "queued" && item.nextRetryAt && (["planning", "running", "review"].includes(current.status) || item.interactionOnly));
         if (!retries.length) throw new Error("当前没有等待退避的可重试调用");
         const dispatchIds = retries.map((item) => item.id);
         for (const item of retries) { item.nextRetryAt = null; item.updatedAt = now(); }
@@ -650,21 +726,21 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     completeDispatch(dispatchId) {
       return this.transaction(() => {
-        const item = find(state.dispatches, dispatchId);
+        const item = journal.get("dispatches", dispatchId);
         if (!item || item.status !== "claimed") throw new Error("投递未领取，不能确认");
-        item.status = "done"; item.updatedAt = now(); item.nextRetryAt = null; delete item.continueRequested; save();
+        item.status = "done"; item.updatedAt = now(); item.nextRetryAt = null; delete item.continueRequested; delete item.routingError; delete item.routingCorrectionCount; save();
         const current = getRun(item.runId);
         if (current.retryingDispatchId === item.id) {
           delete current.retryingDispatchId;
-          const other = state.dispatches.find(value => value.runId === item.runId && value.status === 'cancelled' && value.lastError && !value.interactionOnly && !value.escalatedAt && getTrace(value.traceIds.at(-1))?.status === 'failed');
+          const other = journal.select("dispatches", "runId", item.runId).find(value => value.status === 'cancelled' && value.lastError && !value.interactionOnly && !value.escalatedAt && getTrace(value.traceIds.at(-1))?.status === 'failed');
           if (other) { this.failRun(item.runId, other.lastError, 'runtime'); current.failure.dispatchId = other.id; }
           save();
         }
       });
     },
     pendingQuestions(runId) {
-      const ids = state.dispatches.filter((item) => item.runId === runId && item.status === "waiting").map((item) => item.waitingMessageId);
-      return clone(state.messages.filter((item) => ids.includes(item.id)));
+      const ids = journal.select("dispatches", "status", "waiting").filter(item => item.runId === runId).map((item) => item.waitingMessageId);
+      return clone(ids.map(id=>journal.get('messages',id)).filter(Boolean));
     },
     syncWaiting(runId) {
       const current = getRun(runId), task = getTask(current.taskId);
@@ -680,14 +756,14 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     handoffDispatch(dispatchId, recipientAgentId, content, traceId) {
       return this.transaction(() => {
-        const delivery = find(state.dispatches, dispatchId), current = getRun(delivery?.runId);
+        const delivery = journal.get("dispatches", dispatchId), current = getRun(delivery?.runId);
         if (!delivery || !this.canExecuteDispatch(dispatchId)) throw new Error("当前投递不能交接");
         if (recipientAgentId === delivery.recipientAgentId) throw new Error("不能 @ 自己");
         const sender = runAgent(current, delivery.recipientAgentId);
         if (recipientAgentId === humanMember.id) return this.askQuestion(dispatchId, { audience: "human", question: content }, traceId);
         if (!runAgent(current, recipientAgentId)) throw new Error("交接接收者不属于当前 Run");
         if (delivery.purpose === "consultation") {
-          const parent = find(state.dispatches, delivery.parentDispatchId);
+          const parent = journal.get("dispatches", delivery.parentDispatchId);
           if (parent?.recipientAgentId === recipientAgentId) {
             const message = this.answerQuestion(current.id, parent.waitingMessageId, content, { type: "agent", id: sender.id, name: sender.name }, traceId);
             this.completeDispatch(dispatchId); return message;
@@ -702,7 +778,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     askQuestion(dispatchId, consultation, traceId) {
       return this.transaction(() => {
-        const delivery = find(state.dispatches, dispatchId), current = getRun(delivery?.runId);
+        const delivery = journal.get("dispatches", dispatchId), current = getRun(delivery?.runId);
         if (!delivery || delivery.status !== "claimed") throw new Error("咨询投递未领取");
         const questionType = consultation.questionType || "协作", routingReason = consultation.routingReason || "员工请求转交";
         const considered = Array.isArray(consultation.consideredMemberIds) ? consultation.consideredMemberIds : [];
@@ -713,6 +789,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         const sender = runAgent(current, delivery.recipientAgentId);
         const message = this.addMessage({ runId: current.id, workflowNodeId: delivery.workflowNodeId, traceId, conversationId: id("conversation"), sender: { type: "agent", id: sender.id, name: sender.name }, recipientHuman: human, recipientAgentId: human ? null : recipientId, kind: human ? "clarification_question" : "agent_consultation", content: consultation.question, questionType, routingReason, consideredMemberIds: considered });
         delivery.status = "waiting"; delivery.waitingMessageId = message.id; delivery.updatedAt = now(); delivery.messageIds.push(message.id);
+        delete delivery.routingError; delete delivery.routingCorrectionCount;
         if (!human) {
           this.enqueueDispatch(current.id, { recipientAgentId: recipientId, workflowNodeId: this.memberResponsibility(current.id, recipientId) || delivery.workflowNodeId, purpose: "consultation", messageIds: [message.id], sourceMessageId: message.id, parentDispatchId: delivery.id, dedupeKey: "question:" + message.id });
         }
@@ -721,8 +798,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     answerQuestion(runId, questionId, content, sender, traceId = null, attachmentIds = []) {
       return this.transaction(() => {
-        const current = getRun(runId), question = find(state.messages, questionId);
-        const waiting = state.dispatches.find((item) => item.runId === runId && item.status === "waiting" && item.waitingMessageId === questionId);
+        const current = getRun(runId), question = journal.get("messages", questionId);
+        const waiting = journal.select("dispatches", "runId", runId).find(item => item.status === "waiting" && item.waitingMessageId === questionId);
         if (!current || getTask(current.taskId).archivedAt || !waiting || question?.recipient.id !== sender.id || question?.recipient.type !== sender.type) throw new Error("不存在匹配的待回答问题");
         const message = this.addMessage({ runId, workflowNodeId: question.workflowNodeId, conversationId: question.conversationId, replyToMessageId: questionId, traceId, sender, recipientAgentId: question.sender.id, kind: sender.type === "human" ? "clarification_answer" : "consultation_answer", content, attachmentIds });
         waiting.status = "queued"; waiting.waitingMessageId = null; waiting.nextRetryAt = null; waiting.messageIds.push(message.id); waiting.updatedAt = now();
@@ -740,7 +817,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         const before=current.participants.filter(item=>item.type==="agent" && !(current.removedParticipantIds || []).includes(item.id));
         const removed=before.filter(item=>!selected.includes(item.id));
         for(const member of removed) {
-          if(state.traces.some(trace=>trace.runId===runId&&trace.agentId===member.id&&trace.status==="running") || state.dispatches.some(delivery=>delivery.runId===runId&&delivery.recipientAgentId===member.id&&!["done","cancelled"].includes(delivery.status)))throw new Error(`「${member.name}」仍有执行、待处理或等待回复的投递，暂不能移除`);
+          if(journal.select("traces", "runId", runId).some(trace => trace.agentId===member.id&&trace.status==="running") || journal.select("dispatches", "runId", runId).some(delivery => delivery.recipientAgentId===member.id&&!["done","cancelled"].includes(delivery.status)))throw new Error(`「${member.name}」仍有执行、待处理或等待回复的投递，暂不能移除`);
         }
         const added=selected.filter(id=>!before.some(member=>member.id===id));
         for(const agentId of added) {
@@ -767,7 +844,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const item = {...clone(record), runId, createdAt:now()}; state.runAttachments.push(item); save(); return clone(item);
     },
     getRunAttachment(runId, attachmentId) {
-      const record = state.runAttachments.find(item => item.runId === runId && item.id === attachmentId);
+      const record = journal.select("runAttachments", "runId", runId).find(item => item.id === attachmentId);
       if (!record) throw new Error('附件不属于当前任务或不存在');
       return clone(record);
     },
@@ -830,7 +907,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     // A concluded Run makes them unclaimable forever, so the terminal decision
     // legitimately cancels them with an audit record — never silently.
     settleCoordinationFollowups(runId) {
-      const pending = state.dispatches.filter((item) => item.runId === runId && item.coordinationFollowup && !["done", "cancelled"].includes(item.status));
+      const pending = journal.select("dispatches", "runId", runId).filter(item => item.coordinationFollowup && !["done", "cancelled"].includes(item.status));
       if (!pending.length) return [];
       for (const item of pending) { item.status = "cancelled"; item.nextRetryAt = null; item.updatedAt = now(); }
       addEvent({ type: "dispatch.coordination_followups_settled", runId, message: "终止安排或人类确认已取代未执行的平台协调复核投递；这些投递已取消并保留记录。", data: { dispatchIds: pending.map((item) => item.id) } });
@@ -838,7 +915,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     requestHumanAcceptance(runId, { traceId = null, summary = "项目经理已提交人类验收。" } = {}) {
       const current = getRun(runId), task = getTask(current.taskId);
-      if (current.status === 'failed' || state.traces.some(item => item.runId === runId && item.status === 'running') || state.dispatches.some(item => item.runId === runId && !['done', 'cancelled'].includes(item.status) && !item.deferredRevisit)) throw new Error("仍有成员执行、排队或等待答复，不能提交验收");
+      if (current.status === 'failed' || journal.select("traces", "runId", runId).some(item => item.status === 'running') || journal.select("dispatches", "runId", runId).some(item => !['done', 'cancelled'].includes(item.status) && !item.deferredRevisit)) throw Object.assign(new Error("仍有成员执行、排队或等待答复，不能提交验收"), { code: 'COORDINATION_PENDING' });
       if (task.kind === "automation" && summary === "项目经理已提交人类验收。") summary = "项目经理已完成本轮交付。";
       this.settleCoordinationFollowups(runId);
       current.acceptanceRequest = { traceId, summary, requestedAt: now(), managerAgentId: current.manager.id };
@@ -847,39 +924,83 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       addEvent({ type: "run.awaiting_acceptance", runId, actor: { type: "agent", id: current.manager.id, name: current.manager.name }, message: summary, data: { acceptanceRequest: clone(current.acceptanceRequest) } });
       save(); return clone(current);
     },
-    canCompleteRun(runId) { return !state.traces.some((item) => item.runId === runId && item.status === "running") && !state.dispatches.some((item) => item.runId === runId && !["done", "cancelled"].includes(item.status)); },
+    canCompleteRun(runId) { return !journal.select("traces", "runId", runId).some(item => item.status === "running") && !journal.select("dispatches", "runId", runId).some(item => !["done", "cancelled"].includes(item.status)); },
     assertTaskDeletionAllowed(taskId, {automationId} = {}) { const task = getTask(taskId); if (!task) throw new Error("Task 不存在"); if (task.kind === "automation" && task.automationId !== automationId) throw new Error("自动化任务请从已停用的自动化中统一删除"); const blockedBy = taskDeletionBlock(taskId); if (blockedBy) throw new Error(taskDeletionError(blockedBy)); return taskReadModel(task); },
-    deleteTask(taskId, options) { const task = this.assertTaskDeletionAllowed(taskId, options); const relatedRuns = state.runs.filter((run) => run.taskId === taskId); const runIds = new Set(relatedRuns.map((run) => run.id)); state.tasks = state.tasks.filter((item) => item.id !== taskId); state.runs = state.runs.filter((item) => !runIds.has(item.id)); state.traces = state.traces.filter((item) => !runIds.has(item.runId)); state.artifacts = state.artifacts.filter((item) => !runIds.has(item.runId)); state.messages = state.messages.filter((item) => !runIds.has(item.runId)); state.runAttachments = state.runAttachments.filter(item => !runIds.has(item.runId)); state.dispatches = state.dispatches.filter((item) => !runIds.has(item.runId)); state.decisions = state.decisions.filter((item) => !runIds.has(item.runId)); state.events = state.events.filter((item) => !runIds.has(item.runId)); save(); return { task: clone(task), runIds: [...runIds] }; },
-    getExecutionLogs: (query) => executionLogs(state, query),
+    deleteTasks(taskIds, options) {
+      const selected=new Set(taskIds), tasks=taskIds.map(taskId=>this.assertTaskDeletionAllowed(taskId,options));
+      const runIds=new Set(taskIds.flatMap(taskId=>journal.select('runs','taskId',taskId).map(run=>run.id)));
+      state.tasks=state.tasks.filter(item=>!selected.has(item.id)); state.runs=state.runs.filter(item=>!runIds.has(item.id));
+      for(const name of ['traces','artifacts','messages','runAttachments','dispatches','decisions','events'])state[name]=state[name].filter(item=>!runIds.has(item.runId));
+      save(); return {tasks,runIds:[...runIds]};
+    },
+    deleteTask(taskId, options) { const result=this.deleteTasks([taskId],options);return {task:result.tasks[0],runIds:result.runIds}; },
+    getExecutionLogs(query={}) {
+      const page=persistence.executionLogPage(query), sample={events:[],communicationEvents:[],runs:[],tasks:[],communicationConversations:[],communicationDeliveries:[]};
+      const seen=new Map();
+      const include=(name,id)=>{if(!id)return;let ids=seen.get(name);if(!ids)seen.set(name,ids=new Set());if(ids.has(id))return;ids.add(id);const row=journal.get(name,id);if(row)sample[name].push(row);return row;};
+      for(const {collection,event} of page.rows){sample[collection].push(event);if(collection==='events'){const run=include('runs',event.runId)||getRun(event.runId);if(run)include('tasks',run.taskId);}else{include('communicationConversations',event.conversationId);include('communicationDeliveries',event.deliveryId);}}
+      const result=executionLogs(sample,{...query,before:null});return {...result,hasMore:page.hasMore};
+    },
     snapshot: () => clone(state), subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, addEvent,
     listAgents: () => state.agents.filter(item => item.status !== "deleted").map(employeeConfiguration), listTeams: () => clone(state.teams.map((item) => {
       const { managerAgentId, ...team } = item, memberAgentIds = teamMembers(item);
       return { ...team, memberAgentIds, members: memberAgentIds.map(value => ({ ...employeeConfiguration(getAgent(value)), type: "agent" })) };
-    })), listTasks: () => state.tasks.filter(task => task.kind !== "automation").map(taskReadModel), listWorkflowTemplates: () => clone(state.workflowTemplates), timeline: (runId = null) => clone(state.events.filter((item) => !runId || item.runId === runId)),
-    listRuns: () => clone(state.runs.map((item) => ({ ...item, task: taskReadModel(getTask(item.taskId)), traceCount: state.traces.filter((trace) => trace.runId === item.id).length, artifactCount: state.artifacts.filter((artifact) => artifact.runId === item.id).length }))),
+    })), listTasks: () => state.tasks.filter(task => task.kind !== "automation").map(taskReadModel), listWorkflowTemplates: () => clone(state.workflowTemplates), timeline: (runId = null) => clone(runId ? journal.select("events", "runId", runId) : state.events),
+    listRuns: () => clone(state.runs.map((item) => ({ ...item, task: taskReadModel(getTask(item.taskId)), traceCount: journal.select("traces", "runId", item.id).length, artifactCount: journal.select("artifacts", "runId", item.id).length }))),
     getRun(runId) { const item = getRun(runId); if (!item) throw new Error("Run 不存在"); return clone(item); }, getTask(taskId) { const item = getTask(taskId); if (!item) throw new Error("任务不存在"); return taskReadModel(item); }, getRunAgent(runId, agentId) { return clone(runAgent(getRun(runId), agentId)); },
     getRunTask(runId) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const task = getTask(current.taskId); return clone({ ...taskReadModel(task), memberAgentIds: current.participants.filter(item=>item.type==="agent" && !(current.removedParticipantIds || []).includes(item.id)).map(item=>item.id), taskWorkspacePath: task.workspacePath, workspacePath: current.workspacePath || task.workspacePath, deletionBlockedBy: taskDeletionBlock(task.id) }); },
     // Scheduling needs facts, not the UI's expanded history or employee configuration.
-    hasRunTraces(runId) { return state.traces.some(item => item.runId === runId); },
-    getRunMessage(runId, messageId) { return clone(state.messages.find(item => item.runId === runId && item.id === messageId) || null); },
-    latestRunMessageId(runId) { return state.messages.findLast(item => item.runId === runId)?.id || null; },
-    getRunArtifact(runId, artifactId) { return clone(state.artifacts.find(item => item.runId === runId && item.id === artifactId) || null); },
+    hasRunTraces(runId) { return journal.select("traces", "runId", runId, {idsOnly:true}).length > 0; },
+    getRunMessage(runId, messageId) { const item=journal.get('messages',messageId);return clone(item?.runId===runId?item:null); },
+    latestRunMessageId(runId) { return journal.select('messages','runId',runId,{last:1})[0]?.id || null; },
+    getRunArtifact(runId, artifactId) { const item=journal.get('artifacts',artifactId);return clone(item?.runId===runId?item:null); },
     getRunExecutionContext(runId) {
       if (!getRun(runId)) throw new Error("Run 不存在");
       return {
-        traces: state.traces.filter(item => item.runId === runId).slice(-18).map(({workflowNodeId,agentId,type,status,error}) => ({workflowNodeId,agentId,type,status,error})),
-        dispatches: state.dispatches.filter(item => item.runId === runId && !['done','cancelled'].includes(item.status)).map(({id,recipientAgentId,workflowNodeId,purpose,status}) => ({id,recipientAgentId,workflowNodeId,purpose,status})),
-        artifacts: state.artifacts.filter(item => item.runId === runId).map(({name,deleted,sha256,bytes}) => ({name,deleted,sha256,bytes})),
-        messages: state.messages.filter(item => item.runId === runId && ['human','agent'].includes(item.sender?.type)).slice(-30).map(item => clone(item)),
+        traces: journal.select("traces", "runId", runId,{last:18}).map(({workflowNodeId,agentId,type,status,error}) => ({workflowNodeId,agentId,type,status,error})),
+        dispatches: journal.select("dispatches", "runId", runId).filter(item => !['done','cancelled'].includes(item.status)).map(({id,recipientAgentId,workflowNodeId,purpose,status}) => ({id,recipientAgentId,workflowNodeId,purpose,status})),
+        artifacts: journal.select("artifacts", "runId", runId).map(({name,deleted,sha256,bytes}) => ({name,deleted,sha256,bytes})),
+        messages: persistence.collaborationPage(runId,{limit:30}).selected.map(id=>clone(journal.get('messages',id))),
         pendingQuestions: this.pendingQuestions(runId),
-        decisions: state.decisions.filter(item => item.runId === runId).map(item => clone(item))
+        decisions: journal.select("decisions", "runId", runId).map(item => clone(item))
       };
     },
-    getRunWorkspace(runId, { summary = false } = {}) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const traces = state.traces.filter((item) => item.runId === runId).map((item) => ({ ...item, agent: { id: item.agentId, name: current.participants.find(member=>member.id===item.agentId)?.name } })); const artifacts = state.artifacts.filter((item) => item.runId === runId).map((item) => (summary ? { ...item } : { ...item, trace: getTrace(item.traceId), agent: { id: item.ownerAgentId, name: current.participants.find(member=>member.id===item.ownerAgentId)?.name } })); return clone({ deletedAgentIds: state.agents.filter(item => item.status === "deleted").map(item => item.id), failureEvents: state.events.filter((event) => event.runId === runId && event.type === "trace.failed").slice(-20).map(consoleAuditProjection), pendingQuestions: this.pendingQuestions(runId), dispatches: this.listDispatches(runId), run: { ...current, task: this.getRunTask(runId), artifactCount: artifacts.length }, traces, artifacts, messages: state.messages.filter((item) => item.runId === runId), decisions: state.decisions.filter((item) => item.runId === runId), events: state.events.filter((item) => item.runId === runId && (!summary || ["dispatch.retry_scheduled", "dispatch.retry_requested", "dispatch.retry_stopped", "dispatch.escalated", "dispatch.coordination_followups_settled", "session.reset", "run.completed", "run.awaiting_acceptance", "run.acceptance_reopened", "run.recovered", "run.cancelled", "run.paused", "run.resumed", "run.inquiries_cancelled", "run.failed", "run.retry_requested", "run.orchestration_retry_requested", "run.reassessment_requested"].includes(item.type))) }); },
+    getRunSummary(runId) {
+      const current=getRun(runId);if(!current)throw new Error('Run 不存在');
+      const traceCounts=persistence.traceCounts(runId),latest=new Map();
+      for(const member of current.participants.filter(item=>item.type==='agent')) {
+        const id=persistence.findEntities('traces',{runId,agentId:member.id},{last:true,limit:1})[0];if(id)latest.set(member.id,getTrace(id));
+      }
+      const acceptanceId=current.acceptanceRequest?.traceId;if(acceptanceId&&!Array.from(latest.values()).some(t=>t.id===acceptanceId)){const trace=getTrace(acceptanceId);if(trace)latest.set(acceptanceId,trace);}
+      const dispatches=['queued','claimed','waiting','failed'].flatMap(status=>journal.select('dispatches','status',status)).filter(item=>item.runId===runId);if(current.failure?.dispatchId&&!dispatches.some(item=>item.id===current.failure.dispatchId)){const item=journal.get('dispatches',current.failure.dispatchId);if(item)dispatches.push(item);}
+      return clone({run:{...current,task:this.getRunTask(runId),traceCounts,traceCount:Object.values(traceCounts).reduce((n,value)=>n+value,0),artifactCount:journal.select('artifacts','runId',runId,{idsOnly:true}).length},
+        traces:[...latest.values()],dispatches,pendingQuestions:this.pendingQuestions(runId),artifacts:[],messages:[],decisions:[],events:[],failureEvents:[],deletedAgentIds:state.agents.filter(item=>item.status==='deleted').map(item=>item.id)});
+    },
+    getRunCollaboration(runId,{before=null,limit=30,human=false}={}) {
+      const current=getRun(runId);if(!current)throw new Error('Run 不存在');
+      if(!Number.isInteger(limit)||limit<1||limit>100)throw new Error('协作分页大小必须在 1 至 100 之间');
+      const page=persistence.collaborationPage(runId,{before,limit,human}),selected=page.selected,included=new Map(selected.map(id=>[id,journal.get('messages',id)]));
+      for(const item of [...included.values()]) {
+        if(item.replyToMessageId){const question=journal.get('messages',item.replyToMessageId);if(question?.runId===runId)included.set(question.id,question);}
+        for(const answer of journal.select('messages','replyToMessageId',item.id,{limit:1}))if(answer.runId===runId)included.set(answer.id,answer);
+      }
+      const context=persistence.collaborationContext(runId,[...included.keys()],[...included.values()].map(item=>item.traceId).filter(Boolean));
+      const dispatches=context.dispatchIds.map(id=>journal.get('dispatches',id)),events=context.eventIds.map(id=>journal.get('events',id));
+      const traces=new Map([...included.values()].filter(item=>item.traceId).map(item=>[item.traceId,getTrace(item.traceId)]));
+      for(const delivery of dispatches)for(const id of delivery.traceIds||[]){const trace=getTrace(id);if(trace)traces.set(id,trace);}
+      return clone({...page,workspace:{run:{id:runId,participants:current.participants,manager:current.manager,task:{kind:getTask(current.taskId).kind,workflowSnapshot:getTask(current.taskId).workflowSnapshot}},messages:[...included.values()],dispatches,traces:[...traces.values()].filter(Boolean),events,acceptanceFiles:Object.fromEntries(events.filter(e=>e.type==='run.awaiting_acceptance').map(e=>[e.id,persistence.acceptanceFiles(runId,e.timestamp)])),artifacts:[]}});
+    },
+    getRunArtifacts(runId,{before=null,limit=20}={}) {
+      if(!getRun(runId))throw new Error('Run 不存在');if(!Number.isSafeInteger(limit)||limit<1||limit>100)throw new Error('分页大小无效');
+      const ids=journal.select('artifacts','runId',runId,{idsOnly:true}),end=before?ids.indexOf(before):ids.length;if(end<0)throw new Error('产物游标无效');
+      const selected=ids.slice(Math.max(0,end-limit),end).reverse();return {items:selected.map(id=>clone(journal.get('artifacts',id))),total:ids.length,hasMore:end>limit,nextBefore:selected.at(-1)||null};
+    },
+    getRunTrace(runId,traceId){const trace=getTrace(traceId);if(!trace||trace.runId!==runId)throw new Error('Trace 不属于当前 Run');return clone(trace);},
+    getRunWorkspace(runId, { summary = false } = {}) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const traces = journal.select("traces", "runId", runId).map((item) => ({ ...item, agent: { id: item.agentId, name: current.participants.find(member=>member.id===item.agentId)?.name } })); const artifacts = journal.select("artifacts", "runId", runId).map((item) => (summary ? { ...item } : { ...item, trace: getTrace(item.traceId), agent: { id: item.ownerAgentId, name: current.participants.find(member=>member.id===item.ownerAgentId)?.name } })); return clone({ deletedAgentIds: state.agents.filter(item => item.status === "deleted").map(item => item.id), failureEvents: journal.select("events", "runId", runId).filter(event => event.type === "trace.failed").slice(-20).map(consoleAuditProjection), pendingQuestions: this.pendingQuestions(runId), dispatches: this.listDispatches(runId), run: { ...current, task: this.getRunTask(runId), artifactCount: artifacts.length }, traces, artifacts, messages: journal.select("messages", "runId", runId), decisions: journal.select("decisions", "runId", runId), events: journal.select("events", "runId", runId).filter(item => (!summary || ["dispatch.retry_scheduled", "dispatch.retry_requested", "dispatch.retry_stopped", "dispatch.escalated", "dispatch.coordination_followups_settled", "session.reset", "run.completed", "run.awaiting_acceptance", "run.acceptance_reopened", "run.recovered", "run.cancelled", "run.paused", "run.resumed", "run.inquiries_cancelled", "run.failed", "run.retry_requested", "run.orchestration_retry_requested", "run.reassessment_requested"].includes(item.type))) }); },
     createWorkflowTemplate(input = {}) { validateWorkflowInput(input); const item = workflow(input, {current: true}); if (state.workflowTemplates.some((candidate) => candidate.name === item.name)) throw new Error("工作流名称必须唯一"); state.workflowTemplates.push(item); save(); return clone(item); },
-    updateWorkflowTemplate(templateId, input = {}) { const current = find(state.workflowTemplates, templateId); if (!current) throw new Error("工作流不存在"); validateWorkflowInput(input); Object.assign(current, workflow(input, { templateId, system: current.system, current: true })); save(); return clone(current); },
+    updateWorkflowTemplate(templateId, input = {}) { const current = journal.get("workflowTemplates", templateId); if (!current) throw new Error("工作流不存在"); validateWorkflowInput(input); Object.assign(current, workflow(input, { templateId, system: current.system, current: true })); save(); return clone(current); },
     deleteWorkflowTemplate(templateId) {
-      const current = find(state.workflowTemplates, templateId);
+      const current = journal.get("workflowTemplates", templateId);
       if (!current) throw new Error("工作流不存在");
       const references = state.tasks.filter(task => task.workflowTemplateId === templateId);
       if (references.length) throw new Error(`工作流仍被 ${references.length} 个 Task 的冻结快照引用，不能删除`);
@@ -1134,7 +1255,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (members.some(member => !["business", "manager"].includes(member.kind))) throw new Error("任务成员含旧研发类型，请先编辑为普通员工");
       if (input.workflowTemplateId != null && typeof input.workflowTemplateId !== "string") throw new Error("工作流 ID 必须是字符串或 null");
       const templateId = input.workflowTemplateId?.trim() || null;
-      const template = templateId ? find(state.workflowTemplates, templateId) : { id: null, name: "默认协作", description: "按任务目标和成员能力协作，由经理推进交接并提交验收。", nodes: [{ id: "delivery", title: "完成任务", staffingGuidance: "经理根据任务目标和成员能力安排执行，成员完成后明确交接；需要更多工作时继续协调，交付后提交验收。", deliverable: "完成用户要求，如实说明交付结果与尚未解决的问题。", artifactPaths: [], dependsOn: [], handoffFrom: [] }] };
+      const template = templateId ? journal.get("workflowTemplates", templateId) : { id: null, name: "默认协作", description: "按任务目标和成员能力协作，由经理推进交接并提交验收。", nodes: [{ id: "delivery", title: "完成任务", staffingGuidance: "经理根据任务目标和成员能力安排执行，成员完成后明确交接；需要更多工作时继续协调，交付后提交验收。", deliverable: "完成用户要求，如实说明交付结果与尚未解决的问题。", artifactPaths: [], dependsOn: [], handoffFrom: [] }] };
       if (!template) throw new Error("工作流不存在");
       const workspaceRoot = this.getWorkspaceSettings().workspaceRoot, taskId = "task_" + randomUUID();
       if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定");
@@ -1148,9 +1269,9 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const item = { id: taskId, workspaceManaged: Boolean(workspaceRoot), repositoryMode: "workspace", ...repositories, memberAgentIds: selectedIds, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), kind: "manual", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId, managerRuntime: runtime(input.managerRuntime || managerSnapshot.runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: now(), updatedAt: now() };
       return item;
     },
-    createTask(input = {}) { const item = this.buildTask(input); state.tasks.unshift(item); save(); return clone(item); },
-    archiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (current.status !== "done") throw new Error("只有已完成任务可以归档"); if (current.archivedAt) throw new Error("任务已经归档"); if (state.runs.some((run) => run.taskId === taskId && !this.canCompleteRun(run.id))) throw new Error("仍有未结束协作，不能归档"); current.archivedAt = now(); current.updatedAt = current.archivedAt; const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.archived", runId: latestRun?.id || null, message: `任务「${current.title}」已归档，交付记录仍可查看。`, data: { taskId, archivedAt: current.archivedAt } }); save(); return taskReadModel(current); },
-    unarchiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (!current.archivedAt) throw new Error("任务尚未归档"); current.archivedAt = null; current.updatedAt = now(); const latestRun = state.runs.find((run) => run.taskId === taskId); addEvent({ type: "task.unarchived", runId: latestRun?.id || null, message: `任务「${current.title}」已恢复至任务中心。`, data: { taskId } }); save(); return taskReadModel(current); },
+    createTask(input = {}) { const item = this.buildTask(input); state.tasks.push(item); save(); return clone(item); },
+    archiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (current.status !== "done") throw new Error("只有已完成任务可以归档"); if (current.archivedAt) throw new Error("任务已经归档"); if (journal.select("runs", "taskId", taskId).some(run => !this.canCompleteRun(run.id))) throw new Error("仍有未结束协作，不能归档"); current.archivedAt = now(); current.updatedAt = current.archivedAt; const latestRun = taskRuns(taskId)[0]; addEvent({ type: "task.archived", runId: latestRun?.id || null, message: `任务「${current.title}」已归档，交付记录仍可查看。`, data: { taskId, archivedAt: current.archivedAt } }); save(); return taskReadModel(current); },
+    unarchiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (!current.archivedAt) throw new Error("任务尚未归档"); current.archivedAt = null; current.updatedAt = now(); const latestRun = taskRuns(taskId)[0]; addEvent({ type: "task.unarchived", runId: latestRun?.id || null, message: `任务「${current.title}」已恢复至任务中心。`, data: { taskId } }); save(); return taskReadModel(current); },
     createRun(taskId) {
       const currentTask = getTask(taskId);
       if (!currentTask || currentTask.status !== "backlog") throw new Error("Task 不能启动新的 Run");
@@ -1162,14 +1283,14 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const manager = { ...withRoleSnapshot(clone(sourceManager)), id: id("manager"), sourceAgentId: sourceManager.id, runtime: clone(currentTask.managerRuntime) };
       const participants = [...currentTask.memberSnapshots.map(item => ({ ...withRoleSnapshot(clone(item)), type: "agent" })), { ...manager, type: "agent" }, ...(currentTask.kind === "automation" ? [] : [clone(humanMember)])];
       const runId = id("run"), item = { id: runId, workspacePath: currentTask.workspaceManaged ? resolve(currentTask.workspacePath, runId) : currentTask.workspacePath, taskId, manager, participants, status: "running", currentFocus: null, waitingConversationId: null, waitingNodeId: null, waitingAgentId: null, pendingMessageIds: [], startedAt: now(), completedAt: null, failure: null, summary: null, deliveryReview: null };
-      state.runs.unshift(item); currentTask.status = "running"; save(); return clone(item);
+      state.runs.push(item); currentTask.status = "running"; save(); return clone(item);
     },
     updateRun(runId, patch = {}) { if (patch.status === "completed") throw new Error("完成必须由人类确认"); const current = getRun(runId); if (!current) throw new Error("Run 不存在"); if (patch.status === "awaiting_human" && getTask(current.taskId).kind === "automation") throw new Error("自动化不等待人类澄清"); if (patch.status && patch.status !== current.status && !runTransitions[current.status]?.includes(patch.status)) throw new Error(`Run 不能从 ${current.status} 变更为 ${patch.status}`); Object.assign(current, clone(patch)); save(); return clone(current); }, setTaskStatus(taskId, status) { if (status === "done") throw new Error("完成必须由人类确认"); const current = getTask(taskId); if (!current || (status !== current.status && !taskTransitions[current.status]?.includes(status))) throw new Error("Task 状态变更不合法"); current.status = status; current.updatedAt = now(); save(); return clone(current); },
     getRunRecoveryPlan(runId) {
       const current = getRun(runId);
       const empty = { shouldExecute: false, interruptedTraceIds: [], recoveredDispatchIds: [] };
       if (!current || getTask(current.taskId).archivedAt) return empty;
-      const deliveries = state.dispatches.filter((item) => item.runId === runId);
+      const deliveries = journal.select("dispatches", "runId", runId);
       const pending = deliveries.filter((item) => ["queued", "claimed"].includes(item.status));
       const inquiryPending = pending.some((item) => item.interactionOnly);
       const inquiryReady = pending.some((item) => item.interactionOnly && (item.status === "claimed" || !item.nextRetryAt || Date.parse(item.nextRetryAt) <= Date.now()));
@@ -1181,7 +1302,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const recoverableDispatches = deliveries.filter((item) => item.status === "claimed" && (recoverBusiness || item.interactionOnly));
       return {
         shouldExecute: current.status !== "failed" && !this.hasPendingHumanQuestion(runId) && Boolean(businessActive || waitingWork || inquiryReady),
-        interruptedTraceIds: state.traces.filter((trace) => trace.runId === runId && trace.status === "running" && (recoverBusiness || (inquiryPending && deliveries.some((item) => item.interactionOnly && item.traceIds.includes(trace.id))))).map((trace) => trace.id),
+        interruptedTraceIds: journal.select("traces", "runId", runId).filter(trace => trace.status === "running" && (recoverBusiness || (inquiryPending && deliveries.some((item) => item.interactionOnly && item.traceIds.includes(trace.id))))).map((trace) => trace.id),
         recoveredDispatchIds: recoverableDispatches.map((item) => item.id),
       };
     },
@@ -1190,7 +1311,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (!plan.interruptedTraceIds.length && !plan.recoveredDispatchIds.length) return { run: clone(current), ...plan };
       return this.transaction(() => {
         for (const dispatchId of plan.recoveredDispatchIds) {
-          const delivery = find(state.dispatches, dispatchId);
+          const delivery = journal.get("dispatches", dispatchId);
           delivery.status = "queued"; delivery.nextRetryAt = null; delivery.updatedAt = now();
         }
         for (const traceId of plan.interruptedTraceIds) this.completeTrace(traceId, { status: "failed", error: reason });
@@ -1202,7 +1323,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       return this.transaction(() => {
         const current = getRun(runId), task = getTask(current?.taskId);
         if (!current || !task || !["planning", "running", "review", "awaiting_human", "failed"].includes(current.status)) throw new Error("只有活跃 Run 可以标记为失败");
-        if (phase !== 'runtime' && (state.traces.some((trace) => trace.runId === runId && trace.status === "running") || state.dispatches.some((item) => item.runId === runId && item.status === "claimed"))) throw new Error("存在活跃执行，不能标记 Run 失败");
+        if (phase !== 'runtime' && (journal.select("traces", "runId", runId).some(trace => trace.status === "running") || journal.select("dispatches", "runId", runId).some(item => item.status === "claimed"))) throw new Error("存在活跃执行，不能标记 Run 失败");
         current.status = "failed"; current.completedAt = now(); current.failure = { phase, message: text(reason, "失败原因") };
         task.status = "blocked"; task.updatedAt = now();
         addEvent({ type: "run.failed", runId, message: current.failure.message, data: { phase } });
@@ -1257,7 +1378,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       assertNode(current, nodeId);
       if (!currentTrace || currentTrace.runId !== runId || currentTrace.workflowNodeId !== nodeId || currentTrace.status !== "running") throw new Error("Trace 不属于当前节点或不可验收");
       for (const input of inputs) {
-        const item = { id: id("artifact"), runId, taskId: current.taskId, traceId, ownerAgentId: currentTrace.agentId, name: input.name, category: input.name.startsWith("repos/") ? "code" : "document", mediaType: input.mediaType || "application/octet-stream", storagePath: input.storagePath, sourcePath: input.sourcePath || null, sha256: input.sha256, bytes: input.bytes, deleted: Boolean(input.deleted), version: state.artifacts.filter((artifact) => artifact.runId === runId && artifact.name === input.name).length + 1, createdAt: now() };
+        const item = { id: id("artifact"), runId, taskId: current.taskId, traceId, ownerAgentId: currentTrace.agentId, name: input.name, category: input.name.startsWith("repos/") ? "code" : "document", mediaType: input.mediaType || "application/octet-stream", storagePath: input.storagePath, sourcePath: input.sourcePath || null, sha256: input.sha256, bytes: input.bytes, deleted: Boolean(input.deleted), version: journal.select("artifacts", "runId", runId).filter(artifact => artifact.name === input.name).length + 1, createdAt: now() };
         state.artifacts.push(item); currentTrace.outputArtifactIds.push(item.id);
       }
       for (const input of (Array.isArray(output.decisions) ? output.decisions : [])) if (input?.summary) state.decisions.push({ id: id("decision"), runId, traceId, summary: input.summary, impact: input.impact || "clarification", affectedNodeIds: input.affectedNodeIds || [], rationale: input.rationale || "", status: "confirmed", createdAt: now(), confirmedAt: now() });
@@ -1270,13 +1391,13 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         if (ids.length && input.sender && input.sender.type !== 'human') throw new Error('只有人类上传消息可以绑定附件');
         const attachments = ids.map(id => this.getRunAttachment(current.id, id));
         const content = attachments.length && (input.content === undefined || input.content === '') ? '' : text(input.content, '消息内容');
-        const item = { id: id("message"), runId: current.id, conversationId: input.conversationId || `conversation_${current.id}_${input.workflowNodeId || "general"}`, workflowNodeId: input.workflowNodeId || null, sender: input.sender || { type: "human", id: "human_operator", name: "你" }, recipient: { type: recipient.type || "agent", id: recipient.id, name: recipient.name }, traceId: input.traceId || null, startMessageId: input.traceId ? getTrace(input.traceId)?.inputMessageId || null : null, replyToMessageId: input.replyToMessageId || null, questionType: input.questionType || null, routingReason: input.routingReason || null, consideredMemberIds: input.consideredMemberIds || [], kind: input.kind || "instruction", content, ...(attachments.length ? {attachments} : {}), createdAt: now() }; state.messages.push(item); addEvent({ type: "message.sent", runId: current.id, actor: item.sender, message: item.content || `发送了 ${attachments.length} 个附件`, data: { messageId: item.id, conversationId: item.conversationId, workflowNodeId: item.workflowNodeId } }); return clone(item); }, waitForHuman(runId, nodeId, conversationId) { const current = getRun(runId); if (getTask(current.taskId).kind === "automation") throw new Error("自动化不等待人类澄清"); current.waitingNodeId = nodeId; current.waitingAgentId = null; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待人类澄清", updatedAt: now() }; current.status = "awaiting_human"; getTask(current.taskId).status = "awaiting_human"; save(); }, resumeHuman(runId, messageId) { const current = getRun(runId), message = find(state.messages, messageId); if (!current?.waitingNodeId || !message || message.conversationId !== current.waitingConversationId) throw new Error("当前 Run 没有匹配的人类澄清"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; current.status = "running"; getTask(current.taskId).status = "running"; save(); return clone(current); }, waitForAgent(runId, nodeId, agentId, conversationId) { const current = getRun(runId); if (!runAgent(current, agentId)) throw new Error("被咨询数字员工不属于当前 Run"); current.waitingNodeId = nodeId; current.waitingAgentId = agentId; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待角色协作答复", updatedAt: now() }; save(); }, resumeAgent(runId, conversationId) { const current = getRun(runId); if (!current?.waitingNodeId || !current.waitingAgentId || current.waitingConversationId !== conversationId) throw new Error("当前 Run 没有匹配的角色协作"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; save(); return clone(current); },
-    requestReplan(runId, messageId) { const current = getRun(runId); current.pendingMessageIds.push(messageId); save(); }, pendingMessages(runId) { const current = getRun(runId); return clone(state.messages.filter((item) => current?.pendingMessageIds.includes(item.id))); }, consumePendingMessages(runId) { getRun(runId).pendingMessageIds = []; save(); }, noteReassessment(runId, nodeIds, reason = "项目经理确认变更影响") { const current = getRun(runId); for (const nodeId of nodeIds) assertNode(current, nodeId); addEvent({ type: "run.reassessment_requested", runId, message: reason, data: { nodeIds } }); save(); return clone(current); },
+        const item = { id: id("message"), runId: current.id, conversationId: input.conversationId || `conversation_${current.id}_${input.workflowNodeId || "general"}`, workflowNodeId: input.workflowNodeId || null, sender: input.sender || { type: "human", id: "human_operator", name: "你" }, recipient: { type: recipient.type || "agent", id: recipient.id, name: recipient.name }, traceId: input.traceId || null, startMessageId: input.traceId ? getTrace(input.traceId)?.inputMessageId || null : null, replyToMessageId: input.replyToMessageId || null, questionType: input.questionType || null, routingReason: input.routingReason || null, consideredMemberIds: input.consideredMemberIds || [], kind: input.kind || "instruction", content, ...(attachments.length ? {attachments} : {}), createdAt: now() }; state.messages.push(item); addEvent({ type: "message.sent", runId: current.id, actor: item.sender, message: item.content || `发送了 ${attachments.length} 个附件`, data: { messageId: item.id, conversationId: item.conversationId, workflowNodeId: item.workflowNodeId } }); return clone(item); }, waitForHuman(runId, nodeId, conversationId) { const current = getRun(runId); if (getTask(current.taskId).kind === "automation") throw new Error("自动化不等待人类澄清"); current.waitingNodeId = nodeId; current.waitingAgentId = null; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待人类澄清", updatedAt: now() }; current.status = "awaiting_human"; getTask(current.taskId).status = "awaiting_human"; save(); }, resumeHuman(runId, messageId) { const current = getRun(runId), message = journal.get("messages", messageId); if (!current?.waitingNodeId || !message || message.conversationId !== current.waitingConversationId) throw new Error("当前 Run 没有匹配的人类澄清"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; current.status = "running"; getTask(current.taskId).status = "running"; save(); return clone(current); }, waitForAgent(runId, nodeId, agentId, conversationId) { const current = getRun(runId); if (!runAgent(current, agentId)) throw new Error("被咨询数字员工不属于当前 Run"); current.waitingNodeId = nodeId; current.waitingAgentId = agentId; current.waitingConversationId = conversationId; current.currentFocus = { nodeId, reason: "等待角色协作答复", updatedAt: now() }; save(); }, resumeAgent(runId, conversationId) { const current = getRun(runId); if (!current?.waitingNodeId || !current.waitingAgentId || current.waitingConversationId !== conversationId) throw new Error("当前 Run 没有匹配的角色协作"); current.waitingNodeId = null; current.waitingAgentId = null; current.waitingConversationId = null; save(); return clone(current); },
+    requestReplan(runId, messageId) { const current = getRun(runId); current.pendingMessageIds.push(messageId); save(); }, pendingMessages(runId) { const current = getRun(runId); return clone((current?.pendingMessageIds || []).map(id=>journal.get("messages",id)).filter(Boolean).sort((a,b)=>journal.entry("messages",a.id).position-journal.entry("messages",b.id).position)); }, consumePendingMessages(runId) { getRun(runId).pendingMessageIds = []; save(); }, noteReassessment(runId, nodeIds, reason = "项目经理确认变更影响") { const current = getRun(runId); for (const nodeId of nodeIds) assertNode(current, nodeId); addEvent({ type: "run.reassessment_requested", runId, message: reason, data: { nodeIds } }); save(); return clone(current); },
     cancelRun(runId, reason) {
       const current = getRun(runId), task = getTask(current?.taskId);
       if (!current || !task || !["planning", "running", "awaiting_human", "review", "awaiting_acceptance", "paused", "failed"].includes(current.status)) return clone(current);
       const cancelledAt = now(), cancellationReason = text(reason, "终止原因"), cancelledDispatchIds = [];
-      for (const item of state.dispatches.filter((item) => item.runId === runId && !["done", "cancelled"].includes(item.status))) {
+      for (const item of journal.select("dispatches", "runId", runId).filter(item => !["done", "cancelled"].includes(item.status))) {
         item.status = "cancelled"; item.nextRetryAt = null; item.updatedAt = cancelledAt; cancelledDispatchIds.push(item.id);
       }
       current.status = "cancelled"; current.completedAt = cancelledAt; current.cancellationReason = cancellationReason;

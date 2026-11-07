@@ -136,3 +136,11 @@ automations list/get/create/update/delete/trigger/triggers 与 App 使用同一�
 tasks message/reply 的 JSON 支持 attachmentPaths（本机文件路径数组）与 attachmentIds（同一 Run 已上传引用）；两者合计最多10个，单文件最多20 MiB。CLI 以二进制经认证 HTTP 上传后提交附件 ID，不读取数据库。content 必填，有附件时可为空字符串；reply 仍要求精确 replyToMessageId。回执 message.attachments 与 collaboration 列表包含附件元数据；错误/归档/自动化边界同 App。示例：{"content":"参考附件","attachmentPaths":["/absolute/参考图片.png","/absolute/说明.txt"]}。
 
 roles create/update 的 schema 与 App 同步增加 extensionSelection，必须同时提供 pluginIds/mcpIds，均引用已安装版本；创建省略为空，更新省略保留，两个空数组清空。roles list/get 返回选择 ID；agents list/get 的 inheritedExtensionSelection 表示角色继承来源，runtime.extensionSelection 仍为直接选择。保存时校验 Provider 兼容及合并命名空间，执行自动去重。automations delete ID --yes 仅删除停用自动化，同时终止关联执行并永久删除全部任务和触发记录，返回 taskIds/runIds；与 App 删除确认一致。
+
+## 分页与按需读取契约
+
+员工、角色、团队、工作流、普通任务列表统一由认证 HTTP 服务端过滤/分页，`--all` 顺序读取全部页；详情使用精确 ID 端点。普通任务自动排除自动化任务，角色/工作流名称经轻量关联目录解析并检查唯一性。`tasks progress/questions` 读取 compact 状态；collaboration/artifacts 用消息/文件游标映射 `--page`，保留总数与 hasMore。分页是读取方式调整，不减少 App/CLI 管理能力。
+
+`runtimes models PROVIDER [--refresh]`：默认共享 30 秒缓存，--refresh 重查；并发刷新仍合并正在执行的相同查询。失败不缓存。附件路径流式上传，不再整体读入内存，单文件 20 MiB 和每消息 10 个上限不变。
+
+派工协议纠错不增加 CLI 写入能力或创建参数：App/CLI 共用 Store，单人/多人指令均完整定向送达。progress 保留真实失败 Trace 和失败原因，协调格式最多自动纠正一次，重复拒收为 failed；客户端重试继续原成员。collaboration 仍只有角色沟通，不混入纠错系统提示；已存在创建/查询/成员管理的字段与默认值不变。

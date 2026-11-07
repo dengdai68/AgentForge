@@ -9,8 +9,33 @@ import { createCatalogFixtureStore as createStore } from "./fixture-store.mjs";
 import { createCommunicationService } from "../server/communication.mjs";
 import { RuntimeSessionMissingError, runClaudeCodeCli } from "../server/runtime/local-cli.mjs";
 import { registerExecution } from "../server/runtime/registry.mjs";
-import { activeMention, communicationSenderTone, createCommunicationUI, formatCommunicationContent, latestConversationId } from "../web/communication.js";
+import { activeMention, communicationSenderTone, createCommunicationUI, downloadAttachment, formatCommunicationContent, latestConversationId, messageAttachments } from "../web/communication.js";
 import { createMarketplace } from "../server/runtime/marketplace.mjs";
+import { executionBudget, closeExecutionBudget } from '../server/execution-budget.mjs';
+
+test('attachment HEAD failures keep the HTTP status without parsing an empty body',async t=>{
+  t.mock.method(globalThis,'fetch',async(_url,options)=>{assert.equal(options.method,'HEAD');return {ok:false,status:404,json(){throw new Error('HEAD has no body');}};});
+  await assert.rejects(downloadAttachment({href:'http://fixture/attachment'}),/附件下载失败（HTTP 404）/);
+});
+
+test('BMP keeps its browser preview while decoded image formats request a thumbnail',()=>{
+  assert.match(messageAttachments([{id:'image',name:'photo.png'}],'chat'),/thumbnail=1/);
+  const bmp=messageAttachments([{id:'image',name:'photo.BMP'}],'chat');
+  assert.match(bmp,/data-chat-image/);assert.doesNotMatch(bmp,/thumbnail=1/);
+});
+
+test('shutdown while waiting for execution resources preserves a recoverable communication delivery',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'af-chat-admission-')),store=createStore(),releases=[];
+  try{
+    const pool=executionBudget(store),chat=store.openCommunication({kind:'agent',targetId:'agent_analyst'});
+    for(let i=0;i<pool.status().total;i++)releases.push(await pool.acquire({owner:`fixture-${i}`,provider:`held-${i}`}));
+    send(store,chat.id,'wait for admission');
+    const service=createCommunicationService(store,{root,invoke:async()=>{throw new Error('must not invoke');}}),pending=service.kick(chat.id);
+    assert.equal(pool.status().waiting,1);closeExecutionBudget(store);await pending;
+    assert.equal(store.getCommunication(chat.id).deliveries[0].status,'running');
+    store.recoverCommunications();assert.ok(store.claimCommunication(chat.id));
+  }finally{releases.forEach(release=>release());store.close();await rm(root,{recursive:true,force:true});}
+});
 
 test('unselected communication chooses the latest updated conversation with stable ties and empty state',()=>{
   assert.equal(latestConversationId(),null);
@@ -75,7 +100,7 @@ function communicationReaderFixture(t) {
   const ui = createCommunicationUI({ api: (url) => new Promise((resolve, reject) => pending.push({ url, resolve, reject })), navigate() {}, notify() {} });
   const mount = (key = "a") => ui.mount(host, { agents: [], teams: [] }, key);
   const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
-  const take = (suffix) => { const index = pending.findIndex((item) => item.url === `/api/communications${suffix}`); assert.notEqual(index, -1, `request ${suffix}`); return pending.splice(index, 1)[0]; };
+  const take = (suffix) => { const index = pending.findIndex((item) => item.url === `/api/communications${suffix || "?page=1"}`); assert.notEqual(index, -1, `request ${suffix}`); const request=pending.splice(index,1)[0];return {...request,resolve:value=>request.resolve(suffix?value:{page:1,pageSize:20,total:value.conversations?.length||0,totalPages:1,hasMore:false,...value})}; };
   const result = (ids, { before = null, more = false, name = "A" } = {}) => ({ conversation: { id: name, kind: "agent", name, members: [] }, messages: ids.map((id) => ({ id, createdAt: `2026-01-01T00:00:${id.padStart(2, "0")}.000Z`, sender: { type: "agent", name }, content: `message-${id}` })), deliveries: [], nextBefore: before, hasMore: more });
   t.after(() => ui.unmount());
   return { ui, host, query, mount, flush, take, pending, result, tick: () => [...intervals].forEach((callback) => callback()), intervals };
@@ -142,10 +167,8 @@ test("unread replies persist and read acknowledgements cannot skip unseen replie
   store.close(); store = createStore({ databasePath });
   assert.equal(store.listCommunications().find(item => item.id === chat.id).unreadCount, 1);
   const legacy = new DatabaseSync(databasePath);
-  const snapshot = JSON.parse(legacy.prepare("SELECT state_json FROM workspace_snapshots WHERE id=1").get().state_json);
-  snapshot.communicationConversations.forEach(item => delete item.humanReadThroughMessageId);
   store.close();
-  legacy.prepare("UPDATE workspace_snapshots SET state_json=? WHERE id=1").run(JSON.stringify(snapshot)); legacy.close();
+  legacy.exec("UPDATE workspace_entities SET value_json=json_remove(value_json,'$.humanReadThroughMessageId') WHERE collection='communicationConversations'");legacy.close();
   store = createStore({ databasePath });
   assert.equal(store.getNavigationNotifications().communicationUnreadCount, 0, "old messages establish the upgrade baseline");
   reply("unread-fixture-4");

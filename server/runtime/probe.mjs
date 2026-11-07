@@ -26,9 +26,11 @@ export async function probeRuntime(profile, { timeoutMs = 90000, invoke } = {}) 
       const output = JSON.parse(result.finalText);
       if (output.status !== "ok" || Object.keys(output).length !== 1) throw new Error("模型未返回有效测试应答");
       diagnostic("runtime_test.completed");
+      await diagnostics().flush?.();
       return { ok: true, testId, durationMs: Date.now() - started, logPath: diagnostics().status().filePath };
     } catch (error) {
       diagnostic("runtime_test.failed", { error, timedOut: expired });
+      await diagnostics().flush?.();
       return { ok: false, timedOut: expired, testId, durationMs: Date.now() - started, logPath: diagnostics().status().filePath };
     } finally {
       clearTimeout(timer);

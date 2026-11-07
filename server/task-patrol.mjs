@@ -4,10 +4,11 @@ export const TASK_PATROL_INTERVAL_MS = 10000;
 // preparation, before a provider process or a running Trace exists.
 export function createTaskPatrol({ store, execute, isExecuting = () => false, blocked = () => false, onError = () => {} }) {
   const inFlight = new Set();
-  let timer;
+  let timer,continuation,queue=[];
   function tick() {
-    if (blocked()) return;
-    for (const runId of store.listPatrolRunIds()) {
+    if (blocked() || continuation) return;
+    if(!queue.length)queue=store.listPatrolRunIds();
+    for (const runId of queue.splice(0,16)) {
       if (inFlight.has(runId) || isExecuting(runId)) continue;
       try {
         if (!store.prepareRunPatrol(runId)) continue;
@@ -15,6 +16,7 @@ export function createTaskPatrol({ store, execute, isExecuting = () => false, bl
         void Promise.resolve().then(() => execute(runId)).catch(error => onError(error, runId)).finally(() => inFlight.delete(runId));
       } catch (error) { onError(error, runId); }
     }
+    if(queue.length)continuation=setImmediate(()=>{continuation=null;tick();});
   }
-  return { tick, start() { timer ||= setInterval(tick, TASK_PATROL_INTERVAL_MS); timer.unref(); }, stop() { clearInterval(timer); timer = null; } };
+  return { tick, start() { timer ||= setInterval(tick, TASK_PATROL_INTERVAL_MS); timer.unref(); }, stop() { clearInterval(timer);clearImmediate(continuation);timer = continuation = null;queue=[]; } };
 }

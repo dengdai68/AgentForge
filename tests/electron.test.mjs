@@ -440,9 +440,9 @@ test('application branding preserves the master and separates UI, inset Dock and
   const png = await readFile(new URL('web/icons/application.png', root));
   const icns = await readFile(new URL('apps/electron/application.icns', root));
   assert.equal(png.subarray(1, 4).toString(), 'PNG');
-  assert.equal(png.readUInt32BE(16), 1254);
-  assert.equal(png.readUInt32BE(20), 1254);
-  assert.equal(createHash('sha256').update(png).digest('hex'), '46bb3c5165723bba5f63f070de19647fa6c6385366579d0d9a9a9bb1277e937e', 'do not redraw or overwrite the operator-supplied mark');
+  assert.equal(png.readUInt32BE(16), 1536);
+  assert.equal(png.readUInt32BE(20), 1536);
+  assert.equal(createHash('sha256').update(png).digest('hex'), '530b81a4b34e489a9886d289c27151d1359fa2d8ebc3118c8d3c89adf46f38c9', 'do not redraw or overwrite the operator-supplied mark');
   assert.equal(icns.subarray(0, 4).toString(), 'icns');
   assert.equal(icns.readUInt32BE(4), icns.length);
   const html = await readFile(new URL('web/index.html', root), 'utf8');

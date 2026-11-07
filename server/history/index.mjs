@@ -46,52 +46,82 @@ export const historyTools = Object.entries(fields).map(([name, keys]) => ({ name
 }));
 
 // Derived index only. Reconcile against authority on each query, never index runtime configuration.
-export function historyCommands(state, { databasePath = ":memory:", employeeConfiguration = row => ({id:row.id,name:row.name,description:row.description,kind:row.kind,status:row.status,capabilities:row.capabilities,systemPrompt:row.systemPrompt,roleIds:row.roleIds}) } = {}) {
+export function historyCommands(state, { databasePath = ":memory:", journal, persistence, employeeConfiguration = row => ({id:row.id,name:row.name,description:row.description,kind:row.kind,status:row.status,capabilities:row.capabilities,systemPrompt:row.systemPrompt,roleIds:row.roleIds}) } = {}) {
   let db;
   const cursorSecret = randomBytes(32);
   const signCursor = value => createHmac("sha256",cursorSecret).update(JSON.stringify(value)).digest("hex");
-  function records() {
+  let dirty = null;
+  const indexedCollections = new Set(['runs','tasks','communicationConversations','communicationMessages','messages','traces','events','decisions','artifacts']);
+  const unsubscribe = journal?.onCommit(changes => {
+    if (dirty === null) return;
+    for (const [name,ids] of changes) if (indexedCollections.has(name)) {
+      if (ids.has(null) || ['tasks','communicationConversations'].includes(name)) { dirty = null; return; }
+      if (!dirty.has(name)) dirty.set(name,new Set());
+      for (const id of ids) dirty.get(name).add(id);
+    }
+  });
+  function records(changed = null) {
     const result = [];
-    function add(key, kind, sessionId, body, visible, meta = {}) {
-      result.push({key,kind,sessionId,body:String(body || ""),visible:[...new Set(visible.filter(Boolean))],...meta});
+    const byId = (name,id) => journal ? journal.get(name,id) : state[name]?.find(row=>row.id===id);
+    const rows = name => changed ? [...(changed.get(name) || [])].map(id=>byId(name,id)).filter(Boolean) : state[name] || [];
+    const add = (key,kind,sessionId,body,meta) => result.push({key,kind,sessionId,body:String(body || ''),...meta});
+    for (const message of rows('communicationMessages')) {
+      const thread = byId('communicationConversations',message.conversationId); if (!thread) continue;
+      add(message.id,thread.kind==='agent'?'private':'group',thread.id,message.content,{occurredAt:message.createdAt,sender:actor(message.sender),replyToMessageId:message.replyToMessageId,coverage:thread.kind==='team'&&!message.visibleToAgentIds?'legacy_partial':'complete',title:thread.name});
     }
-    for (const thread of state.communicationConversations || []) {
-      for (const message of (state.communicationMessages || []).filter(m => m.conversationId === thread.id)) {
-        add(message.id,thread.kind === "agent" ? "private" : "group",thread.id,message.content,communicationVisibility(state,thread,message),{
-          occurredAt:message.createdAt, sender:actor(message.sender), replyToMessageId:message.replyToMessageId,
-          coverage:thread.kind === "team" && !message.visibleToAgentIds ? "legacy_partial" : "complete", title:thread.name
-        });
-      }
+    const metaOf = runId => {
+      const run = byId('runs',runId); if (!run) return null;
+      const task = byId('tasks',run.taskId);
+      return {taskId:run.taskId,runId,title:task?.title,occurredAt:run.startedAt};
+    };
+    for (const run of rows('runs')) {
+      const task = byId('tasks',run.taskId);
+      add(run.id,'task',run.id,JSON.stringify({title:task?.title,objective:task?.objective,status:run.status}),metaOf(run.id));
     }
-    for (const run of state.runs) {
-      const members = [...(run.participants || []).filter(m => m.type !== "human"), run.manager].filter(Boolean);
-      const resolve = id => stable(members.find(m => m.id === id));
-      const visible = members.map(stable), task = state.tasks.find(t => t.id === run.taskId);
-      const meta = {taskId:run.taskId,runId:run.id,title:task?.title,occurredAt:run.startedAt};
-      add(run.id,"task",run.id,JSON.stringify({title:task?.title,objective:task?.objective,status:run.status}),visible,meta);
-      for (const m of state.messages.filter(m => m.runId === run.id)) add(m.id,"task",run.id,m.content,m.recipient?.type === "team" ? visible : [resolve(m.sender?.id),resolve(m.recipient?.id)],{...meta,occurredAt:m.createdAt,sender:actor(m.sender),replyToMessageId:m.replyToMessageId});
-      for (const t of state.traces.filter(t => t.runId === run.id)) add(t.id,"task",run.id,JSON.stringify(pick(t,["id","workflowNodeId","type","status","summary","error","startedAt","endedAt","inputArtifactIds","outputArtifactIds"])),[resolve(t.agentId)],{...meta,traceId:t.id,occurredAt:t.startedAt});
-      const traces = new Map(state.traces.filter(t => t.runId === run.id).map(t => [t.id,t]));
-      for (const event of state.events.filter(e => e.runId === run.id)) {
-        const trace = traces.get(event.data?.traceId);
-        if (trace && event.actor?.id === trace.agentId) add(event.id,"task",run.id,JSON.stringify({type:event.type,message:event.message,data:event.data}),[resolve(trace.agentId)],{...meta,traceId:trace.id,entityType:"trace_event",occurredAt:event.timestamp});
-      }
-      for (const [collection,keys] of [["decisions",["summary","rationale","impact","status"]],["artifacts",["id","name","path","relativePath","kind","description","sha256","status"]]]) {
-        for (const row of state[collection].filter(r => r.runId === run.id)) add(row.id,"task",run.id,JSON.stringify(pick(row,keys)),visible,{...meta,occurredAt:row.createdAt || run.startedAt,entityType:collection,traceId:row.traceId});
-      }
+    for (const m of rows('messages')) { const meta=metaOf(m.runId); if(meta)add(m.id,'task',m.runId,m.content,{...meta,occurredAt:m.createdAt,sender:actor(m.sender),replyToMessageId:m.replyToMessageId}); }
+    for (const t of rows('traces')) {const meta=metaOf(t.runId);if(meta)add(t.id,'task',t.runId,JSON.stringify(pick(t,['id','workflowNodeId','type','status','summary','error','startedAt','endedAt','inputArtifactIds','outputArtifactIds'])),{...meta,traceId:t.id,occurredAt:t.startedAt});}
+    for (const e of rows('events')) {
+      const trace=byId('traces',e.data?.traceId),meta=metaOf(e.runId);
+      if(meta && trace && trace.runId===e.runId && e.actor?.id===trace.agentId)add(e.id,'task',e.runId,JSON.stringify({type:e.type,message:e.message,data:e.data}),{...meta,traceId:trace.id,entityType:'trace_event',occurredAt:e.timestamp});
     }
-    const employeeIds = state.agents.map((agent) => agent.id);
-    return result.map((record) => ({ ...record, visible: employeeIds }));
+    for (const [name,keys] of [['decisions',['summary','rationale','impact','status']],['artifacts',['id','name','path','relativePath','kind','description','sha256','status']]])
+      for(const row of rows(name)){const meta=metaOf(row.runId);if(meta)add(row.id,'task',row.runId,JSON.stringify(pick(row,keys)),{...meta,occurredAt:row.createdAt||meta.occurredAt,entityType:name,traceId:row.traceId});}
+    return result;
   }
   function sync() {
+    if (db && journal && dirty?.size === 0 && !persistence) return;
     if (!db) {
       db = new DatabaseSync(databasePath === ":memory:" ? ":memory:" : `${databasePath}.history.sqlite`);
       if (databasePath !== ":memory:") chmodSync(`${databasePath}.history.sqlite`,0o600);
       db.exec("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, kind TEXT, session TEXT, body TEXT, json TEXT); CREATE TABLE IF NOT EXISTS visibility(record INTEGER, agent TEXT, PRIMARY KEY(record,agent)); CREATE INDEX IF NOT EXISTS visible_agent ON visibility(agent,record); CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(body, tokenize='trigram');");
       db.exec("CREATE TABLE IF NOT EXISTS record_index(id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, kind TEXT, session TEXT, task TEXT, run TEXT, occurred REAL, title TEXT); CREATE INDEX IF NOT EXISTS history_session ON record_index(session,id); CREATE INDEX IF NOT EXISTS history_run ON record_index(run,id); CREATE INDEX IF NOT EXISTS history_task ON record_index(task,id);");
       db.exec("CREATE INDEX IF NOT EXISTS history_fingerprint_cover ON record_index(id,fingerprint)");
+      db.exec("CREATE TABLE IF NOT EXISTS history_watermark(id INTEGER PRIMARY KEY,revision INTEGER NOT NULL)");
     }
-    const old = new Map(db.prepare("SELECT r.id,r.key,i.fingerprint FROM records r LEFT JOIN record_index i INDEXED BY history_fingerprint_cover ON i.id=r.id").all().map(r => [r.key,r]));
+    const revision = persistence?.revision(), metadataSessions=new Map(), removedSessions=new Set();
+    if (persistence) {
+      const watermark=db.prepare('SELECT revision FROM history_watermark WHERE id=1').get()?.revision;
+      if(watermark!==undefined && watermark<=revision) {
+        dirty=new Map();
+        for(const {collection,id} of persistence.changesSince(watermark)) if(indexedCollections.has(collection)) {
+          if(!dirty.has(collection))dirty.set(collection,new Set());dirty.get(collection).add(id);
+        }
+        if(!dirty.size){if(watermark!==revision)db.prepare('UPDATE history_watermark SET revision=? WHERE id=1').run(revision);return;}
+        if(dirty.has('communicationConversations')) {
+          for(const id of dirty.get('communicationConversations')){const thread=journal.get('communicationConversations',id);if(thread)metadataSessions.set(id,thread.name);else removedSessions.add(id);}
+          dirty.delete('communicationConversations');
+        }
+        if(dirty.has('tasks')) {
+          const taskIds=dirty.get('tasks');dirty.delete('tasks');
+          if(!dirty.has('runs'))dirty.set('runs',new Set());
+          for(const taskId of taskIds) {
+            for(const run of journal.select('runs','taskId',taskId)){dirty.get('runs').add(run.id);metadataSessions.set(run.id,journal.get('tasks',taskId)?.title||'');}
+          }
+        }
+      } else dirty=null;
+    }
+    const allOld = "SELECT r.id,r.key,i.fingerprint FROM records r LEFT JOIN record_index i INDEXED BY history_fingerprint_cover ON i.id=r.id";
+    const old = new Map((dirty ? [...dirty.values()].flatMap(ids=>[...ids]).map(key=>db.prepare(allOld+" WHERE r.key=?").get(key)).filter(Boolean) : db.prepare(allOld).all()).map(r=>[r.key,r]));
     // Only pre-fingerprint indexes require a one-time body comparison. Batch the
     // legacy read instead of doing one random disk lookup for every stored row.
     const legacy = [...old.values()].some(row => row.fingerprint == null)
@@ -99,7 +129,12 @@ export function historyCommands(state, { databasePath = ":memory:", employeeConf
       : null;
     db.exec("BEGIN");
     try {
-      for (const record of records()) {
+      for(const [session,title] of metadataSessions){
+        db.prepare("UPDATE record_index SET title=?,fingerprint='' WHERE session=? AND title IS NOT ?").run(title,session,title);
+        db.prepare("UPDATE records SET json=json_set(json,'$.title',?) WHERE session=? AND json_extract(json,'$.title') IS NOT ?").run(title,session,title);
+      }
+      for(const session of removedSessions)for(const row of db.prepare('SELECT id,key FROM records WHERE session=?').all(session))old.set(row.key,row);
+      for (const record of records(dirty)) {
         const json = JSON.stringify(record), fingerprint = createHash("sha256").update(json).digest("hex"), previous = old.get(record.key); old.delete(record.key);
         if (previous?.fingerprint === fingerprint) continue;
         let id = previous?.id;
@@ -109,14 +144,18 @@ export function historyCommands(state, { databasePath = ":memory:", employeeConf
         if (!unchangedLegacy) {
           if (id) { db.prepare("UPDATE records SET kind=?,session=?,body=?,json=? WHERE id=?").run(record.kind,record.sessionId,record.body,json,id); db.prepare("DELETE FROM visibility WHERE record=?").run(id); db.prepare("DELETE FROM search WHERE rowid=?").run(id); }
           else id = Number(db.prepare("INSERT INTO records(key,kind,session,body,json) VALUES(?,?,?,?,?)").run(record.key,record.kind,record.sessionId,record.body,json).lastInsertRowid);
-          for (const agent of record.visible) db.prepare("INSERT INTO visibility VALUES(?,?)").run(id,agent);
+
           db.prepare("INSERT INTO search(rowid,body) VALUES(?,?)").run(id,record.body);
         }
         const occurred = Date.parse(record.occurredAt);
         db.prepare("INSERT INTO record_index VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,kind=excluded.kind,session=excluded.session,task=excluded.task,run=excluded.run,occurred=excluded.occurred,title=excluded.title").run(id,fingerprint,record.kind,record.sessionId,record.taskId ?? null,record.runId ?? null,Number.isFinite(occurred) ? occurred : null,record.title ?? null);
       }
+      if(dirty?.has('runs')) for(const id of dirty.get('runs')) if(!journal.get('runs',id))
+        for(const row of db.prepare('SELECT id,key FROM records WHERE session=?').all(id)) old.set(row.key,row);
       for (const row of old.values()) { db.prepare("DELETE FROM records WHERE id=?").run(row.id); db.prepare("DELETE FROM record_index WHERE id=?").run(row.id); db.prepare("DELETE FROM visibility WHERE record=?").run(row.id); db.prepare("DELETE FROM search WHERE rowid=?").run(row.id); }
+      if(persistence)db.prepare('INSERT INTO history_watermark VALUES(1,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision').run(revision);
       db.exec("COMMIT");
+      if(journal) dirty = new Map();
     } catch (error) { db.exec("ROLLBACK"); throw error; }
   }
   function validate(tool,args) {
@@ -129,7 +168,7 @@ export function historyCommands(state, { databasePath = ":memory:", employeeConf
     if (args.kind && !["private","group","task"].includes(args.kind)) throw new Error("历史会话类型无效");
   }
   function authorized(agentId,key) {
-    const row = db.prepare("SELECT r.json FROM records r JOIN visibility v ON v.record=r.id WHERE r.key=? AND v.agent=?").get(key,agentId);
+    const row = db.prepare("SELECT json FROM records WHERE key=?").get(key);
     return row ? JSON.parse(row.json) : denied();
   }
   function publicRecord(record, max = 8000, offset = 0) {
@@ -154,9 +193,10 @@ export function historyCommands(state, { databasePath = ":memory:", employeeConf
       }
       sync();
       if (tool === "read_context") {
-        const event = state.events.find(e => e.id === args.recordId);
+        const event = journal?journal.get('events',args.recordId):state.events.find(e=>e.id===args.recordId);
         if (event) {
-          const trace = state.traces.find(t => t.id === event.data?.traceId && t.runId === event.runId && t.agentId === event.actor?.id);
+          const trace = journal?journal.get('traces',event.data?.traceId):state.traces.find(t=>t.id===event.data?.traceId);
+          if(trace && (trace.runId!==event.runId||trace.agentId!==event.actor?.id))denied();
           if (!trace) denied();
           authorized(agentId,trace.id);
           return publicRecord({key:event.id,kind:"trace_event",sessionId:trace.runId,occurredAt:event.timestamp,body:JSON.stringify({type:event.type,message:event.message,data:event.data})},args.length || defaultReadLength,args.offset || 0);
@@ -177,11 +217,14 @@ export function historyCommands(state, { databasePath = ":memory:", employeeConf
       if (tool === "read_trace") {
         const record = authorized(agentId,args.traceId);
         if (record.key !== record.traceId) denied();
-        const trace = state.traces.find(t => t.id === args.traceId);
-        rows = state.events.filter(e => e.runId === trace.runId && e.actor?.id === trace.agentId && e.data?.traceId === trace.id).map((e,i) => ({id:i+1,record:{key:e.id,kind:"trace_event",sessionId:trace.runId,occurredAt:e.timestamp,body:JSON.stringify({type:e.type,message:e.message,data:e.data})}}));
-        high ??= rows.at(-1)?.id || 0;
+        const trace = journal?journal.get('traces',args.traceId):state.traces.find(t => t.id === args.traceId);
+        if(persistence){const result=persistence.historyTracePage(trace,{after,high,limit:args.limit||defaultPageLimit});high=result.high;rows=result.rows.map(({id,event:e})=>({id,record:{key:e.id,kind:'trace_event',sessionId:trace.runId,occurredAt:e.timestamp,body:JSON.stringify({type:e.type,message:e.message,data:e.data})}}));}
+        else {
+          rows=state.events.filter(e=>e.runId===trace.runId&&e.actor?.id===trace.agentId&&e.data?.traceId===trace.id).map((e,i)=>({id:i+1,record:{key:e.id,kind:'trace_event',sessionId:trace.runId,occurredAt:e.timestamp,body:JSON.stringify({type:e.type,message:e.message,data:e.data})}}));
+          high??=rows.at(-1)?.id||0;
+        }
       } else {
-        const clauses = ["v.agent=?"], values = [agentId];
+        const clauses = ["1=1"], values = [];
         const kind = ({search_private_chat:"private",search_group_chat:"group",search_task_activity:"task"})[tool] || args.kind;
         if (kind) { clauses.push("i.kind=?"); values.push(kind); }
         if (args.conversationId) { clauses.push("i.session=?"); values.push(args.conversationId); }
@@ -193,7 +236,7 @@ export function historyCommands(state, { databasePath = ":memory:", employeeConf
           if ([...term].length >= 3 && /^[\p{L}\p{N}]+$/u.test(term)) { clauses.push("i.id IN (SELECT rowid FROM search WHERE search MATCH ?)"); values.push('"'+term+'"'); }
         }
         const sessions = tool === "list_sessions";
-        const candidates = `SELECT ${sessions ? "MIN(i.id) AS id" : "i.id"} FROM record_index i JOIN visibility v ON v.record=i.id WHERE ${clauses.join(" AND ")}${sessions ? " GROUP BY i.session" : ""}`;
+        const candidates = `SELECT ${sessions ? "MIN(i.id) AS id" : "i.id"} FROM record_index i WHERE ${clauses.join(" AND ")}${sessions ? " GROUP BY i.session" : ""}`;
         // High water and page bounds are applied before loading any record JSON.
         if (high === undefined || tool === "read_conversation") {
           const currentHigh = db.prepare(`SELECT MAX(id) AS high FROM (${candidates})`).get(...values).high || 0;
@@ -223,11 +266,11 @@ export function historyCommands(state, { databasePath = ":memory:", employeeConf
     },
     historyArtifact(agentId,artifactId) {
       this.historyQuery(agentId,"read_artifact",{artifactId});
-      const artifact = state.artifacts.find((item) => item.id === artifactId);
+      const artifact = journal?journal.get('artifacts',artifactId):state.artifacts.find((item) => item.id === artifactId);
       if (!artifact?.storagePath) denied();
       return { storagePath: artifact.storagePath, sha256: artifact.sha256, bytes: artifact.bytes };
     },
     historyArtifactPath(agentId,artifactId) { return this.historyArtifact(agentId,artifactId).storagePath; },
-    closeHistory() { db?.close(); db = undefined; }
+    closeHistory() { unsubscribe?.(); db?.close(); db = undefined; }
   };
 }

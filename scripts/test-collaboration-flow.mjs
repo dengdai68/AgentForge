@@ -82,6 +82,20 @@ s.requestHumanAcceptance(run.id, { traceId: tManager.id, summary: 'FLOW_ACCEPTAN
 s.addMessage({ runId: run.id, sender: { type: 'system', id: 'agentforge', name: 'AgentForge' }, recipientAgentId: run.manager.id, kind: 'escalation', content: 'FLOW_PLATFORM_FAILURE：自动失败升级摘要。' });
 s.confirmRunCompletion(run.id);
 s.addEvent({ type: 'run.failed', runId: run.id, message: 'FLOW_FAILURE_NOTICE：执行失败', data: { error: 'FLOW_OLD_ERROR：一次临时故障' } });
+const scrollRuns = [];
+for (const width of [1320, 760]) {
+  const task = s.createTask({title:`协作回复滚动 ${width}`,objective:'隔离界面回归，不调用 Provider',memberAgentIds:['system_project_manager', analyst.id]});
+  const current = s.createRun(task.id);
+  s.initializeDispatches(current.id);
+  const dispatch = s.claimDispatch(current.id);
+  s.enqueueDispatch(current.id,{recipientAgentId:analyst.id,workflowNodeId:dispatch.workflowNodeId,purpose:'instruction',dedupeKey:'scroll-second-question'});
+  const peer = s.claimDispatch(current.id);
+  for (let index=0;index<65;index++) s.addMessage({runId:current.id,sender:actor(analyst),recipientAgentId:current.manager.id,kind:'handoff',content:`SCROLL_HISTORY_${width}_${index}\n\n${'历史记录内容。'.repeat(20)}`});
+  const question = s.askQuestion(dispatch.id,{audience:'human',question:`SCROLL_QUESTION_${width}：请确认回复内容。`},null);
+  s.askQuestion(peer.id,{audience:'human',question:`SCROLL_SECOND_QUESTION_${width}：请再确认一次。`},null);
+  s.pauseRun(current.id,'隔离界面回归；回复不能启动 Provider');
+  scrollRuns.push({runId:current.id,width,questionId:question.id});
+}
 s.close();
 
 const app = await electron.launch({ ...(appBundle ? { executablePath: resolve(appBundle, 'Contents/MacOS/AgentForge'), args: [] } : { args: ['apps/electron/main.mjs'] }), env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 180000 });
@@ -104,6 +118,7 @@ try {
   assert.equal((await page.request.get(origin + '/api/runs/' + run.id + '/defects')).status(), 404);
   await page.goto(origin + '/runs/' + run.id);
   await page.locator('.collaboration-row').first().waitFor();
+  if (!process.env.AGENTFORGE_COLLABORATION_SCROLL_ONLY) {
   await page.locator('[data-toggle-task-details]').click();
   assert.equal(await page.locator('.quality-risk-panel').count(), 0);
   const typography=await page.evaluate(()=>({description:getComputedStyle(document.querySelector('#task-description-content p')).fontSize,path:getComputedStyle(document.querySelector('.workspace-path span')).fontSize,descriptionHeading:getComputedStyle(document.querySelector('#task-description-content').previousElementSibling).fontSize,pathHeading:getComputedStyle(document.querySelector('.workspace-directory-details h5')).fontSize}));
@@ -268,5 +283,52 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: join(root, `prompt-session-${theme}-${width}.png`), fullPage: true });
   }
-  console.log('PASS' + ' ' + (appBundle ? 'packaged' : 'source') + ' collaboration flow; evidence: ' + root);
+  }
+  for (const {runId,width,questionId} of scrollRuns) {
+    await app.evaluate(({BrowserWindow},{origin,width})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,800),{origin,width});
+    await page.waitForFunction(width=>innerWidth===width,width);
+    await page.goto(origin+'/runs/'+runId);
+    await page.locator('[data-answer-message="'+questionId+'"]').waitFor();
+    await page.locator('.collaboration-markdown').first().waitFor();
+    await page.locator('[data-collaboration-older]').click();
+    await page.waitForFunction(()=>!document.querySelector('.human-message-list')?.textContent.includes('SCROLL_QUESTION_'));
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const firstRecord = await page.locator('.collaboration-row').first().getAttribute('data-collaboration-record');
+    const historyTop = await page.locator('.human-message-list').evaluate(el=>{el.scrollTop=120;return el.scrollTop;});
+    assert.ok(historyTop>0,'fixture has scrollable history');
+    const reply = `SCROLL_REPLY_${width}`;
+    const rejectMessage = route=>route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'SCROLL_EXPECTED_FAILURE'})});
+    await page.route('**/api/runs/'+runId+'/messages',rejectMessage);
+    await page.locator('#instruction-text').fill(reply);
+    await page.locator('[data-send-instruction]').click();
+    await page.getByText('SCROLL_EXPECTED_FAILURE',{exact:true}).waitFor();
+    await page.waitForFunction(()=>!document.querySelector('[data-send-instruction]')?.disabled);
+    assert.equal(await page.locator('#instruction-text').inputValue(),reply,'failed reply keeps the draft');
+    assert.equal(await page.locator('.collaboration-row').first().getAttribute('data-collaboration-record'),firstRecord,'failed reply keeps the historical page');
+    const failureTop = await page.locator('.human-message-list').evaluate(el=>el.scrollTop);
+    if(Math.abs(failureTop-historyTop)>=2)await page.screenshot({path:join(root,`reply-failure-${width}.png`)});
+    assert.ok(Math.abs(failureTop-historyTop)<2,`failed reply preserves the reading position (${width}: ${historyTop} → ${failureTop})`);
+    await page.unroute('**/api/runs/'+runId+'/messages',rejectMessage);
+    await page.locator('[data-send-instruction]').click();
+    await page.locator('.collaboration-row.from-human').filter({hasText:reply}).waitFor();
+    await page.waitForFunction(()=>{const el=document.querySelector('.human-message-list');return el&&el.scrollHeight-el.scrollTop-el.clientHeight<2;});
+    assert.equal(await page.locator('#instruction-text').inputValue(),'','successful reply clears the draft');
+    const workspace = await (await page.request.get(origin+'/api/runs/'+runId+'/workspace?view=compact')).json();
+    assert.equal(workspace.run.status,'paused','scroll verification does not start execution');
+    assert.equal(workspace.run.traceCount,0,'no Provider is invoked');
+    await page.locator('[data-collaboration-older]').click();
+    await page.waitForFunction(reply=>!document.querySelector('.human-message-list')?.textContent.includes(reply),reply);
+    await page.locator('[data-collaboration-latest]').click();
+    await page.locator('.collaboration-row.from-human').filter({hasText:reply}).waitFor();
+    await page.waitForFunction(()=>{const el=document.querySelector('.human-message-list');return el&&el.scrollHeight-el.scrollTop-el.clientHeight<2;});
+    const bottomReply = `SCROLL_BOTTOM_REPLY_${width}`;
+    await page.locator('#instruction-text').fill(bottomReply);
+    await page.locator('[data-send-instruction]').click();
+    await page.locator('.collaboration-row.from-human').filter({hasText:bottomReply}).waitFor();
+    await page.waitForFunction(()=>{const el=document.querySelector('.human-message-list');return el&&el.scrollHeight-el.scrollTop-el.clientHeight<2;});
+    const after = await (await page.request.get(origin+'/api/runs/'+runId+'/workspace?view=compact')).json();
+    assert.equal(after.run.status,'paused');assert.equal(after.run.traceCount,0);
+    await page.screenshot({path:join(root,`reply-latest-${width}.png`)});
+  }
+  console.log('PASS' + ' ' + (appBundle ? 'packaged' : 'source') + (process.env.AGENTFORGE_COLLABORATION_SCROLL_ONLY ? ' collaboration reply scroll' : ' collaboration flow') + '; evidence: ' + root);
 } finally { await app.close(); }

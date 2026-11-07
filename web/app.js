@@ -1,3 +1,4 @@
+import { ByteCache } from "/client/byte-cache.mjs";
 import { createAutomationUI } from "./automations.mjs";
 import { disposeManualGraphs, disposeWorkflowGraphs, fitManualGraph, mountManualGraph, mountWorkflowGraph, zoomManualGraph } from "./manual-graphs.mjs";
 import { imageAttachment, attachmentControls, draftAttachments, messageAttachments, attachmentImageError, openAttachmentImage, downloadAttachment, createCommunicationUI, formatCommunicationContent, memberMentionMarkup, employeeDetailMarkup } from "./communication.js";
@@ -6,7 +7,7 @@ import { createSettingsUI } from "./settings.mjs";
 import { createMarketplaceUI, createMcpMarketplaceUI, createEmployeeMultiSelect } from "./marketplace.mjs";
 import { paginate, paginationMarkup } from "./pagination.mjs";
 import { createFloatingList, closeFloatingList, closeFloatingLists } from './floating-list.mjs';
-import { consoleContentTokens, editDiff, isShellTool, shellCommandText, shellTokens, toolCommandSummary, toolEditInput, toolFileInput, workingDirectoryIcon } from "/client/console-projections.mjs";
+import { consoleContentTokens, consoleEventWindow, editDiff, isShellTool, shellCommandText, shellTokens, toolCommandSummary, toolEditInput, toolFileInput, workingDirectoryIcon } from "/client/console-projections.mjs";
 import { EVENT_KIND_LABEL as KIND_LABEL, STATUS_TEXT as statusText, buildConsoleEntries, classifyEvent, collaborationRecords, displayText, formatExactTime as exactTime, formatRelativeTime as timeAgo, isTransportFrame, mentionables, providerLabel, roleExecutionStatus, taskActionLabel, taskMatchesFilter, taskNeedsAttention, workspaceAgents, workflowFocus } from "/client/console-projections.mjs";
 
 /* AgentForge Console：任务空间信息架构 + 轻盈视觉系统。
@@ -104,7 +105,7 @@ function acceptanceReview(workspace = {}, { history = false } = {}) {
     verified: true,
     findings,
     criteria,
-    artifactCount: artifacts.length,
+    artifactCount: run.artifactCount ?? artifacts.length,
     reviewTraceId: reviewTrace?.id || null,
   };
 }
@@ -132,9 +133,34 @@ async function api(path, options = {}) {
   if (!response.ok) throw new Error(body.error || "请求失败");
   return body;
 }
+const directoryResources={tasks:['tasks','tasks'],agents:['agents','agents'],teams:['teams','teams'],roles:['roles','roles'],workflows:['workflow-templates','workflowTemplates']};
+let directoryRequest=0, directoryTimer;
+async function refreshDirectory() {
+  const view=state.currentView, resource=directoryResources[view]; if(!resource)return;
+  const key=view==='tasks'&&state.taskArchiveView?'archive':view;
+  const query=new URLSearchParams({page:String(state.listPages[key]||1)});
+  if(view==='tasks') {query.set('search',state.taskSearch.name);query.set('status',state.taskSearch.status);query.set('workflow',state.taskSearch.workflow);query.set('archived',String(state.taskArchiveView));}
+  else query.set('search',$(`#${view}-search`)?.value||'');
+  if(view==='agents')query.set('role',$('#agents-role-filter')?.value||'');
+  const request=++directoryRequest;
+  const result=await api(`/api/${resource[0]}?${query}`);
+  if(request!==directoryRequest||view!==state.currentView)return;
+  const items=result[resource[1]];
+  state.directoryPages ||= {};state.directoryPages[key]={...result,items};state.listPages[key]=result.page;
+  // References stay lightweight; full edit data belongs only to the current page.
+  state[resource[1]]=items;
+  if(view==='tasks')state.runs=items.flatMap(task=>task.runs||[]);
+}
+function queryDirectorySoon() {clearTimeout(directoryTimer);directoryTimer=setTimeout(()=>refreshDirectory().then(render).catch(error=>toast(error.message,true)),180);}
+async function loadCatalogReferences() {
+  const result=await api('/api/catalog-references');
+  state.catalogReferences=result;
+  for(const [key,items] of Object.entries(result)) if(Array.isArray(items))state[key]=items;
+  return result;
+}
 async function refresh({ quiet = false } = {}) {
   try {
-    if (!bootstrapPromise) bootstrapPromise = api("/api/bootstrap").finally(() => { bootstrapPromise = null; });
+    if (!bootstrapPromise) bootstrapPromise = api("/api/bootstrap?view=shell").finally(() => { bootstrapPromise = null; });
     const result = await bootstrapPromise;
     try {
       const previous = localStorage.getItem("agentforge.installation");
@@ -142,7 +168,10 @@ async function refresh({ quiet = false } = {}) {
       if (result.installationId) localStorage.setItem("agentforge.installation", result.installationId);
     } catch { /* Storage may be unavailable in this container. */ }
     Object.assign(state, result);
-    state.navigationNotifications = null;
+    state.navigationNotifications = result;
+    if(['tasks','agents','communication','automations','overview'].includes(state.currentView))await loadCatalogReferences();
+    await refreshDirectory();
+    if(state.currentView==='overview')Object.assign(state,await api('/api/overview'));
     render();
     return true;
   } catch (error) {
@@ -316,6 +345,7 @@ function renderShell() {
 
 let navigationRequest = null;
 async function refreshNavigation() {
+  if(document.visibilityState==='hidden')return;
   if (resetRequestActive || document.visibilityState === "hidden" || navigationRequest) return;
   navigationRequest = api("/api/notifications");
   try { state.navigationNotifications = await navigationRequest; renderShell(); }
@@ -338,6 +368,7 @@ function setView(view, { replace = false, taskArchiveView = state.taskArchiveVie
   if (view !== "manual") disposeManualGraphs();
   if (view !== "workflows") disposeWorkflowGraphs("templates");
   if (view !== "workspace") disposeWorkflowGraphs("task");
+  if(view!=='workspace'){consolePages.clear();consoleContentCache.clear();promptSnapshotCache.clear();}
   state.currentView = view;
   if (view === "tasks") state.taskArchiveView = Boolean(taskArchiveView);
   const path = view === "workspace" && state.selectedRunId ? `/runs/${encodeURIComponent(state.selectedRunId)}`
@@ -359,14 +390,16 @@ function setView(view, { replace = false, taskArchiveView = state.taskArchiveVie
 function renderOverview() {
   const active = state.runs.filter((run) => taskMatchesFilter(run.status, "active"));
   const attention = state.runs.filter((run) => taskNeedsAttention(run.status));
-  const awaitingAcceptance = attention.filter((run) => run.status === "awaiting_acceptance").length;
+  const counts=state.overviewCounts || {runs:{},tasks:{},artifacts:0};
+  const attentionCount=Object.entries(counts.runs).filter(([status])=>taskNeedsAttention(status)).reduce((n,[,count])=>n+count,0);
+  const awaitingAcceptance=counts.runs.awaiting_acceptance || 0;
   const attentionSummary = awaitingAcceptance
     ? `含 <b>${awaitingAcceptance}</b> 个待你验收`
-    : attention.length ? `有 <b>${attention.length}</b> 个需要你处理` : "没有等待你的决策";
+    : attentionCount ? `有 <b>${attentionCount}</b> 个需要你处理` : "没有等待你的决策";
   const stats = [
-    { label: "执行中 Run", value: active.length, sub: attentionSummary },
-    { label: "已完成任务", value: state.tasks.filter((task) => task.status === "done").length, sub: `共 ${state.tasks.length} 个任务` },
-    { label: "文件产物", value: state.runs.reduce((total, run) => total + (run.artifactCount || 0), 0), sub: "已接纳的 Run 内快照" },
+    { label: "执行中 Run", value: Object.entries(counts.runs).filter(([status])=>taskMatchesFilter(status,"active")).reduce((n,[,count])=>n+count,0), sub: attentionSummary },
+    { label: "已完成任务", value: counts.tasks.done || 0, sub: `共 ${Object.values(counts.tasks).reduce((n,count)=>n+count,0)} 个任务` },
+    { label: "文件产物", value: counts.artifacts, sub: "已接纳的 Run 内快照" },
     { label: "可用数字员工", value: state.agents.filter((agent) => agent.status === "active").length, sub: "可按需要编辑、停用或删除" },
   ];
   $("#stats-grid").innerHTML = stats.map((stat) => `
@@ -447,7 +480,7 @@ function renderTasks() {
     </form>`;
   }
   const workflowSelect = $("#task-search-form select[name=workflow]");
-  const workflowNames = new Map(state.workflowTemplates.map(item => [item.id, item.name]));
+  const workflowNames = new Map([...(state.catalogReferences?.workflowTemplates||state.workflowTemplates),...(state.catalogReferences?.taskWorkflows||[])].map(item => [item.id, item.name]));
   for (const task of state.tasks) if (task.workflowTemplateId && !workflowNames.has(task.workflowTemplateId)) {
     workflowNames.set(task.workflowTemplateId, task.workflowSnapshot?.name || task.workflowTemplateId);
   }
@@ -463,12 +496,12 @@ function renderTasks() {
   const actionHost = $("#task-search-form .task-directory-actions");
   if (actionHost.innerHTML !== actionMarkup) actionHost.innerHTML = actionMarkup;
   const rows = (archiveView ? archivedTasks : activeTasks).filter((task) => taskMatchesSearch(task, state.taskSearch)).sort((left, right) => archiveView ? new Date(right.archivedAt) - new Date(left.archivedAt) : new Date(right.updatedAt) - new Date(left.updatedAt));
-  if (!rows.length) {
+  if (!(state.directoryPages?.[archiveView?"archive":"tasks"]?.items.length)) {
     $("#tasks-table").innerHTML = `<div class="directory-empty" role="status"><strong>没有匹配的任务</strong>请调整搜索条件，或点击重置查看全部${archiveView ? "归档" : ""}任务。</div>`;
     return;
   }
   const pageKey = archiveView ? "archive" : "tasks";
-  const page = paginate(rows, state.listPages[pageKey]);
+  const page = state.directoryPages?.[pageKey] || paginate([],1);
   state.listPages[pageKey] = page.page;
  $("#tasks-table").innerHTML = `<table class="table task-inventory"><colgroup><col class="col-task" /><col class="col-workflow" /><col class="col-status" /><col class="col-updated" /><col class="col-actions" /></colgroup><thead><tr>
       <th>任务名称</th><th>工作流</th><th>状态</th><th>${archiveView ? "归档时间" : "更新"}</th><th style="text-align:right">操作</th>
@@ -507,7 +540,7 @@ function renderListPager(key, page) {
 function renderTeams() {
   const query = ($("#teams-search")?.value || "").trim().toLocaleLowerCase();
   const rows = state.teams.filter(team => `${team.name} ${team.mission || ""}`.toLocaleLowerCase().includes(query));
-  const page = paginate(rows, state.listPages.teams); state.listPages.teams = page.page;
+  const page = state.directoryPages?.teams || paginate([],1); state.listPages.teams = page.page;
   $("#teams-grid").innerHTML = page.items.map((team) => `
     <div class="team-card">
       <div class="team-card-header"><h3>${esc(team.name)}</h3><div class="directory-card-actions"><button class="small-button primary" data-chat-team="${team.id}">群聊</button><button class="small-button" data-edit-team="${team.id}">编辑</button><button class="small-button danger" data-delete-team="${team.id}">删除</button></div></div>
@@ -524,10 +557,9 @@ function renderWorkflows() {
   disposeWorkflowGraphs("templates");
   const host = $("#workflows-grid");
   const query = ($("#workflows-search")?.value || "").trim().toLocaleLowerCase();
-  const rows = state.workflowTemplates.filter(flow => `${flow.name} ${flow.description || ""}`.toLocaleLowerCase().includes(query));
-  const page = paginate(rows, state.listPages.workflows); state.listPages.workflows = page.page;
+  const page = state.directoryPages?.workflows || paginate([],1); state.listPages.workflows = page.page;
   host.innerHTML = page.items.map((template) => {
-    const referenceCount = state.tasks.filter((task) => task.workflowTemplateId === template.id).length;
+    const referenceCount = template.referenceCount || 0;
     const deleteAction = !referenceCount ? `<button class="small-button danger" data-delete-workflow="${esc(template.id)}">删除</button>` : "";
     return `
     <article class="workflow-list-row">
@@ -571,7 +603,7 @@ function renderAgents() {
   roleSelect.innerHTML = '<option value="">全部角色</option>' + state.roles.map(role=>`<option value="${esc(role.id)}">${esc(role.name)}</option>`).join('');
   roleSelect.value = state.roles.some(role=>role.id===selectedRole) ? selectedRole : '';
   const filtered = state.agents.filter(agent => (!roleSelect.value || agent.roleIds?.includes(roleSelect.value)) && `${agent.name} ${agent.description || ""} ${(agent.capabilities || []).join(" ")}`.toLowerCase().includes(query));
-  const page = paginate(filtered, state.listPages.agents); state.listPages.agents = page.page;
+  const page = state.directoryPages?.agents || paginate([],1); state.listPages.agents = page.page;
   $("#agents-grid").innerHTML = page.items.map((agent) => `
     <div class="agent-card employee-card">
       <div class="agent-card-top">
@@ -592,7 +624,7 @@ function renderAgents() {
 function renderRoles() {
   const query = ($("#roles-search").value || "").trim().toLowerCase();
   const filtered = state.roles.filter(role => `${role.name} ${role.prompt || ""}`.toLowerCase().includes(query));
-  const page = paginate(filtered, state.listPages.roles); state.listPages.roles = page.page;
+  const page = state.directoryPages?.roles || paginate([],1); state.listPages.roles = page.page;
   $("#roles-grid").innerHTML = page.items.map((role) => `
     <div class="agent-card">
       <div class="agent-card-top">
@@ -1055,7 +1087,7 @@ function renderWorkspace() {
     <section id="working-diff-panel" class="working-diff-panel" role="tabpanel" aria-labelledby="directory-mode" ${tab !== "diff" ? "hidden" : ""}></section>
     <section class="collaboration-panel" id="collaboration-panel" role="tabpanel" aria-labelledby="collaboration-mode" ${tab !== "collaboration" ? "hidden" : ""}></section>
     </div>
-    ${view.detailsOpen ? workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, artifactCount: businessArtifacts.length }) : ""}
+    ${view.detailsOpen ? workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, artifactCount: workspace.run.artifactCount ?? businessArtifacts.length }) : ""}
     </div>`, tab === "console" && box.dataset.runId === run.id && box.dataset.agentId === selected?.id && !box.querySelector("#console-panel")?.hidden);
   box.dataset.runId = run.id;
   box.dataset.agentId = selected?.id || "";
@@ -1070,14 +1102,10 @@ function renderWorkspace() {
     for (const details of stream.querySelectorAll("details[data-console-key]")) details.open = consoleView.open.includes(details.dataset.consoleKey) || (details.dataset.defaultOpen !== undefined && !(consoleView.closed || []).includes(details.dataset.consoleKey));
     stream.scrollTop = consoleView.following ? stream.scrollHeight : consoleView.top;
   }
-  const messageList = $(".human-message-list");
-  if (messageList) messageList.scrollTop = view.collaborationScroll && !view.collaborationScroll.following ? view.collaborationScroll.top : messageList.scrollHeight;
   const followConsole = !consoleView || consoleView.following || view.jumpLatest;
-  const followCollaboration = !view.collaborationScroll || view.collaborationScroll.following || view.jumpLatest;
   view.jumpLatest = false;
   requestAnimationFrame(() => {
     if (stream.isConnected && tab === "console" && followConsole) stream.scrollTop = stream.scrollHeight;
-    if (messageList?.isConnected && followCollaboration) messageList.scrollTop = messageList.scrollHeight;
   });
   if (draftFocused && $("#instruction-text")) {
     $("#instruction-text").focus({ preventScroll: true });
@@ -1114,6 +1142,8 @@ function renderConsolePage({ prepend = false } = {}) {
   if (!stream || !agent) return;
   const page = consolePage(state.selectedRunId, agent.id);
   const top = stream.scrollTop, height = stream.scrollHeight, following = height - top - stream.clientHeight < 48;
+  const anchor = prepend ? [...stream.querySelectorAll('[data-console-row]')].find(node => node.getBoundingClientRect().bottom > stream.getBoundingClientRect().top) : null;
+  const anchorTop = anchor?.getBoundingClientRect().top;
   const open = new Set([...stream.querySelectorAll("details[open][data-console-key]")].map((item) => item.dataset.consoleKey));
   const closed = new Set([...stream.querySelectorAll("details[data-default-open]:not([open])")].map((item) => item.dataset.consoleKey));
   renderChatStream(page.events, agent, { traceId: page.traceId, hasMore: page.hasMore });
@@ -1124,12 +1154,13 @@ function renderConsolePage({ prepend = false } = {}) {
   if (!oldControls) stream.prepend(controls);
   else if (oldControls.outerHTML !== controls.outerHTML) oldControls.replaceWith(controls);
   for (const details of stream.querySelectorAll("details[data-console-key]")) details.open = open.has(details.dataset.consoleKey) || (details.dataset.defaultOpen !== undefined && !closed.has(details.dataset.consoleKey));
-  stream.scrollTop = prepend ? top + stream.scrollHeight - height : following ? stream.scrollHeight : top;
+  stream.scrollTop = prepend && anchor?.isConnected ? stream.scrollTop + anchor.getBoundingClientRect().top - anchorTop : prepend ? 0 : following ? stream.scrollHeight : top;
 }
 
 async function openCollaborationTurn(traceId, startMessageId) {
   const runId = state.selectedRunId;
-  const trace = state.workspace.traces.find(item => item.id === traceId);
+  const trace = state.workspace.traces.find(item => item.id === traceId) || (await api(`/api/runs/${runId}/traces/${traceId}`)).trace;
+  if(trace&&!state.workspace.traces.some(item=>item.id===trace.id))state.workspace.traces.push(trace);
   if (!trace) return toast("来源 Trace 在当前 Run 中不可读取。", true);
   state.selectedAgentId = trace.agentId;
   workspaceView().jumpLatest = false; workspaceView().tab = "console";
@@ -1152,6 +1183,7 @@ async function loadConsolePage(runId, agentId, { older = false, reset = false, t
   if (older) page.browsingHistory = true;
   if (traceId !== undefined) page.traceId = traceId;
   const request = ++page.request;
+  const arriving = new Map(); page.loadingEvents = arriving;
   const query = new URLSearchParams({ agentId, limit: "50" });
   if (older && page.nextBefore) query.set("before", page.nextBefore);
   if (page.traceId) query.set("traceId", page.traceId);
@@ -1159,11 +1191,14 @@ async function loadConsolePage(runId, agentId, { older = false, reset = false, t
   if (state.selectedRunId === runId && state.selectedAgentId === agentId) renderConsolePage();
   try {
     const result = await api(`/api/runs/${encodeURIComponent(runId)}/console?${query}`);
+    if(state.workspace?.run.id===runId)state.workspace.traces=[...new Map([...state.workspace.traces,...(result.traces||[])].map(item=>[item.id,item])).values()].slice(-300);
     if (request !== page.request) return;
-    page.events = [...new Map([...result.events, ...page.events].map((event) => [event.id, event])).values()].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    const received = [...new Map([...result.events, ...arriving.values()].map(event => [event.id, event])).values()];
+    page.events = consoleEventWindow(older ? page.events : [], received, { older }).events;
     page.loaded = true; page.hasMore = result.hasMore; page.nextBefore = result.nextBefore;
+    if (!older && received.length > page.events.length) { page.hasMore = true; page.nextBefore = page.events[0].id; }
   } catch (error) { if (request === page.request) page.error = error.message; }
-  finally { if (request === page.request) { page.loading = false; if (state.selectedRunId === runId && state.selectedAgentId === agentId) renderConsolePage({ prepend: older }); } }
+  finally { if (request === page.request) { page.loading = false; page.loadingEvents = null; if (state.selectedRunId === runId && state.selectedAgentId === agentId) renderConsolePage({ prepend: older }); } }
 }
 
 function isCurrentRuntimeAudit(event) {
@@ -1361,7 +1396,7 @@ function renderChatStream(events, agent, { traceId = null, hasMore = false, stre
   queueMicrotask(() => observeConsoleContent(stream));
 }
 
-const consoleContentCache = new Map();
+const consoleContentCache = new ByteCache({maxBytes:8*1024*1024,maxEntries:200});
 function consoleContentMarkup(event) {
   if (!event?.data?.contentRef) return "";
   const body = `<div class="execution-content" data-console-content="${esc(event.id)}" data-content-run="${esc(event.runId)}"${event.contentBase ? ` data-content-url="${esc(event.contentBase)}/console-content/${esc(event.id)}"` : ""}><span class="muted">正在读取执行内容…</span></div>`;
@@ -1518,7 +1553,7 @@ async function hydrateConsoleContent(nodes = []) {
   await Promise.all(Array.from({ length: 4 }, worker));
 }
 
-const promptSnapshotCache = new Map();
+const promptSnapshotCache = new ByteCache({maxBytes:4*1024*1024,maxEntries:50});
 async function hydratePromptSnapshots(nodes = []) {
   for (const node of nodes) {
     if (!consoleContentVisible(node) || node.dataset.contentLoading) continue;
@@ -1814,14 +1849,20 @@ function bindTaskAttachments(dock, view, workspace, agents, messagingBlocked) {
 
 function renderCollaboration(workspace, agents) {
   const { run } = workspace, dock = $("#collaboration-panel"), view = workspaceView(run.id);
+  const previousList = dock.querySelector('.human-message-list');
+  if (previousList?.clientHeight) view.collaborationScroll = {
+    top: previousList.scrollTop,
+    following: previousList.scrollHeight - previousList.scrollTop - previousList.clientHeight < 48,
+  };
+  const reading = view.jumpLatest ? null : view.collaborationScroll;
   view.disclosures ||= {};
   view.attachments ||= [];
   const questions = (state.workspace?.pendingQuestions || []).filter(message => message.recipient.type === "human");
   if (view.replyToMessageId === undefined || !questions.some(item => item.id === view.replyToMessageId)) view.replyToMessageId = questions[0]?.id || "";
-  const records = collaborationRecords(workspace).filter(item => view.collaborationFilter === "human" ? item.human : true);
+  const records = view.collaborationItems || [];
   const autonomous = run.task.kind === "automation";
   const messagingBlocked = Boolean(autonomous || run.task.archivedAt || run.status === "failed");
-  const visibleRecords = records.slice(-(view.collaborationLimit || 30));
+  const visibleRecords = records;
   const body = (content, key) => {
     const expanded = Boolean(view.disclosures["body:" + key]), id = "collaboration-body-" + encodeURIComponent(key);
     return `<div class="collaboration-body ${expanded ? "is-expanded" : ""}" data-collaboration-body="${esc(key)}"><div class="collaboration-body-content" id="${esc(id)}">${collaborationMessageMarkup(content, agents.map(agent => agent.name))}</div><button type="button" class="text-action collaboration-expand" data-expand-collaboration-body aria-expanded="${expanded}" aria-controls="${esc(id)}" hidden>${expanded ? "收起" : "展开全文"}</button></div>`;
@@ -1830,7 +1871,7 @@ function renderCollaboration(workspace, agents) {
     <div class="collaboration-toolbar"><div><strong>团队协作</strong></div><div class="collaboration-filters">${(autonomous ? [] : [["all", "全部"], ["human", "涉及人类"]]).map(([value, label]) => `<button class="small-button ${view.collaborationFilter === value ? "primary" : ""}" data-collaboration-filter="${value}" aria-pressed="${view.collaborationFilter === value}">${label}</button>`).join("")}<button class="small-button" data-collaboration-latest>↓ 最新</button></div></div>
     ${questions.length ? `<div class="await-banner"><strong>${questions.length} 个问题待你回答</strong>回答后恢复对应成员的协作；也可以选择追加新指令。${run.status === "paused" ? "任务已暂停，回复不会启动执行。" : ""}</div>` : ""}
     <div class="human-message-list">
-      ${records.length > visibleRecords.length ? '<button class="small-button" data-collaboration-older>加载更早协作记录</button>' : ""}
+      ${view.collaborationHasMore ? '<button class="small-button" data-collaboration-older>加载更早协作记录</button>' : ""}
       ${records.length ? visibleRecords.map(item => `<article class="collaboration-row ${item.senderType === "human" ? "from-human" : ""} ${item.canReply ? "needs-answer" : ""}" data-collaboration-record="${esc(item.id)}" data-tone="${esc(item.tone)}" data-record-status="${esc(item.statusCode)}"><time>${exactTime(item.timestamp)}</time><div>
         <header><span class="collaboration-kind">${esc(item.title)}</span><strong>${esc(item.from)}${item.to ? ` <span aria-label="交给">→</span> ${esc(item.to)}` : ""}</strong>${item.status ? `<span class="collaboration-status">${esc(item.status)}</span>` : ""}</header>
         <div class="collaboration-content">
@@ -1852,9 +1893,29 @@ function renderCollaboration(workspace, agents) {
   if ($("#instruction-text")) { $("#instruction-text").value = view.draft; $("#instruction-text").disabled = messagingBlocked; }
   bindTaskAttachments(dock, view, workspace, agents, messagingBlocked);
   refreshCollaborationBodies(dock);
+  // Sending also renders this panel directly, outside renderWorkspace. Restore
+  // reading state here so every replacement of the list follows the same rule.
+  const messageList = dock.querySelector('.human-message-list');
+  const restoreReading = () => {
+    if (messageList?.isConnected && messageList.clientHeight) messageList.scrollTop = !reading || reading.following ? messageList.scrollHeight : reading.top;
+  };
+  restoreReading();
+  requestAnimationFrame(restoreReading);
 }
 
 /* ---------- 任务空间数据与动作 ---------- */
+async function loadCollaboration(runId=state.selectedRunId,{older=false,render:paint=true}={}) {
+  const view=workspaceView(runId), query=new URLSearchParams({limit:'30',human:String(view.collaborationFilter==='human')});
+  if(older&&view.collaborationBefore)query.set('before',view.collaborationBefore);
+  const token=(view.collaborationRequest||0)+1;view.collaborationRequest=token;
+  const result=await api(`/api/runs/${runId}/collaboration?${query}`);
+  if(state.selectedRunId!==runId||token!==view.collaborationRequest)return;
+  // A historical page is a bounded window. Live updates never replace it while reading.
+  if(!older && view.collaborationBrowsing && view.collaborationItems?.length)return;
+  view.collaborationItems=result.items;
+  view.collaborationHasMore=result.hasMore;view.collaborationBefore=result.nextBefore;view.collaborationBrowsing=older;
+  if(paint)renderWorkspace();
+}
 async function loadWorkspace(runId = state.selectedRunId, { quiet = false } = {}) {
   if (!runId) { renderWorkspace(); return; }
   const request = ++workspaceRequest;
@@ -1863,9 +1924,10 @@ async function loadWorkspace(runId = state.selectedRunId, { quiet = false } = {}
   if (state.currentView === "workspace" && state.workspace?.run.id !== runId) renderWorkspace();
   connectEvents(runId);
   try {
-    const workspace = await api(`/api/runs/${runId}/workspace?view=summary`);
+    const workspace = await api(`/api/runs/${runId}/workspace?view=compact`);
     if (request !== workspaceRequest || state.selectedRunId !== runId || state.currentView !== "workspace") return;
     state.workspace = workspace;
+    if(workspaceView(runId).tab==='collaboration')await loadCollaboration(runId,{render:false});
     if(workspace.run.task.kind === "automation") state.automationId=workspace.run.task.automationId;
     $$(".nav-item").forEach(item=>item.classList.toggle("active", item.dataset.view === (workspace.run.task.kind === "automation" ? "automations" : "tasks")));
     const task = state.tasks.find((item) => item.id === workspace.run.taskId);
@@ -1895,6 +1957,7 @@ function connectEvents(runId) {
   clearTimeout(workspaceRefreshTimer); workspaceRefreshTimer = null;
   clearTimeout(consoleRenderTimer); consoleRenderTimer = null;
   for (const [key, page] of consolePages) if (key.startsWith(`${runId}:`)) { page.request++; page.loading = false; page.loaded = false; page.events = []; page.error = null; page.hasMore = false; page.nextBefore = null; }
+  for(const key of consolePages.keys())if(!key.startsWith(`${runId}:`))consolePages.delete(key);
   const source = new EventSource(`/api/runs/${runId}/events`);
   source.addEventListener("auth-expired", () => { source.close(); location.replace(`/login?next=${encodeURIComponent(location.pathname)}`); });
   source.runId = runId;
@@ -1917,6 +1980,8 @@ function connectEvents(runId) {
     if (page && (page.loaded || page.loading) && (!page.traceId || page.traceId === event.data?.traceId) && !page.events.some((item) => item.id === event.id)) {
       const readingStream = event.actor?.id === state.selectedAgentId ? $("#trace-stream") : null;
       if (readingStream && (readingStream.scrollHeight - readingStream.scrollTop - readingStream.clientHeight >= 48 || (!getSelection()?.isCollapsed && readingStream.contains(getSelection()?.anchorNode)))) page.browsingHistory = true;
+      if(page.browsingHistory){if(event.type!=='runtime.event')scheduleWorkspaceRefresh(runId);return;}
+      if (page.loadingEvents) { page.loadingEvents.set(event.id, event); if (page.loadingEvents.size > 200) page.loadingEvents.delete(page.loadingEvents.keys().next().value); }
       page.events.push(event);
       // Keep the automatic live window bounded; older events remain available through pagination.
       if (!page.browsingHistory && page.events.length > 200) { page.events = page.events.slice(-200); page.nextBefore = page.events[0].id; page.hasMore = true; }
@@ -1993,6 +2058,8 @@ async function sendInstruction(event) {
     view.attachments = (view.attachments || []).filter(item => !attachments.includes(item));
     for (const item of attachments) if (item.previewURL) URL.revokeObjectURL(item.previewURL);
     if (workspaceView(runId).draft === draft) workspaceView(runId).draft = "";
+    view.collaborationBrowsing = false;
+    view.jumpLatest = true;
     if (state.selectedRunId === runId) await loadWorkspace(runId);
   } catch (error) { toast(error.message, true); }
   finally { view.sending = false; if (state.workspace?.run.id === runId) renderCollaboration(state.workspace, workspaceAgents(state.workspace, state.agents)); }
@@ -2145,7 +2212,8 @@ async function resumeWorkspaceRun(runId) {
 /* ---------- 创建弹窗 ---------- */
 const pathList = (value) => String(value || "").split("\n").map((item) => item.trim()).filter(Boolean);
 
-function newTaskModal({ automation = false, existing = null } = {}) {
+async function newTaskModal({ automation = false, existing = null } = {}) {
+  await loadCatalogReferences();
   if (!state.agents.some(agent => agent.status === "active" && agent.kind === "manager")) { toast("请先创建或启用一位项目经理。", true); return; }
   openModal(`
     <h2>${automation ? existing ? "编辑自动化" : "新建自动化" : "新建任务"}</h2>
@@ -2433,7 +2501,8 @@ function mountEmployeePicker(host, { agents, selectedIds, name, inputId, multipl
   renderSelected();
 }
 
-function editTaskMembers() {
+async function editTaskMembers() {
+  await loadCatalogReferences();
   const workspace=state.workspace,run=workspace.run;
   const members=workspaceAgents(workspace,state.agents);
   const locked=new Set([run.manager.id,...workspace.traces.filter(t=>t.status==='running').map(t=>t.agentId),...(workspace.dispatches || []).filter(d=>!['done','cancelled'].includes(d.status)).map(d=>d.recipientAgentId)]);
@@ -2447,7 +2516,8 @@ function editTaskMembers() {
   };
 }
 
-function teamModal(existing = null) {
+async function teamModal(existing = null) {
+  await loadCatalogReferences();
   openModal(`
     <h2>${existing ? "编辑团队" : "创建团队"}</h2>
     <form id="team-form" novalidate>
@@ -2499,14 +2569,14 @@ function render() {
   views[state.currentView]?.();
 }
 
-$("#agents-role-filter").addEventListener("change", () => { state.listPages.agents = 1; renderAgents(); });
+$("#agents-role-filter").addEventListener("change", () => { state.listPages.agents = 1; queryDirectorySoon(); });
 $("#agents-search").addEventListener("input", () => {
   state.listPages.agents = 1;
-  renderAgents();
+  queryDirectorySoon();
 });
 for (const [key, render] of [["teams", renderTeams], ["workflows", renderWorkflows], ["roles", renderRoles]]) $("#" + key + "-search").addEventListener("input", () => {
   state.listPages[key] = 1;
-  render();
+  queryDirectorySoon();
 });
 document.addEventListener("submit", (event) => {
   if (event.target.id !== "task-search-form") return;
@@ -2514,7 +2584,7 @@ document.addEventListener("submit", (event) => {
   const fields = new FormData(event.target);
   state.taskSearch = { name: String(fields.get("name") || ""), status: String(fields.get("status") || "all"), workflow: String(fields.get("workflow") || "all") };
   state.listPages[state.taskArchiveView ? "archive" : "tasks"] = 1;
-  renderTasks();
+  refreshDirectory().then(render).catch(error=>toast(error.message,true));
 });
 document.addEventListener("reset", (event) => {
   if (event.target.id !== "task-search-form") return;
@@ -2524,13 +2594,13 @@ document.addEventListener("reset", (event) => {
   event.target.elements.name.value = "";
   event.target.elements.status.value = "all";
   event.target.elements.workflow.value = "all";
-  renderTasks();
+  refreshDirectory().then(render).catch(error=>toast(error.message,true));
 });
 
 document.addEventListener("click", (event) => {
   const el = (selector) => event.target.closest(selector);
   let target;
-  if ((target = el("[data-pagination] [data-page]"))) { const key = target.closest("[data-pagination]").dataset.pagination; state.listPages[key] = Number(target.dataset.page); ({ tasks: renderTasks, archive: renderTasks, teams: renderTeams, workflows: renderWorkflows, agents: renderAgents, roles: renderRoles })[key]?.(); return; }
+  if ((target = el("[data-pagination] [data-page]"))) { const key = target.closest("[data-pagination]").dataset.pagination; state.listPages[key] = Number(target.dataset.page); if(directoryResources[key]||key==="archive")refreshDirectory().then(render).catch(error=>toast(error.message,true)); return; }
   if ((target = el("[data-chat-agent]"))) return communicationUI.open("agent", target.dataset.chatAgent);
   if ((target = el("[data-chat-team]"))) return communicationUI.open("team", target.dataset.chatTeam);
   if ((target = el("#logout-button"))) {
@@ -2566,31 +2636,31 @@ document.addEventListener("click", (event) => {
   if ((target = el('[data-action="new-agent"]'))) return newAgentModal();
   if ((target = el('[data-action="new-role"]'))) return newRoleModal();
   if ((target = el("[data-edit-role]"))) {
-    const role = state.roles.find((item) => item.id === target.dataset.editRole);
+    const role = state.directoryPages?.roles?.items.find((item) => item.id === target.dataset.editRole);
     return role ? roleModal(role) : toast("角色不存在，请刷新列表。", true);
   }
   if ((target = el("[data-delete-role]"))) return configurationDeletionModal("role", target.dataset.deleteRole);
   if ((target = el("[data-edit-agent]"))) {
-    const agent = state.agents.find((item) => item.id === target.dataset.editAgent);
+    const agent = state.directoryPages?.agents?.items.find((item) => item.id === target.dataset.editAgent);
     return agent ? agentModal(agent) : toast("数字员工不存在。", true);
   }
   if ((target = el("[data-edit-team]"))) {
-    const team = state.teams.find((item) => item.id === target.dataset.editTeam);
+    const team = state.directoryPages?.teams?.items.find((item) => item.id === target.dataset.editTeam);
     return team ? teamModal(team) : toast("团队不存在。", true);
   }
   if ((target = el("[data-delete-agent]"))) return configurationDeletionModal("agent", target.dataset.deleteAgent);
   if ((target = el("[data-delete-team]"))) return configurationDeletionModal("team", target.dataset.deleteTeam);
   if ((target = el("[data-edit-workflow]"))) {
     closeModal();
-    const workflow = state.workflowTemplates.find((item) => item.id === target.dataset.editWorkflow);
+    const workflow = state.directoryPages?.workflows?.items.find((item) => item.id === target.dataset.editWorkflow);
     return workflow ? workflowModal(workflow) : toast("工作流不存在。", true);
   }
   if ((target = el("[data-workflow-details]"))) {
-    const workflow = state.workflowTemplates.find((item) => item.id === target.dataset.workflowDetails);
+    const workflow = state.directoryPages?.workflows?.items.find((item) => item.id === target.dataset.workflowDetails);
     return workflow ? workflowDetails(workflow) : toast("工作流不存在。", true);
   }
   if ((target = el("[data-delete-workflow]"))) {
-    const workflow = state.workflowTemplates.find((item) => item.id === target.dataset.deleteWorkflow);
+    const workflow = state.directoryPages?.workflows?.items.find((item) => item.id === target.dataset.deleteWorkflow);
     if (!workflow) return;
     return confirmDialog({ title: "删除工作流", message: `删除工作流「${workflow.name}」？该操作不可恢复。`, confirmLabel: "删除工作流", danger: true })
       .then((accepted) => accepted ? api(`/api/workflow-templates/${workflow.id}`, { method: "DELETE" }).then(async () => { toast("工作流已删除。"); await refresh(); }).catch((error) => toast(error.message, true)) : undefined);
@@ -2628,7 +2698,7 @@ document.addEventListener("click", (event) => {
   if ((target = el("[data-task-member-console]"))) { state.selectedAgentId=target.dataset.taskMemberConsole;workspaceView().tab='console';workspaceView().jumpLatest=true;return renderWorkspace(); }
   if ((target = el("[data-task-member-detail]"))) { const member=workspaceAgents(state.workspace,state.agents).find(a=>a.id===target.dataset.taskMemberDetail);if(member)void showEmployeeDetail(member);return; }
   if ((target = el("[data-task-workflow-details]"))) return workflowDetails(state.workspace.run.task.workflowSnapshot, { frozen: true });
-  if ((target = el("[data-ws-tab]"))) { workspaceView().jumpLatest = true; workspaceView().tab = target.dataset.wsTab; renderWorkspace(); if (target.dataset.wsTab === "diff" && workspaceView().changes && !workspaceView().changesLoading) return loadWorkingChanges(state.selectedRunId); if (target.dataset.wsTab === "directory" && workspaceView().directory && !workspaceView().directoryLoading) return loadWorkingDirectory(state.selectedRunId); return; }
+  if ((target = el("[data-ws-tab]"))) { workspaceView().jumpLatest = true; workspaceView().tab = target.dataset.wsTab; renderWorkspace(); if(target.dataset.wsTab==='collaboration')return loadCollaboration().catch(error=>toast(error.message,true)); if (target.dataset.wsTab === "diff" && workspaceView().changes && !workspaceView().changesLoading) return loadWorkingChanges(state.selectedRunId); if (target.dataset.wsTab === "directory" && workspaceView().directory && !workspaceView().directoryLoading) return loadWorkingDirectory(state.selectedRunId); return; }
   if ((target = el("[data-reload-workspace]"))) return loadWorkspace();
   if ((target = el("[data-load-directory]"))) return loadWorkingDirectory(state.selectedRunId,{path:target.dataset.loadDirectory});
   if ((target = el("[data-load-more-directory]"))) return loadWorkingDirectory(state.selectedRunId,{path:target.dataset.loadMoreDirectory,more:true});
@@ -2651,19 +2721,13 @@ document.addEventListener("click", (event) => {
     workspaceView().disclosures["body:" + body.dataset.collaborationBody] = expanded;
     return;
   }
-  if ((target = el("[data-collaboration-filter]"))) { workspaceView().collaborationFilter = target.dataset.collaborationFilter; workspaceView().collaborationScroll = null; return renderWorkspace(); }
-  if ((target = el("[data-collaboration-latest]"))) { const list = $(".human-message-list"); list.scrollTop = list.scrollHeight; return; }
+  if ((target = el("[data-collaboration-filter]"))) { workspaceView().collaborationFilter = target.dataset.collaborationFilter; workspaceView().collaborationScroll = null; workspaceView().collaborationBrowsing=false;return loadCollaboration().catch(error=>toast(error.message,true)); }
+  if ((target = el("[data-collaboration-latest]"))) { workspaceView().collaborationBrowsing=false;workspaceView().jumpLatest=true;return loadCollaboration().catch(error=>toast(error.message,true)); }
   if ((target = el("[data-answer-message]"))) { workspaceView().replyToMessageId = target.dataset.answerMessage; renderWorkspace(); $("#instruction-text").focus({ preventScroll: true }); return; }
   if ((target = el("[data-open-collaboration-trace]"))) { void openCollaborationTurn(target.dataset.openCollaborationTrace, target.dataset.startMessageId); return; }
   if ((target = el("[data-open-acceptance-review]"))) { const trace = state.workspace?.traces.find((item) => item.id === target.dataset.openAcceptanceReview); if (!trace) return toast("经理交接记录在当前 Run 中不可读取。", true); state.selectedAgentId = trace.agentId; workspaceView().jumpLatest = true; workspaceView().tab = "console"; loadConsolePage(state.selectedRunId, trace.agentId, { reset: true, traceId: trace.id }); renderWorkspace(); return; }
   if ((target = el("[data-console-latest]"))) { workspaceView().jumpLatest = true; workspaceView().tab = "console"; loadConsolePage(state.selectedRunId, state.selectedAgentId, { reset: true, traceId: null }); renderWorkspace(); const stream = $("#trace-stream"); stream.scrollTop = stream.scrollHeight; return; }
-  if ((target = el("[data-collaboration-older]"))) {
-    const list = $(".human-message-list"), top = list.scrollTop, height = list.scrollHeight;
-    workspaceView().collaborationLimit = (workspaceView().collaborationLimit || 30) + 30;
-    renderWorkspace();
-    const updated = $(".human-message-list"); updated.scrollTop = top + updated.scrollHeight - height;
-    return;
-  }
+  if ((target = el("[data-collaboration-older]"))) {loadCollaboration(state.selectedRunId,{older:true}).catch(error=>toast(error.message,true));return;}
   if ((target = el("[data-select-agent]"))) { state.selectedAgentId = target.dataset.selectAgent; workspaceView().jumpLatest = true; return renderWorkspace(); }
   if ((target = el("[data-mention-insert]"))) {
     const textarea = $("#instruction-text");

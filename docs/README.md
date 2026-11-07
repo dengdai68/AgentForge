@@ -4,7 +4,7 @@
 | --- | --- |
 | 代码导航 | [模块地图](00-ai-map.md) |
 | 产品 | [功能与协作方式](01-product-requirements.md) |
-| 架构 | [系统分层](02-system-architecture.md)、[领域模型](03-domain-model.md) |
+| 架构 | [系统分层](02-system-architecture.md)、[领域模型](03-domain-model.md)、[性能架构决策](28-performance-architecture.md) |
 | 界面 | [设计约定](06-design-system.md) |
 | 存储 | [SQLite](07-sqlite-persistence.md)、[文件与 Diff](13-local-artifact-rendering.md) |
 | 运行 | [本机 Runtime](08-real-local-agent-runtime.md)、[员工配置](15-employee-runtime-configuration.md) |

@@ -1,3 +1,5 @@
+import { ByteCache } from "../client/byte-cache.mjs";
+import { consoleEventWindow } from "../client/console-projections.mjs";
 export function attachmentImageError(event) {
   if (event.target.matches?.('.communication-image img')) event.target.closest('.communication-image').dataset.imageError = 'true';
 }
@@ -18,10 +20,10 @@ export function openAttachmentImage(trigger, onClose = () => {}) {
     document.body.append(dialog); dialog.showModal(); return dialog;
 }
 export async function downloadAttachment(link) {
-  const response = await fetch(link.href);
-  if (!response.ok) throw new Error((await response.json()).error || '附件下载失败');
-  const url = URL.createObjectURL(await response.blob()), download = document.createElement('a');
-  download.href = url; download.download = link.download; download.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const response = await fetch(link.href,{method:'HEAD'});
+  // HEAD intentionally has no response body, including error responses.
+  if (!response.ok) throw new Error(`附件下载失败（HTTP ${response.status}）`);
+  const download=document.createElement('a');download.href=link.href;download.download=link.download;download.click();
 }
 
 import { createEmployeeMultiSelect, extensionAvatarColor } from "./marketplace.mjs";
@@ -33,7 +35,7 @@ const consoleIcon = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden
 
 export const imageAttachment = name => /\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(name || '');
 const attachmentSize = bytes => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : bytes >= 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${bytes} B`;
-export const imageButton = (url, name) => `<button type="button" class="communication-image" data-chat-image data-image-url="${escapeHtml(url)}" data-image-name="${escapeHtml(name)}" aria-label="放大查看 ${escapeHtml(name)}"><img src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy"><span class="communication-image-error">图片无法预览</span></button>`;
+export const imageButton = (url, name, thumbnail=url) => `<button type="button" class="communication-image" data-chat-image data-image-url="${escapeHtml(url)}" data-image-name="${escapeHtml(name)}" aria-label="放大查看 ${escapeHtml(name)}"><img src="${escapeHtml(thumbnail)}" alt="${escapeHtml(name)}" loading="lazy"><span class="communication-image-error">图片无法预览</span></button>`;
 const attachmentIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/></svg>';
 const pictureIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg>';
 export function attachmentControls(scope, disabled = false) {
@@ -52,7 +54,9 @@ export function messageAttachments(files, conversationId, scope = "communication
   if (!files.length) return '';
   return `<div class="communication-attachment-list">${files.map(file => {
     const url = `/api/${scope}/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(file.id)}`;
-    if (imageAttachment(file.name)) return `<figure class="communication-image-item">${imageButton(url + '?preview=1', file.name)}</figure>`;
+    // libvips does not decode BMP. Keep its existing browser preview rather
+    // than replacing a supported attachment with a broken thumbnail.
+    if (imageAttachment(file.name)) return `<figure class="communication-image-item">${imageButton(url + '?preview=1', file.name,url+(/\.bmp$/i.test(file.name)?'?preview=1':'?preview=1&thumbnail=1'))}</figure>`;
     return `<a class="communication-attachment" href="${url}" download="${escapeHtml(file.name)}" data-attachment-download>${attachmentIcon}<span>${escapeHtml(file.name)}</span><small>${attachmentSize(file.bytes)}</small></a>`;
   }).join('')}</div>`;
 }
@@ -109,8 +113,8 @@ export function communicationSenderTone(sender = {}) {
 
 export function createCommunicationUI({ api, navigate, notify, prepareContent = async () => {}, renderContent = escapeHtml, renderConsole = () => {}, renderAvatar = () => '', onRead = () => {} }) {
   let host, currentId = null, generation = 0, timer, contacts = [], conversations = [];
-  let listLoaded = false, listError = "", listRequest = null, listPage = 1;
-  const views = new Map();
+  let listLoaded = false, listError = "", listRequest = null, listPage = 1, listPagination = {page:1,totalPages:1,total:0};
+  const views = new Map(), markdownCache=new ByteCache({maxBytes:4*1024*1024,maxEntries:300});
   let imageViewer = null;
   const view = (key) => {
     if (!views.has(key)) views.set(key, { messages: new Map(), readMessageIds: new Set(), deliveries: new Map(), draft: "", mentions: [], attachments: [], consoleOpen: false, consoleAgentId: null, consoleMembers: [], consolePages: new Map(), consoleRequest: null, consoleError: '', requestId: null, hasMore: false, before: null, loaded: false, sending: false, latestError: "", olderError: "", historyEpoch: 0, latestRequest: null, olderRequest: null });
@@ -123,7 +127,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     query(".communication-error").textContent = [listError, state?.latestError, state?.olderError].filter(Boolean).join(" · ");
   }
   function renderList() {
-    const page = paginate(conversations, listPage); listPage = page.page;
+    const page = {...listPagination,items:conversations}; listPage = page.page;
     const html = page.items.map(item => {
       const employee = item.members?.find(member => member.id === item.targetId) || contacts.find(member => member.id === item.targetId) || {name:item.name};
       const initials = [...(employee.initials || employee.name || '?')].slice(0,2).join('');
@@ -158,10 +162,12 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     const messages = [...state.messages.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const html = messages.map((message) => {
 
+      const mentions=(state.conversation?.members||[]).map(member=>member.name),cacheKey=message.id+':'+message.content+':'+mentions.join('|');
+      let content=markdownCache.get(cacheKey);if(content===undefined){content=renderContent(message.content,mentions);markdownCache.set(cacheKey,content);}
       const attachments = messageAttachments(message.attachments || [], currentId);
       const failed = [...state.deliveries.values()].filter(item => item.messageId === message.id && item.status === 'failed');
       const recovery = failed.map(item => `<div class="communication-recovery"><span>${escapeHtml(state.conversation.members.find(member=>member.id===item.agentId)?.name || '员工')} 回复失败</span><button type="button" class="text-action" data-chat-failure-console="${escapeHtml(item.agentId)}">查看控制台</button><button type="button" class="text-action" data-retry-chat-delivery="${escapeHtml(item.id)}">重试</button></div>`).join('');
-      return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header><div class="communication-body communication-markdown">${renderContent(message.content, (state.conversation?.members || []).map(member => member.name))}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}${recovery}</article>`;
+      return `<article class="communication-message ${message.sender.type === "human" ? "from-human" : ""}" data-tone="${communicationSenderTone(message.sender)}"><header><strong>${escapeHtml(message.sender.name)}</strong><time>${escapeHtml(date(message.createdAt))}</time></header><div class="communication-body communication-markdown">${content}</div>${attachments ? `<div class="communication-message-attachments">${attachments}</div>` : ''}${recovery}</article>`;
     }).join("") || `<div class="communication-empty">${state.latestError ? "聊天记录读取失败，正在重连。" : state.loaded ? "从一句话开始沟通。消息将持续保留。" : "正在读取聊天记录…"}</div>`;
     if (state.renderedMessages !== html || state.messageList !== list) {
       state.renderedMessages = html; state.messageList = list;
@@ -170,6 +176,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       else list.scrollTop = bottom ? list.scrollHeight : top;
     }
     query(".communication-older").hidden = !state.hasMore;
+    query(".communication-latest").hidden = !state.browsingHistory;
     query(".communication-older").disabled = Boolean(state.olderRequest?.generation === generation);
   }
   async function loadMessages(older = false) {
@@ -184,10 +191,14 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     if (older) query(".communication-older").disabled = true;
     try {
       const [result] = await Promise.all([
-        api(`/api/communications/${key}${older ? "?before=" + encodeURIComponent(request.before) : ""}`),
+        api(`/api/communications/${key}${older ? "?before=" + encodeURIComponent(request.before) : state.revision ? "?since="+encodeURIComponent(state.revision) : ""}`),
         prepareContent().catch(() => {}) // A missing display dependency must not hide messages.
       ]);
       if (!isCurrent(key, token) || (older && request.epoch !== state.historyEpoch)) return;
+      if(result.unchanged)return;
+      if(!older)state.revision=result.revision;
+      if(!older&&state.browsingHistory){state.conversation=result.conversation;renderHeading();renderRoster();return;}
+      if(older)state.browsingHistory=true;
       if (!older && state.loaded && result.messages.length && !result.messages.some((message) => state.readMessageIds.has(message.id))) {
         // A missed window is re-anchored, never joined across a hidden history gap.
         // POST confirms one message, not coverage of intervening history.
@@ -208,6 +219,10 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         state.latestVisibleMessageId = result.messages.at(-1)?.id;
       }
       result.messages.forEach((message) => { state.messages.set(message.id, message); state.readMessageIds.add(message.id); });
+      const ordered=[...state.messages.values()].sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+      const removed=older?ordered.slice(200):ordered.slice(0,Math.max(0,ordered.length-200));
+      for(const {id}of removed){state.messages.delete(id);state.readMessageIds.delete(id);}
+      for(const [id,delivery]of state.deliveries)if(!state.messages.has(delivery.messageId)&&['done','cancelled'].includes(delivery.status))state.deliveries.delete(id);
       result.deliveries.forEach((delivery) => state.deliveries.set(delivery.id, delivery));
       if (!state.loaded || older) { state.before = result.nextBefore; state.hasMore = result.hasMore; }
       state.loaded = true; state.loadingOlder = older;
@@ -231,9 +246,9 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     const request = { generation }; listRequest = request;
     const token = generation;
     try {
-      const result = await api("/api/communications");
+      const result = await api(`/api/communications?page=${listPage}`);
       if (!host || token !== generation) return;
-      conversations = result.conversations; listLoaded = true; listError = ""; renderList(); renderReadErrors();
+      listPagination=result;conversations = result.conversations; listLoaded = true; listError = ""; renderList(); renderReadErrors();
       if(!currentId){const latest=latestConversationId(conversations);if(latest)navigate(latest);}
     } catch (error) { if (host && token === generation) { listError = `会话列表读取失败：${error.message}（历史和草稿保留，正在重连）`; renderList(); renderReadErrors(); } }
     finally { if (listRequest === request) listRequest = null; }
@@ -268,19 +283,23 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       reading.open = [...stream.querySelectorAll('details[open][data-console-key]')].map(node => node.dataset.consoleKey);
       reading.closed = [...stream.querySelectorAll('details[data-default-open]:not([open])')].map(node => node.dataset.consoleKey);
     }
-    const height = stream.scrollHeight;
+    const anchor = state.consolePrepend ? [...stream.querySelectorAll('[data-console-row]')].find(node => node.getBoundingClientRect().bottom > stream.getBoundingClientRect().top) : null;
+    const anchorTop = anchor?.getBoundingClientRect().top;
     stream.dataset.agentId = agent.id;
     renderConsole(stream, { events: [...page.events.values()], traces: page.traces, hasMore: page.hasMore, refresh: Boolean(state.consoleRefresh), basePath: `/api/communications/${encodeURIComponent(currentId)}` }, agent);
     state.consoleRefresh = false;
     for (const details of stream.querySelectorAll('details[data-console-key]')) details.open = reading.open.includes(details.dataset.consoleKey) || (details.dataset.defaultOpen !== undefined && !reading.closed.includes(details.dataset.consoleKey));
-    stream.scrollTop = state.consolePrepend ? reading.top + stream.scrollHeight - height : reading.following ? stream.scrollHeight : reading.top;
+    stream.scrollTop = state.consolePrepend && anchor?.isConnected ? stream.scrollTop + anchor.getBoundingClientRect().top - anchorTop : state.consolePrepend ? 0 : reading.following ? stream.scrollHeight : reading.top;
     state.consolePrepend = false; page.reading = reading;
   }
-  async function loadConsole(older = false) {
+  async function loadConsole(older = false, { latest = false } = {}) {
     const key = currentId, token = generation;
     if (!key) return;
     const state = view(key), page = consolePage(state);
     if (!state.consoleOpen || state.consoleRequest || older && (!page.hasMore || !page.before)) return;
+    const stream = query('[data-communication-stream]');
+    if (!latest && page.loaded && stream.scrollHeight - stream.scrollTop - stream.clientHeight >= 48) page.browsingHistory = true;
+    if (!older && !latest && page.browsingHistory) return;
     const request = { agentId: state.consoleAgentId }; state.consoleRequest = request;
     renderConsolePanel();
     try {
@@ -292,10 +311,14 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
         state.consoleAgentId = (result.agents.find(agent => agent.running) || result.agents[0]).id;
         state.consoleRequest = null; state.consoleRenderKey = null; renderConsolePanel(); void loadConsole(); return;
       }
-      if (!older && page.loaded && result.events.length && !result.events.some(event => page.events.has(event.id))) { page.events.clear(); page.loaded = false; }
-      for (const event of result.events) page.events.set(event.id, event);
-      page.traces = result.traces;
-      if (!page.loaded || older) { page.before = result.nextBefore; page.hasMore = result.hasMore; }
+      const window = consoleEventWindow(latest ? [] : [...page.events.values()], result.events, { older });
+      page.events = new Map(window.events.map(event => [event.id, event]));
+      const traceIds = new Set(window.events.map(event => event.data?.traceId));
+      page.traces = [...new Map([...page.traces, ...result.traces].map(trace => [trace.id, trace])).values()].filter(trace => traceIds.has(trace.id));
+      if (!page.loaded || older || latest || window.reset) { page.before = result.nextBefore; page.hasMore = result.hasMore; }
+      if (window.trimmedBefore) { page.before = window.events[0].id; page.hasMore = true; }
+      if (older) page.browsingHistory = true;
+      if (latest) { page.browsingHistory = false; page.reading = { following: true, top: 0, open: [], closed: [] }; stream.scrollTop = stream.scrollHeight; }
       page.loaded = true; state.consoleError = ''; state.consolePrepend = older;
     } catch (error) { if (isCurrent(key, token) && state.consoleRequest === request) state.consoleError = `控制台读取失败：${error.message}；记录保留，可刷新重试。`; }
     finally { if (state.consoleRequest === request) state.consoleRequest = null; if (isCurrent(key, token)) renderConsolePanel(); }
@@ -384,7 +407,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     area.innerHTML = `<div class="communication-panes">
       <section class="communication-chat">
         <header class="communication-header"><div><h2 class="communication-heading"></h2><input class="communication-name-input" data-chat-name-input aria-label="群聊名称" maxlength="100" required hidden><p class="communication-subtitle"></p></div><button type="button" class="text-action" data-toggle-chat-members aria-expanded="false" hidden>成员</button><button type="button" class="text-action member-console-icon communication-console-toggle" data-toggle-communication-console aria-label="控制台" title="控制台" aria-controls="communication-console-panel" aria-expanded="${state.consoleOpen}" hidden>${consoleIcon}</button></header>
-        <button class="small-button communication-older" hidden>加载更早消息</button><div class="communication-messages" aria-label="聊天记录"></div>
+        <div><button class="small-button communication-older" hidden>加载更早消息</button><button class="small-button communication-latest" hidden>回到最新</button></div><div class="communication-messages" aria-label="聊天记录"></div>
         <form class="communication-composer"><div class="communication-mentions" role="listbox" aria-label="@ 成员" hidden></div><div class="message-composer-card"><div class="message-composer-input"><div class="communication-draft-attachments" data-chat-attachments></div><textarea id="communication-input" aria-label="输入消息" placeholder="输入消息；群聊输入 @ 选择成员" rows="3">${escapeHtml(state.draft)}</textarea></div><p class="field-hint" data-chat-upload-status role="status"></p><input type="file" multiple data-chat-file hidden><input type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/bmp" data-chat-image-file hidden><div class="communication-composer-actions">${attachmentControls('chat', state.sending)}<span>Enter 发送 · Shift + Enter 换行</span><button class="primary-button" type="submit">发送</button></div></div></form>
       </section>
       <aside class="communication-roster" aria-label="聊天成员" hidden><header><strong data-chat-member-count>成员</strong><button type="button" class="text-action" data-edit-chat-group>编辑群聊</button><button type="button" class="text-action" data-close-chat-members aria-label="关闭成员列表">×</button></header><div data-chat-roster></div></aside>
@@ -407,8 +430,8 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
     query('[data-close-chat-console]').onclick = () => { state.consoleOpen = false; renderConsolePanel(); };
     query('[data-toggle-communication-console]').onclick = () => { state.consoleOpen = !state.consoleOpen; state.consoleRequest = null; state.consoleRenderKey = null; renderConsolePanel(); if (state.consoleOpen) void loadConsole(); };
     query('[data-communication-console-older]').onclick = () => void loadConsole(true);
-    query('[data-communication-console-refresh]').onclick = () => { state.consoleRenderKey = null; state.consoleRefresh = true; void loadConsole(); };
-    query('[data-communication-console-latest]').onclick = () => { const stream = query('[data-communication-stream]'); stream.scrollTop = stream.scrollHeight; };
+    query('[data-communication-console-refresh]').onclick = () => { state.consoleRenderKey = null; state.consoleRefresh = true; state.consoleRequest = null; void loadConsole(false, { latest: true }); };
+    query('[data-communication-console-latest]').onclick = () => { state.consoleRequest = null; void loadConsole(false, { latest: true }); };
     const fileInput = query('[data-chat-file]');
     query('[data-chat-attach]').onclick = () => { if (!state.sending) fileInput.click(); };
     const imageInput = query('[data-chat-image-file]');
@@ -443,6 +466,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       } catch (error) { notify(error.message, true); }
     };
     query(".communication-messages").onscroll = () => { void markVisibleRead(); };
+    query('.communication-latest').onclick=()=>{state.browsingHistory=false;state.revision=null;state.messages.clear();state.deliveries.clear();state.readMessageIds.clear();state.loaded=false;loadMessages();};
     query(".communication-older").onclick = () => loadMessages(true).catch((error) => notify(error.message, true));
     const form = query("form"), input = query("textarea"), submit = form.querySelector('[type="submit"]');
     submit.disabled = state.sending;
@@ -574,15 +598,15 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       if (fresh) {
         host.innerHTML = '<div class="communication-error" role="status"></div><div class="communication-layout"><aside class="communication-sidebar"><div class="communication-sidebar-heading"><h2>沟通</h2><button type="button" class="small-button" data-new-chat aria-label="新建对话"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg></button></div><div class="communication-list"></div><div class="communication-pager"></div></aside><section class="communication-main"></section></div>';
         query("[data-new-chat]").onclick = () => showGroupEditor();
-        query(".communication-pager").onclick = (event) => { const button = event.target.closest("[data-page]"); if (button) { listPage = Number(button.dataset.page); renderList(); } };
+        query(".communication-pager").onclick = (event) => { const button = event.target.closest("[data-page]"); if (button) { listPage = Number(button.dataset.page); poll(); } };
       }
       const changed = fresh || currentId !== selectedId;
-      if (changed) { imageViewer?.close(); if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} generation++; currentId = selectedId; if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} setupConversation(); }
-      const update = () => { poll(); loadMessages(); void loadConsole(); };
+      if (changed) { imageViewer?.close(); if(currentId){const old=view(currentId);old.consoleOpen=false;old.consoleRequest=null;old.consolePages.clear();old.messages.clear();old.deliveries.clear();old.readMessageIds.clear();old.loaded=false;old.revision=null;old.browsingHistory=false;} generation++; currentId = selectedId; if(currentId){view(currentId).consoleOpen=false;view(currentId).consoleRequest=null;} setupConversation(); }
+      const update = () => { if(globalThis.document?.visibilityState==='hidden')return; poll(); loadMessages(); void loadConsole(); };
       renderList(); renderReadErrors();
       if (changed || !timer) { clearInterval(timer); timer = setInterval(update, 2000); update(); }
     },
-    unmount() { imageViewer?.close(); for(const state of views.values()){state.consoleOpen=false;state.consoleRequest=null;} clearInterval(timer); timer = null; closeFloatingLists(host); host = null; currentId = null; generation++; }
+    unmount() { markdownCache.clear(); imageViewer?.close(); for(const state of views.values()){state.consoleOpen=false;state.consoleRequest=null;} clearInterval(timer); timer = null; closeFloatingLists(host); host = null; currentId = null; generation++; }
   };
 }
 

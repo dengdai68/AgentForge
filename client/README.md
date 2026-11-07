@@ -37,3 +37,5 @@ workspaceAgents 默认排除已移除成员；历史 Trace 保留冻结身份。
 共享 STATUS_TEXT 与 TASK_FILTERS 将 backlog 显示为「草稿」，协议仍为 backlog；任务启动及 Run 状态不变。
 
 collaborationRecords 保留 Message.attachments 元数据；任务和沟通共用图片预览/下载展示，CLI 保留对应引用。Trace/Artifact 中 agent 为 id/name 引用，完整成员配置从 Run.participants 读取。
+
+ByteCache 按 UTF-8 字节及项数实施 LRU，支持并发读取去重和失败移除。控制台正文、提示词及沟通 Markdown 分别配置预算；缓存不拥有领域状态。collaborationRecords 可接收按页补齐的问题/答复、投递和验收文件摘要，与全历史投影保持消息语义和本轮输入定位一致。

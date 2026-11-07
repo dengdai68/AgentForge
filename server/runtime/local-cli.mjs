@@ -7,6 +7,7 @@ import { runCodexAppServer } from "./codex-app-server.mjs";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline";
 import { registerExecution, hasActiveExecution } from "./registry.mjs";
+import { withExtensionValidation } from "./marketplace.mjs";
 import { selectedExtensions, codexMarketArgs, claudeMarketEnvironment, nativePluginRuntime } from "./extensions.mjs";
 import { diagnostic, diagnosticRedactor, withDiagnosticContext } from "../diagnostics.mjs";
 import { diagnoseLaunch } from "./launch-diagnostics.mjs";
@@ -591,7 +592,7 @@ async function loggedInvocation(input, invoke) {
   return withDiagnosticContext({ executionKey: input.executionKey || input.runId, provider: input.runtime.provider, model: input.runtime.model, traceDirectory: input.traceDirectory }, async () => {
     diagnostic("provider.invocation_started", { command: input.runtime.executable, cwd: input.workspacePath });
     try {
-      const result = await invoke(input);
+      const result = await withExtensionValidation(()=>invoke(input));
       diagnostic("provider.invocation_completed");
       return result;
     } catch (error) {

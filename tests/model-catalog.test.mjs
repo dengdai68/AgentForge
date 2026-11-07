@@ -151,3 +151,20 @@ test("assertModelEffort constrains only catalog-listed models and never invents 
   assert.doesNotThrow(() => assertModelEffort(claude, "sonnet", "xhigh"), "claude entries carry string levels");
   assert.throws(() => assertModelEffort(claude, "sonnet", "ultra"), /不支持/);
 });
+
+test('model catalogs coalesce queries, clone cached results, refresh and invalidate executable/config changes',async()=>{
+  const home=await mkdtemp(join(tmpdir(),'af-model-cache-')),executable=join(home,'codex');
+  await writeFile(executable,'v1');await mkdir(join(home,'.codex'));
+  let calls=0,release;
+  const run=async()=>{calls++;if(calls===1)await new Promise(resolve=>{release=resolve;});return {stdout:JSON.stringify(codexFixture)};};
+  const options={homeDirectory:home,environment:{},run},input={provider:'codex',executable};
+  const first=runtimeModelCatalog(input,options),second=runtimeModelCatalog(input,options);
+  while(!release)await new Promise(resolve=>setImmediate(resolve));release();
+  const [a,b]=await Promise.all([first,second]);assert.equal(calls,1);a.models.length=0;assert.ok(b.models.length>0);
+  assert.ok((await runtimeModelCatalog(input,options)).models.length>0);assert.equal(calls,1);
+  await runtimeModelCatalog(input,{...options,refresh:true});assert.equal(calls,2);
+  await writeFile(executable,'version 2');await runtimeModelCatalog(input,options);assert.equal(calls,3);
+  await writeFile(join(home,'.codex','auth.json'),'synthetic credential version');await runtimeModelCatalog(input,options);assert.equal(calls,4);
+  let failures=0;const failed={...options,run:async()=>{failures++;throw Error('offline');}};
+  await assert.rejects(runtimeModelCatalog(input,failed));await assert.rejects(runtimeModelCatalog(input,failed));assert.equal(failures,2);
+});

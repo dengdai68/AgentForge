@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { execute as executeCommand, run as runCommand } from '../cli/main.mjs';
 import { createClient, defaultEndpointFile, readInput, resolveEndpoint } from '../cli/client.mjs';
+import { collaborationRecords } from '../client/console-projections.mjs';
 import { resources } from '../cli/commands.mjs';
 
 test('employee extension help states selected-only tools without expanding the input protocol', () => {
@@ -85,7 +86,7 @@ test('all task commands progressively disclose their own data and compact relate
   const fetcher = async (url, options) => {
     assert.equal(options.headers.Cookie, cookie);
     const path = url.slice(origin.length);
-    const value = path === '/api/bootstrap' ? { tasks: [task], runs: [run] } : path === '/api/tasks' ? options.method === 'POST' ? { task } : { tasks: [task] } : path.endsWith('/run') ? { run } : path.endsWith('/messages') ? { message: { id: 'message_one', content: marker, recipient: manager, kind: 'instruction' }, run, queued: true, resumed: false } : workspace;
+    const value = options.method === 'GET' ? taskReadResponse(url,{tasks:[task],runs:[run],workspace}) : path === '/api/tasks' ? options.method === 'POST' ? { task } : { tasks: [task] } : path.endsWith('/run') ? { run } : path.endsWith('/messages') ? { message: { id: 'message_one', content: marker, recipient: manager, kind: 'instruction' }, run, queued: true, resumed: false } : workspace;
     return new Response(JSON.stringify(value));
   };
   const args = operation => ['tasks', operation, ...(['list', 'create'].includes(operation) ? [] : [task.id]), '--session-file', f.sessionFile];
@@ -129,7 +130,7 @@ test('task CLI queries scoped progress, filters and collaboration and rejects st
     assert.equal(options.headers.Cookie, cookie);
     const path = url.slice(origin.length);
     if (options.method === 'POST') { writes.push({ path, body: JSON.parse(options.body) }); return new Response(JSON.stringify({ message: { id: 'answer_one' } })); }
-    const data = path === '/api/bootstrap' ? { tasks: [task, { ...task, id: 'archived', archivedAt: '2026-10-22' }], runs: [{ id: 'run_one', taskId: task.id }] } : path === '/api/tasks' ? { tasks: [task] } : workspace;
+    const data = taskReadResponse(url,{tasks:[task,{...task,id:'archived',archivedAt:'2026-10-22'}],runs:[{id:'run_one',taskId:task.id}],workspace});
     return new Response(JSON.stringify(data));
   };
   const invoke = (args, value) => execute(['tasks', ...args, '--session-file', f.sessionFile], { fetcher, stdin: input(value ?? '') });
@@ -168,7 +169,7 @@ test('task collaboration CLI exposes complete dispatch flow in text and JSON wit
     dispatches: [{ id: 'work', sourceMessageId: 'assignment', createdAt: '2026-10-30T00:00:01Z', recipientAgentId: 'analyst', workflowNodeId: 'requirements', purpose: 'node', status: 'claimed', attempts: 1, traceIds: ['execution-trace'] }],
     events: [{ id: 'pause', type: 'run.paused', timestamp: '2026-10-30T00:00:04Z', message: '任务暂停', data: { systemPrompt: 'INTERNAL_SNAPSHOT' } }],
   };
-  const fetcher = async url => new Response(JSON.stringify(url.endsWith('/api/bootstrap') ? { tasks: [task], runs: [{ id: 'run_flow', taskId: task.id }] } : workspace));
+  const fetcher = async url => new Response(JSON.stringify(taskReadResponse(url,{tasks:[task],runs:[{id:'run_flow',taskId:task.id}],workspace})));
   const args = ['tasks', 'collaboration', task.id, '--all', '--session-file', f.sessionFile];
   const result = await execute(args, { fetcher });
   assert.deepEqual(result.items.map(item => item.id), ['human', 'handoff', 'assignment']);
@@ -284,6 +285,22 @@ test('CLI executable works through an npm-style symlink and keeps stdout machine
   const { stdout, stderr } = await promisify(execFile)(process.execPath, [link, 'schema', 'workflows', '--json']);
   assert.equal(JSON.parse(stdout).data.group, 'workflows'); assert.equal(stderr, '');
 });
+function directoryResponse(url,key,rows) {
+  const q=new URL(url).searchParams;
+  const matching=rows.filter(item=>(!q.get('search')||[item.name,item.title,item.description,item.mission,item.prompt,item.objective,...item.capabilities||[]].join(' ').toLowerCase().includes(q.get('search').trim().toLowerCase()))&&(!q.get('role')||item.roleIds?.includes(q.get('role')))&&(!q.get('status')||item.status===q.get('status'))&&(!q.get('workflow')||item.workflowTemplateId===q.get('workflow'))&&(key!=='tasks'||Boolean(item.archivedAt)===(q.get('archived')==='true')));
+  const total=matching.length,totalPages=Math.max(1,Math.ceil(total/20)),page=Math.min(Number(q.get('page')||1),totalPages);
+  return {[key]:matching.slice((page-1)*20,page*20),page,pageSize:20,total,totalPages,hasMore:page<totalPages};
+}
+function taskReadResponse(url,{tasks=[],runs=[],workspace,workflowTemplates=[]}={}) {
+  const path=new URL(url).pathname;
+  if(path==='/api/catalog-references')return {workflowTemplates,taskWorkflows:tasks.map(t=>({id:t.workflowTemplateId,name:t.workflowSnapshot?.name}))};
+  if(path==='/api/tasks')return directoryResponse(url,'tasks',tasks);
+  if(path.startsWith('/api/tasks/')){const task=tasks.find(t=>t.id===path.split('/').at(-1));return {task:task&&{...task,runs:runs.filter(r=>r.taskId===task.id)}};}
+  if(path.endsWith('/collaboration'))return {items:collaborationRecords(workspace),total:collaborationRecords(workspace).length,hasMore:false,nextBefore:null};
+  if(path.endsWith('/artifacts'))return {items:workspace.artifacts,total:workspace.artifacts.length,hasMore:false,nextBefore:null};
+  if(path.endsWith('/workspace'))return workspace;
+  throw Error('Unexpected task read '+url);
+}
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'af-config-cli-')), sessionFile = join(root, 'private', 'session.json');
   const calls = [], state = { agents: [{ id: 'agent_one', name: '原员工', kind: 'business', runtime: { profileId: 'runtime_one', extensionSelection: { mcpIds: ['private-id'], pluginIds: [] } } }], teams: [{ id: 'team_one', name: '内容团队', memberAgentIds: ['agent_one'] }], profiles: [{ id: 'runtime_one', name: 'default', provider: 'claude-code' }], workflowTemplates: [], plugins: [{ id: 'plugin_one', name: '编辑插件', skillIds: ['skill_one'], unsupported: ['hooks'] }], entries: [{ id: 'skill_one', kind: 'skill', name: '编辑', description: '中文' }] };
@@ -299,6 +316,10 @@ async function fixture() {
     const pathname=new URL(url).pathname;
     const resource = Object.values(resources).find(item => pathname === item.path || pathname.startsWith(item.path + '/'));
     if (path.endsWith('/test')) return response({ ok: false, logPath: '/private/probe.jsonl', testId: 'probe-1' });
+    if (options.method === 'GET' && ['agents','roles','teams','workflowTemplates'].includes(resource.key)) {
+      if(pathname!==resource.path)return response({[({agents:'agent',roles:'role',teams:'team',workflowTemplates:'workflowTemplate'})[resource.key]]:state[resource.key].find(item=>item.id===pathname.split('/').at(-1))});
+      return response(directoryResponse(url,resource.key,state[resource.key]));
+    }
     if (options.method === 'GET') return response({ [resource.key]: state[resource.key], ...(resource.key === 'plugins' ? { entries: state.entries } : {}),...(['plugins','entries'].includes(resource.key)?{totalPages:1,total:state[resource.key].length,page:1,pageSize:20,hasMore:false}:{}) });
     return response(body || { deleted: true });
   };
@@ -565,7 +586,7 @@ test('task lifecycle CLI terminates the selected run and deletes through authent
   const fetcher = async (url, options) => {
     assert.equal(options.headers.Cookie, cookie);
     const path = url.slice(origin.length);
-    if (options.method === 'GET') return new Response(JSON.stringify({ tasks: [task], runs }));
+    if (options.method === 'GET') return new Response(JSON.stringify(taskReadResponse(url,{tasks:[task],runs})));
     writes.push({ path, method: options.method });
     if (options.method === 'DELETE') return new Response(JSON.stringify(refuseDelete ? { error: '存在活跃 Run' } : { task, runIds: runs.map(x => x.id), runFileCleanup: 'pending' }), { status: refuseDelete ? 409 : 202 });
     return new Response(JSON.stringify({ run: { ...runs.find(x => path.includes(x.id)), status: 'cancelled', manager: { systemPrompt: 'private' } } }));
@@ -688,6 +709,7 @@ test('employee CLI rejects retired developer/repository writes and directs repos
 test('task progress help describes original employee recovery without granting a CLI retry operation', async () => {
   const help = await execute(['tasks','progress','--help']);
   assert.match(JSON.stringify(help), /原失败员工的投递与会话/);
+  assert.match(JSON.stringify(help), /协调协议拒收.*自动纠正一次/);
   await assert.rejects(execute(['tasks','retry']), /未知|不支持|命令/);
 });
 
@@ -696,7 +718,7 @@ test('task lists expose frozen workflow references and combine workflow filterin
   const f = await fixture();
   const tasks = Array.from({ length: 45 }, (_, i) => ({ id: `task_${i}`, title: `任务 ${i}`, status: 'backlog', workflowTemplateId: i < 22 ? 'flow_a' : 'flow_b', workflowSnapshot: { name: i < 22 ? '旧名称' : '另一流程' }, archivedAt: i === 44 ? '2026-01-01' : null }));
   const workflowTemplates = [{ id: 'flow_a', name: '新名称' }, { id: 'flow_b', name: '另一流程' }];
-  const invoke = args => execute(['tasks', 'list', ...args, '--session-file', f.sessionFile], { fetcher: async () => new Response(JSON.stringify({ tasks, workflowTemplates })) });
+  const invoke = args => execute(['tasks', 'list', ...args, '--session-file', f.sessionFile], { fetcher: async url => new Response(JSON.stringify(taskReadResponse(url,{tasks,workflowTemplates}))) });
   const selected = await invoke(['--workflow', '新名称', '--page', '2']);
   assert.equal(selected.total, 22); assert.equal(selected.items.length, 2);
   assert.deepEqual(selected.items[0].workflow, { id: 'flow_a', name: '旧名称' });
@@ -777,7 +799,7 @@ test('task members CLI reads compact current roster and validates full replaceme
  const f=await fixture(),calls=[];
  const fetcher=async(url,options)=>{
   const path=url.slice(origin.length);calls.push({path,method:options.method,body:options.body});
-  const value=path==='/api/bootstrap'?{tasks:[{id:'t'}],runs:[{id:'r',taskId:'t'}]}:path.endsWith('/members')?{runId:'r',memberAgentIds:['m','b'],members:[{id:'m'},{id:'b'}]}:{run:{participants:[{id:'m',name:'经理',type:'agent',systemPrompt:'private'},{id:'a',type:'agent'}],removedParticipantIds:['a']}};
+  const value=path==='/api/tasks/t'?{task:{id:'t',runs:[{id:'r',taskId:'t'}]}}:path.endsWith('/members')?{runId:'r',memberAgentIds:['m','b'],members:[{id:'m'},{id:'b'}]}:{run:{participants:[{id:'m',name:'经理',type:'agent',systemPrompt:'private'},{id:'a',type:'agent'}],removedParticipantIds:['a']}};
   return new Response(JSON.stringify(value));
  };
  const invoke=(args,value)=>execute(['tasks','members','t',...args,'--session-file',f.sessionFile],{fetcher,stdin:input(value??'')});
@@ -791,7 +813,7 @@ test('task members CLI reads compact current roster and validates full replaceme
 test('employee role filter resolves ID or unique name before search and pagination', async()=>{
  const f=await fixture(),roles=[{id:'role_a',name:'分析'},{id:'role_b',name:'开发'}];
  const agents=Array.from({length:45},(_,i)=>({id:'agent_'+i,name:'员工 '+i,roleIds:i<22?['role_a','role_b']:['role_b']}));
- const invoke=args=>execute(['agents','list',...args,'--session-file',f.sessionFile],{fetcher:async url=>new Response(JSON.stringify(url.endsWith('/roles')?{roles}:{agents}))});
+ const invoke=args=>execute(['agents','list',...args,'--session-file',f.sessionFile],{fetcher:async url=>new Response(JSON.stringify(url.endsWith('/catalog-references')?{roles}:directoryResponse(url,'agents',agents)))});
  assert.equal((await invoke(['--role','分析','--page','2'])).items.length,2);
  assert.equal((await invoke(['--role','role_a','--all'])).total,22);
  assert.equal((await invoke(['--role','role_a','--search','21'])).total,1);
@@ -806,7 +828,7 @@ test('employee role filter resolves ID or unique name before search and paginati
 test('task progress exposes all concurrent members and failed-run settlement in text and JSON', async () => {
  const f=await fixture(),task={id:'task_parallel',title:'并行',status:'running'};
  const workspace={run:{id:'run_parallel',task,status:'running',participants:[{id:'a',name:'A'},{id:'b',name:'B'}]},traces:[{id:'ta',agentId:'a',status:'running'},{id:'tb',agentId:'b',status:'running'}],dispatches:[{id:'da',recipientAgentId:'a',status:'claimed'},{id:'db',recipientAgentId:'b',status:'claimed'},{id:'dc',recipientAgentId:'a',status:'queued'}],pendingQuestions:[],messages:[],events:[],artifacts:[]};
- const fetcher=async url=>new Response(JSON.stringify(url.endsWith('/api/bootstrap')?{tasks:[task],runs:[{id:workspace.run.id,taskId:task.id}]}:workspace));
+ const fetcher=async url=>new Response(JSON.stringify(taskReadResponse(url,{tasks:[task],runs:[{id:workspace.run.id,taskId:task.id}],workspace})));
  const args=['tasks','progress',task.id,'--session-file',f.sessionFile];
  const initial=await execute(args,{fetcher});assert.deepEqual(initial.activeTraces.map(t=>t.agentId),['a','b']);assert.equal(initial.pendingDispatches.length,3);
  workspace.run.status='failed';workspace.traces[0].status='failed';

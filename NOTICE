@@ -23,3 +23,8 @@ DeepSeek Harness command Hook bridges (0.2.1-rc.2) retain their MIT licenses
 in server/runtime/vendor/dsh-hooks/*.LICENSE. Unmodified upstream files and
 package integrity are identified in provenance.json; hook-guard.mjs is an
 AgentForge adapter, not upstream code.
+
+Image thumbnails use sharp (Apache-2.0) and its distributed libvips binaries
+(the bundled @img distribution is LGPL-3.0-or-later). The macOS distribution
+includes the upstream sharp LICENSE and libvips dependency licensing README
+under Contents/Resources/licenses/sharp and licenses/sharp-libvips.

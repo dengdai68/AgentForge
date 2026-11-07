@@ -1,10 +1,12 @@
 import { dshModelCatalog } from "./dsh.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile } from "node:fs/promises";
+import { readFile, stat, access } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, delimiter, isAbsolute } from "node:path";
+import { constants } from "node:fs";
 import { cliEnvironment } from "./cli-environment.mjs";
+import { createHash } from "node:crypto";
 import { diagnostic } from "../diagnostics.mjs";
 
 const exec = promisify(execFile);
@@ -164,7 +166,7 @@ async function codexCatalog(executable, { run }) {
 
 // Read-only catalog for the Runtime settings surfaces. Profile field changes do
 // not reach frozen Task/Run snapshots; this query never mutates CLI state.
-export async function runtimeModelCatalog({ provider, executable = null }, { environment = process.env, homeDirectory = homedir(), run = exec } = {}) {
+async function loadModelCatalog({ provider, executable = null }, { environment = process.env, homeDirectory = homedir(), run = exec } = {}) {
   if (provider === "dsh") return dshModelCatalog();
   if (provider === "claude-code") return claudeCatalog({ environment, homeDirectory });
   if (provider === "codex") return codexCatalog(executable, { run });
@@ -179,4 +181,21 @@ export function assertModelEffort(catalog, model, effort) {
   if (!entry) return;
   const levels = (entry.levels || []).map(level => typeof level === "string" ? level : level.id);
   if (!levels.includes(effort)) throw new Error(`模型 ${model} 不支持思考等级 ${effort}（该模型支持：${levels.join(" / ") || "无，请留空使用 CLI 默认"}）`);
+}
+
+// Only a digest of environment values is retained; never store or expose credentials.
+const catalogs=new WeakMap();
+export async function runtimeModelCatalog(input,{environment=process.env,homeDirectory=homedir(),run=exec,refresh=false}={}) {
+  const provider=input.provider, config=environment.CODEX_HOME || join(homeDirectory,'.codex');
+  const command=input.executable||(provider==='codex'?'codex':provider==='claude-code'?'claude':'dsh');
+  let executable=isAbsolute(command)?command:null;
+  if(!executable)for(const directory of (cliEnvironment(command,{}, {environment,homeDirectory}).PATH||'').split(delimiter)){try{const candidate=join(directory,command);await access(candidate,constants.X_OK);if((await stat(candidate)).isFile()){executable=candidate;break;}}catch{}}
+  const paths=[executable,...(provider==='codex'?[join(config,'auth.json'),join(config,'config.toml')]:provider==='claude-code'?[join(environment.CLAUDE_CONFIG_DIR || join(homeDirectory,'.claude'),'settings.json')]:[])].filter(Boolean);
+  const stamps=await Promise.all(paths.map(async path=>{try{const value=await stat(path,{bigint:true});return [path,String(value.ino),String(value.size),String(value.mtimeNs),String(value.ctimeNs)];}catch{return [path,'missing'];}}));
+  const key=createHash('sha256').update(JSON.stringify([input,homeDirectory,stamps,Object.entries(environment).sort(([a],[b])=>a.localeCompare(b))])).digest('hex');
+  let cache=catalogs.get(run);if(!cache)catalogs.set(run,cache=new Map());
+  const old=cache.get(key);if(old && (old.pending || !refresh && old.expires>Date.now()))return structuredClone(await old.promise);
+  const entry={pending:true,expires:0};entry.promise=loadModelCatalog(input,{environment,homeDirectory,run});cache.set(key,entry);
+  while(cache.size>16)cache.delete(cache.keys().next().value);
+  try{const result=await entry.promise;entry.pending=false;entry.expires=Date.now()+30000;return structuredClone(result);}catch(error){if(cache.get(key)===entry)cache.delete(key);throw error;}
 }

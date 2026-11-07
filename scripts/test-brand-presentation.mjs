@@ -10,6 +10,7 @@ import { createCatalogFixtureStore } from '../tests/fixture-store.mjs';
 await mkdir('.data', { recursive: true });
 const root = await mkdtemp(resolve('.data/brand-presentation-'));
 const bundle = process.env.AGENTFORGE_BRAND_APP, home = join(root, 'home');
+const iconsOnly = process.env.AGENTFORGE_BRAND_ICONS_ONLY === '1';
 const data = bundle ? join(home, '.agentforge/desktop') : join(root, 'client');
 await mkdir(home, { recursive: true });
 const password = randomBytes(24).toString('hex');
@@ -28,6 +29,18 @@ const evidence = { root, bundle: bundle || 'source', cases: [] }, errors = [];
 const presentation = node => { const c = getComputedStyle(node); return Object.fromEntries(['backgroundColor','color','borderTopColor','borderTopWidth','borderTopStyle','borderRadius','padding','margin','fontSize','lineHeight'].map(k => [k, c[k]])); };
 const luminance = rgb => { const v = rgb.match(/[\d.]+/g).slice(0,3).map(Number).map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4); return .2126*v[0] + .7152*v[1] + .0722*v[2]; };
 const contrast = style => { const a = luminance(style.color), b = luminance(style.backgroundColor); return (Math.max(a,b)+.05)/(Math.min(a,b)+.05); };
+const checkApplicationIcon = async page => {
+  await page.waitForFunction(() => document.querySelector('.application-icon')?.naturalWidth===1024);
+  const icon = await page.locator('.application-icon').evaluate(n => {
+    const style=getComputedStyle(n), canvas=document.createElement('canvas'); canvas.width=canvas.height=1024;
+    const c=canvas.getContext('2d');c.drawImage(n,0,0);const pixel=(x,y)=>[...c.getImageData(x,y,1,1).data];
+    return {border:style.borderTopWidth,background:style.backgroundColor,shadow:style.boxShadow,corner:pixel(0,0),edge:pixel(512,2),width:n.width,height:n.height};
+  });
+  assert.equal(icon.border,'0px');assert.equal(icon.background,'rgba(0, 0, 0, 0)');assert.equal(icon.shadow,'none');
+  assert.equal(icon.corner[3],0);assert.equal(icon.edge[3],255);assert.ok(Math.min(...icon.edge.slice(0,3))<100,'no white matte');
+  assert.equal(icon.width,icon.height,'no distorted sidebar image');
+  return icon;
+};
 try {
   const page = await app.firstWindow({ timeout: 90000 }); page.on('pageerror', e => errors.push(e.message));
   await page.waitForURL(/^http:\/\/127\.0\.0\.1:/, { timeout: 60000 });
@@ -35,14 +48,23 @@ try {
   await page.goto(origin + '/login'); await page.locator('#username').fill('brand-qa'); await page.locator('#password').fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click(); await page.locator('#account-name').waitFor();
   const api = (path, body) => page.evaluate(async ({ path, body }) => { const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }); const value = await r.json(); if (!r.ok) throw Error(JSON.stringify(value)); return value; }, { path, body });
-  console.log('Importing display fixtures');
-  await api('/api/runtime/marketplace', { path: source });
-  await api('/api/runtime/mcp-marketplace', { name:'品牌 MCP 展示夹具', description:'静态展示夹具，不执行服务。', content:JSON.stringify({ mcpServers:{ fixture:{ command:'node', args:['--version'], cwd:root } } }) });
+  if (!iconsOnly) {
+    console.log('Importing display fixtures');
+    await api('/api/runtime/marketplace', { path: source });
+    await api('/api/runtime/mcp-marketplace', { name:'品牌 MCP 展示夹具', description:'静态展示夹具，不执行服务。', content:JSON.stringify({ mcpServers:{ fixture:{ command:'node', args:['--version'], cwd:root } } }) });
+  }
   const resize = async (width, height) => { await app.evaluate(({ BrowserWindow }, {origin,width,height}) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith(origin)).setContentSize(width,height), {origin,width,height}); await page.waitForFunction(w => innerWidth === w, width); };
   for (const theme of ['minimal','warm']) {
     await page.goto(origin + '/settings/appearance'); await page.locator(`[name=theme][value=${theme}]`).check();
     for (const width of [1320,760]) { console.log('Checking',theme,width);
       await resize(width,760);
+      if (iconsOnly) {
+        await page.goto(origin + '/agents');
+        const icon = await checkApplicationIcon(page);
+        evidence.cases.push({theme,width,icon});
+        await page.screenshot({path:join(root,`${theme}-${width}-icons.png`)});
+        continue;
+      }
       await page.goto(origin + '/roles'); await page.locator('#roles-empty').waitFor();
       const empty = await page.locator('#roles-empty').evaluate(presentation);
       assert.equal(empty.borderTopStyle,'dashed'); assert.equal(empty.borderTopWidth,'1px'); assert.equal(empty.margin,'0px'); assert.ok(contrast(empty) >= 4.5, 'empty text contrast');
@@ -79,15 +101,7 @@ try {
       const avatarStyles = await page.locator('.agent-card-avatar').evaluateAll(nodes => nodes.map(n => ({color:getComputedStyle(n).color,backgroundColor:getComputedStyle(n).backgroundColor})));
       assert.ok(avatarStyles.every(s => contrast(s) >= 4.5),'avatar initials contrast');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),false);
-      await page.waitForFunction(() => document.querySelector('.application-icon')?.naturalWidth===1024);
-      const icon = await page.locator('.application-icon').evaluate(n => {
-        const style=getComputedStyle(n), canvas=document.createElement('canvas'); canvas.width=canvas.height=1024;
-        const c=canvas.getContext('2d');c.drawImage(n,0,0);const pixel=(x,y)=>[...c.getImageData(x,y,1,1).data];
-        return {border:style.borderTopWidth,background:style.backgroundColor,shadow:style.boxShadow,corner:pixel(0,0),edge:pixel(512,2),width:n.width,height:n.height};
-      });
-      assert.equal(icon.border,'0px');assert.equal(icon.background,'rgba(0, 0, 0, 0)');assert.equal(icon.shadow,'none');
-      assert.equal(icon.corner[3],0);assert.equal(icon.edge[3],255);assert.ok(Math.min(...icon.edge.slice(0,3))<100,'no white matte');
-      assert.equal(icon.width,icon.height,'no distorted sidebar image');
+      await checkApplicationIcon(page);
       await page.screenshot({ path:join(root,`${theme}-${width}-agents.png`) });
       // Every directory uses the exact same surface and spans its full content row.
       const checkEmpty = async (selector, reference) => {
@@ -140,25 +154,27 @@ try {
   assert.equal(nativeIcons.template,true);assert.deepEqual(nativeIcons.size,{width:18,height:18});
   assert.deepEqual(nativeIcons.scales,[1,2]);assert.deepEqual(nativeIcons.dockBounds,[100,100,924,924]);
   evidence.nativeIcons=nativeIcons;
-  // The same full-width surface also represents a real HTTP read failure honestly.
-  await page.route('**/api/runtime/marketplace', route => route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'品牌验收：读取失败'})}));
-  await page.goto(origin + '/marketplace'); await page.locator('[data-market-empty][role=alert]').waitFor();
-  assert.match(await page.locator('[data-market-empty]').innerText(),/读取失败/);
-  assert.equal(await page.locator('[data-market-list]').isHidden(),true);
-  await page.screenshot({path:join(root,'read-failure.png')});
-  // Native confirmation loads compact.css without the renderer stylesheet.
-  const dialogFile = bundle ? resolve(bundle,'Contents/Resources/app.asar/apps/electron/cli-confirmation.html') : resolve('apps/electron/cli-confirmation.html');
-  await app.evaluate(async ({ BrowserWindow }, file) => {
-    const preview = new BrowserWindow({ width:560,height:470,show:true,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,partition:'brand-native-preview'} });
-    await preview.loadFile(file);
-  },dialogFile);
-  const dialog = app.windows().find(p=>p.url().includes('/cli-confirmation.html')); assert.ok(dialog);
-  await dialog.locator('[data-choice=install]').waitFor();
-  const dialogButton = await dialog.locator('[data-choice=install]').evaluate(presentation);
-  assert.equal(dialogButton.backgroundColor,'rgb(37, 88, 217)'); assert.ok(contrast(dialogButton)>=4.5,'native dialog retains readable brand action without renderer tokens');
-  await dialog.screenshot({path:join(root,'native-dialog.png')}); await dialog.locator('[data-choice=cancel]').click();
-  await app.evaluate(({ BrowserWindow })=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/cli-confirmation.html'))?.destroy());
+  if (!iconsOnly) {
+    // The same full-width surface also represents a real HTTP read failure honestly.
+    await page.route('**/api/runtime/marketplace', route => route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'品牌验收：读取失败'})}));
+    await page.goto(origin + '/marketplace'); await page.locator('[data-market-empty][role=alert]').waitFor();
+    assert.match(await page.locator('[data-market-empty]').innerText(),/读取失败/);
+    assert.equal(await page.locator('[data-market-list]').isHidden(),true);
+    await page.screenshot({path:join(root,'read-failure.png')});
+    // Native confirmation loads compact.css without the renderer stylesheet.
+    const dialogFile = bundle ? resolve(bundle,'Contents/Resources/app.asar/apps/electron/cli-confirmation.html') : resolve('apps/electron/cli-confirmation.html');
+    await app.evaluate(async ({ BrowserWindow }, file) => {
+      const preview = new BrowserWindow({ width:560,height:470,show:true,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,partition:'brand-native-preview'} });
+      await preview.loadFile(file);
+    },dialogFile);
+    const dialog = app.windows().find(p=>p.url().includes('/cli-confirmation.html')); assert.ok(dialog);
+    await dialog.locator('[data-choice=install]').waitFor();
+    const dialogButton = await dialog.locator('[data-choice=install]').evaluate(presentation);
+    assert.equal(dialogButton.backgroundColor,'rgb(37, 88, 217)'); assert.ok(contrast(dialogButton)>=4.5,'native dialog retains readable brand action without renderer tokens');
+    await dialog.screenshot({path:join(root,'native-dialog.png')}); await dialog.locator('[data-choice=cancel]').click();
+    await app.evaluate(({ BrowserWindow })=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/cli-confirmation.html'))?.destroy());
+  }
   assert.deepEqual(errors,[]); evidence.result='PASS'; await writeFile(join(root,'evidence.json'),JSON.stringify(evidence,null,2));
-  console.log('PASS brand presentation:',root);
+  console.log(iconsOnly ? 'PASS application icons:' : 'PASS brand presentation:',root);
 } catch(error) { console.error('Evidence:',root);throw error; }
 finally {await app.close();}
