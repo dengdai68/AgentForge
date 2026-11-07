@@ -2,6 +2,7 @@
 
 | 主题 | 文档 |
 | --- | --- |
+| 第一次使用 | [安装、配置员工与检查第一次文件交付](quickstart.md) |
 | 代码导航 | [模块地图](00-ai-map.md) |
 | 产品 | [功能与协作方式](01-product-requirements.md) |
 | 架构 | [系统分层](02-system-architecture.md)、[领域模型](03-domain-model.md)、[性能架构决策](28-performance-architecture.md) |

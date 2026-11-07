@@ -1,14 +1,51 @@
 <div align="center">
   <img src="web/icons/application-ui.png" alt="AgentForge" width="88" />
   <h1>AgentForge</h1>
-  <p><strong>把 AI 能力组织成一支能够协作、执行与交付的数字团队。</strong></p>
-  <p>数字员工 · 多模型协作 · 定时自动化 · 文件交付</p>
-  <p><a href="https://github.com/dengdai68/AgentForge/releases">下载最新版</a> · <a href="docs/README.md">能力文档</a> · <a href="LICENSE">Apache-2.0</a></p>
+  <p><strong>为使用 AI 编程工具的独立开发者，把多个 AI 员工的分工、沟通和文件交付集中到一个本机工作台。</strong></p>
+  <p>A local AI team workspace powered by Claude Code, Codex and DeepSeek Harness.</p>
+  <p><a href="https://github.com/dengdai68/AgentForge/releases/tag/v0.1.6-beta.1">下载 macOS Beta</a> · <a href="docs/quickstart.md">第一次使用</a> · <a href="https://github.com/dengdai68/AgentForge/releases/latest">正式版</a> · <a href="https://github.com/dengdai68/AgentForge/issues">反馈问题</a></p>
 </div>
 
-AgentForge 是面向本机工作的 AI 团队工作台。它将 Claude Code、Codex 和 DeepSeek Harness 接入同一个协作空间，让拥有不同职责、提示词和工具的数字员工共同推进任务，并将沟通、执行过程、文件成果与变更记录关联起来。
+**macOS 13+ / Apple Silicon（M 系列） · Apache-2.0 开源 · 模型费用由所用 Provider 另计 · 需自行安装并授权至少一种模型 CLI。**
+
+![AgentForge v0.1.6-beta.1 数字员工界面：为项目经理、资料分析师、内容编辑和独立审校分别配置职责与 Runtime](https://github.com/dengdai68/AgentForge/releases/download/v0.1.6-beta.1/agentforge-employees-preview-20261107.png)
+
+*v0.1.6-beta.1 的真实界面，展示隔离实例中的示例员工配置；不代表模型任务执行结果。*
+
+AgentForge 将 Claude Code、Codex 和 DeepSeek Harness 接入同一个协作空间，让拥有不同职责、提示词和工具的数字员工共同推进任务，并将沟通、执行过程、文件成果与变更记录关联起来。适合需要反复协调需求分析、实现、审校或内容交付的独立开发者与小团队。
 
 从需求分析、代码实现与测试，到知识整理、研究分析和内容生产，你可以按工作需要组织员工，选择工作流，或把重复工作配置为定时自动化。
+
+## 先试一次：把素材整理成发布说明
+
+1. 从 [v0.1.6-beta.1 下载页](https://github.com/dengdai68/AgentForge/releases/tag/v0.1.6-beta.1) 下载 DMG，拖入 Applications。也可从[正式版入口](https://github.com/dengdai68/AgentForge/releases/latest)选择稳定版本；下文以 Beta 为例。
+2. 首次打开创建本机管理员，在「设置」检查已安装、已授权的 Claude Code、Codex 或 DeepSeek Harness。无需部署服务器；目前没有在线体验版。
+3. 在「数字员工」创建一位项目经理和至少一位普通员工，选择可用 Runtime；也可先使用已有员工。
+4. 在「任务中心」新建任务，选入这些成员，描述素材、目标文件和要求，然后「保存并开始」。工作流可使用默认协作。
+5. 在协作记录查看交接，在工作目录打开实际文件，检查后由你确认普通任务完成。
+
+可直接复制的任务素材、员工提示词和故障排查见[第一次使用教程](docs/quickstart.md)。源码运行见 [CONTRIBUTING](CONTRIBUTING.md#安装与本机运行)。
+
+## 与现有用法有什么区别
+
+| 你现在的用法 | AgentForge 提供的具体变化 |
+| --- | --- |
+| 打开多个 CLI 窗口，手动复制上下文、分配工作 | 在同一任务中选择经理与员工，用协作记录保留派工、交接和咨询；每位员工保留独立会话。 |
+| 用一个助手同时承担分析、实现和审校 | 分别配置员工职责、Runtime 和工具，由经理协调；可以混用已支持的模型 CLI。 |
+| 自己拼接脚本、定时器、文件目录和执行日志 | 在桌面界面管理周期任务，把每次执行与沟通、文件、CHANGE 和控制台关联起来。 |
+
+这些差异描述产品的组织方式；实际质量、速度与费用取决于模型、任务和成员配置，没有性能提升承诺。
+
+## 支持范围、成本与当前限制
+
+| 项目 | 当前情况 |
+| --- | --- |
+| 安装平台 | 发布包支持 macOS 13+ / Apple Silicon；尚无 Intel Mac、Windows 或 Linux 安装包。 |
+| 软件与模型费用 | 应用按 [Apache-2.0](LICENSE) 开源，不包含模型额度。所用 CLI 的订阅、API 和第三方工具费用由对应服务计收；多员工、多轮任务会增加调用量。 |
+| 本机与联网 | 应用自带本机服务，保存配置与任务记录；模型和远程工具调用仍可能把任务内容发送给相应 Provider。 |
+| 安装信任提示 | 当前安装包为 ad-hoc 签名，未做 Apple 公证；macOS 可能拦截。仅在确认来源可信后按系统设置允许打开，勿关闭系统安全保护。 |
+| 使用边界 | 当前为本机单管理员应用；员工以当前系统用户权限运行，不提供 Agent 沙箱或多租户隔离。 |
+| 版本与任务结果 | 开发迭代中，不承诺旧版本数据兼容；升级先读 Release 说明。普通任务的成果须由你检查并最终确认。 |
 
 ## 从一个目标，到完整交付
 
