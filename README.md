@@ -9,6 +9,8 @@
 
 从代码开发、调研分析到知识整理和内容生产，你可以为 Agent 定义职责、提示词、模型与工具，与单个虚拟员工交流，也可以组建团队共同执行任务。AgentForge 将成员、协作、执行记录和交付文件组织在同一个本机工作空间中。
 
+![AgentForge 任务创建界面：描述目标并选择执行成员](https://github.com/dengdai68/AgentForge/releases/download/v0.1.6/agentforge-create-task-v016.png)
+
 ## 能做什么
 
 | 能力 | 用法 |
@@ -19,59 +21,42 @@
 | 工作流 | 定义职责节点、交付要求与交接关系，让多 Agent 围绕同一个目标推进工作。 |
 | 私聊与群聊 | 与员工讨论需求，通过 @ 定向交流，上传图片和文件，在协作中补充指令或回答澄清。 |
 | 定时自动化 | 用 Cron 安排重复任务，独立记录每轮执行、触发状态和成果。 |
-| 工具与文件 | 为员工选择插件、Skill 和 MCP；预览、下载实际文件，通过 CHANGE 查看累计修改。 |
+| 工具与文件 | 为员工选择插件与 MCP，通过插件加载 Skill；预览、下载实际文件，通过 CHANGE 查看累计修改。 |
 
 ## 快速上手
 
-```mermaid
-flowchart LR
-    A[定制员工与团队] --> B[描述目标并创建任务]
-    B --> C[经理协调与成员执行]
-    C --> D[任务中心查看协作与文件]
-    D --> E[检查成果并确认交付]
-```
+**定制员工 → 选择成员 → 创建任务 → 任务中心跟进 → 检查文件并确认交付。**
 
-1. **配置成员**：在「数字员工」设置各自的职责与 Runtime。创建任务时，从团队或员工中选择成员，保留一位可用项目经理。
-2. **创建任务**：填写目标、背景与可选验收标准，选择工作流或使用默认协作；可以先存草稿，也可以「保存并开始」。
-3. **跟进执行**：在任务中心查看派工和交接，回答澄清、追加指令；从「本轮控制台」查看对应执行。发生错误时，修复原因后可继续原员工会话。
-4. **检查交付**：直接打开工作目录中的文件与 CHANGE，核对成果后在客户端确认普通任务完成。
+![AgentForge 实机操作动图：员工配置、任务创建、成员选择与草稿保存](https://github.com/dengdai68/AgentForge/releases/download/v0.1.6/agentforge-task-demo-v016.gif)
 
-<details>
-  <summary>查看任务创建界面</summary>
-  <p><img src="https://github.com/dengdai68/AgentForge/releases/download/v0.1.6-beta.1/agentforge-task-preview-20261107.png" alt="AgentForge 任务创建：填写目标、选择团队成员与工作流，保存草稿或开始执行" width="960" /></p>
-  <p>v0.1.6-beta.1 隔离实例的真实界面，展示示例任务草稿。</p>
-</details>
+*v0.1.6 实机操作，约 18 秒；演示员工配置与任务草稿创建，未调用模型。*
 
-想直接试一次，可以照着[第一次使用教程](docs/quickstart.md)，让编辑与审校协作整理一份产品发布说明。
+创建任务时保留一位可用项目经理，可先保存草稿或直接「保存并开始」。执行后，在任务中心查看协作、控制台与实际文件，回答澄清或补充指令，检查成果后确认普通任务完成。可复制的任务素材见[第一次使用教程](docs/quickstart.md)。
 
 ## CLI：让 AI 团队接入你的工具链
 
-数字员工、角色、团队、工作流、插件、MCP、Runtime、自动化，以及任务的创建、执行与查询，都可以通过 `agentforge` 操作。CLI 与 App 共用认证和业务规则，支持可读文本、JSON 输出及逐级帮助，适合接入脚本或交给其他 Agent 调用。
+通过 `agentforge` 管理配置、创建任务和查询执行。支持逐级 `--help` 和 `--json`，可在终端使用，也可接入脚本或供其他 Agent 调用。
 
-| 命令组 | 主要命令 |
-| --- | --- |
-| `agents` · `roles` · `teams` · `workflows` | `list` / `get` / `create` / `update` / `delete`，管理员工、角色、团队和工作流。 |
-| `plugins` | `list` / `get` / `import` / `delete`，以及 `updates` / `check-updates` / `auto-update`。 |
-| `mcps` | `list` / `get` / `create` / `update` / `delete`，管理 MCP 服务。 |
-| `runtimes` | `list` / `get` / `update` / `test` / `models`，配置和测试模型连接。 |
-| `automations` | `list` / `get` / `create` / `update` / `delete` / `trigger` / `triggers`。 |
-| `tasks` | `list` / `get` / `create` / `start` / `terminate` / `delete`；用 `progress` / `collaboration` / `artifacts` 查询，用 `members` / `message` / `questions` / `reply` 参与协作。 |
-| `auth` | `login` / `status` / `logout`，管理独立 CLI 会话；默认可复用已登录客户端的授权。 |
+```console
+$ agentforge --help
+AgentForge 是一个 AI 团队操作系统：让负责人组织具备不同能力的数字员工，协作完成代码开发、企业知识整理、调研和内容生产，并拿到可核验的交付物，而不只是聊天回复。
 
-保持客户端运行并登录，即可在终端使用：
+命令目录
+  tasks      任务 / 进度 / 协作 / 澄清
+  automations 自动化 / 定时执行 / 触发记录
+  agents     数字员工
+  roles      角色（共用系统提示词）
+  mcps       MCP 市场
+  plugins    插件市场
+  workflows  工作流
+  teams      团队
+  runtimes   Runtime 配置与连接查询
+  auth       登录 / 会话状态 / 退出登录
 
-```bash
-agentforge help
-agentforge agents list --json
-agentforge schema tasks
-agentforge tasks create --file task.json --start
-agentforge tasks progress TASK_ID
-agentforge tasks collaboration TASK_ID
+查看具体操作参数：在命令后加 --help，例如 agentforge agents get --help。
 ```
 
-按 `schema tasks` 的字段与模板编写 `task.json`，成员 ID 可从 `agents list` 或 `teams list` 查询；将 `TASK_ID` 替换为创建返回的任务 ID。任意命令后加 `--help` 查看参数，脚本加 `--json` 获取结构化结果。首次找不到命令时，进入「设置 → 命令行 CLI」修复安装。
-
-普通任务最终验收、私聊群聊、失败后的人工恢复及当前文件浏览仍在客户端完成。完整用法见 [CLI 指南](docs/21-configuration-cli.md)。
+先启动并登录客户端；找不到命令时，在「设置 → 命令行 CLI」修复安装。用 `agentforge tasks create --help` 查看操作参数，`agentforge schema tasks` 查看字段与 JSON 模板。最终验收、私聊群聊、失败后的人工恢复及当前文件浏览仍在客户端完成；详见 [CLI 指南](docs/21-configuration-cli.md)。
 
 ## 安装
 
