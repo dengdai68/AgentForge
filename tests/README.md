@@ -101,3 +101,5 @@ task-attachments.test.mjs 覆盖附件原字节、归属、澄清续接、重启
 `state-journal.test.mjs` 同时覆盖当前领域数据以快照形式保存时的首次物化：空/部分脏日志、首次事务失败保留原快照，以及已有安装 ID 的 Store 冷启动、列表/详情一致与冻结 Run 历史两次重启不变。
 
 协作发送滚动的真实 DOM 回归在 `AGENTFORGE_COLLABORATION_SCROLL_ONLY=1 node scripts/test-collaboration-flow.mjs`：宽窄窗口、两条待澄清问题、历史页回复、底部连续回复、HTTP 失败保留草稿/位置及“最新”定位。使用暂停 Run 的真实回复端点并核对无 Trace；settings/smoke 的轻量 DOM 夹具补齐 querySelector 和动画帧接口，仅验证原有呈现契约。
+
+同一轮包含 `summary` 与 `consultation` 时，先将非空且与问题正文不同的报告保存为普通角色 Message，再保存问题和等待关系；两条消息关联同一 Trace/本轮输入。缺少报告或正文与问题相同不另造消息，协调失败仍回滚路由并保留原报告；不从控制台补造旧 Message。

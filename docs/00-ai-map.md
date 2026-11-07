@@ -222,3 +222,5 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 已有快照首次进入实体存储：`persistence.save` 在同一事务完整物化未初始化集合，再剥离快照数组；`tests/state-journal.test.mjs` 覆盖干净/部分脏日志、失败回滚及已有实例列表/详情与重启一致。
 
 协作回复后的滚动：`web/app.js` 的 `renderCollaboration` 统一捕获/恢复阅读位置；`sendInstruction` 成功后退出历史页并请求最新页，“最新”按钮使用同一跟随规则。定向宽窄隔离验收使用 `AGENTFORGE_COLLABORATION_SCROLL_ONLY=1 node scripts/test-collaboration-flow.mjs`，包含真实澄清回复与发送失败保留阅读位置；无 Provider 调用或 CLI 协议变化。
+
+咨询报告保留：`orchestrator.acceptDelivery` 在咨询提前返回前保存独立 summary；问题与报告共用 Trace/startMessageId，App/CLI 读取同一 Message。缺失/空/相同正文不另造报告，路由失败仍事务回滚；见 docs/03、22 与 tests/dispatch-routing。

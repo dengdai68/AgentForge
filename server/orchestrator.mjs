@@ -13,7 +13,7 @@ import { taskPrompt } from "./prompts.mjs";
 // Plain text and extra report fields are kept as ordinary handoff content.
 export function readNodeResult(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) value = { summary: String(value ?? "") };
-  const output = { ...value, kind: "node_result", summary: typeof value.summary === "string" ? value.summary : JSON.stringify(value) };
+  const output = { ...value, kind: "node_result", summary: typeof value.summary === "string" ? value.summary : value.consultation ? "" : JSON.stringify(value) };
   for (const field of ["artifacts", "decisions"]) output[field] = Array.isArray(value[field]) ? value[field] : [];
   output.consultation = value.consultation && typeof value.consultation === "object" ? value.consultation : null;
   output.managerDecision = value.managerDecision && typeof value.managerDecision === "object" ? value.managerDecision : null;
@@ -165,6 +165,11 @@ function acceptDelivery(store, delivery, trace, output, artifacts) {
     store.completeTrace(trace.id); store.syncWaiting(runId); return;
   }
   if (output.consultation) {
+    // A question changes coordination, not whether this turn's report is kept.
+    // The outer acceptance transaction rolls both messages back on bad routing.
+    if (output.summary.trim() && output.summary.trim() !== String(output.consultation.question ?? "").trim()) {
+      store.addMessage({ runId, workflowNodeId: delivery.workflowNodeId, traceId: trace.id, sender, kind: agent.id === run.manager.id ? "manager_decision" : "handoff", content: output.summary });
+    }
     applyRouting(() => store.askQuestion(delivery.id, output.consultation, trace.id));
     store.completeTrace(trace.id);
     return;

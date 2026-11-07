@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCatalogFixtureStore, createFixtureStore, freezeHistoricalRepository } from "./fixture-store.mjs";
 import { createSqlitePersistence } from "../server/persistence.mjs";
+import { collaborationRecords } from "../client/console-projections.mjs";
 import { createRunFiles } from "../server/run-files.mjs";
 import { executeRun, requestHumanIntervention, scheduleManagerFollowup } from "../server/orchestrator.mjs";
 
@@ -910,5 +911,68 @@ console.log(JSON.stringify({type:'result',is_error:false,result:JSON.stringify(r
     assert.ok(w.dispatches.every(item => ['done','cancelled'].includes(item.status)));
     assert.equal((await readFile(join(w.run.task.workspacePath, 'delivery.txt'), 'utf8')), 'delivered');
     store.confirmRunCompletion(run.id); assert.equal(store.getRun(run.id).status, 'completed');
+  });
+}
+
+
+for (const scenario of ['manager', 'employee', 'same', 'empty', 'missing']) {
+  test(`consultation keeps a distinct report before its question: ${scenario}`, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'af-consultation-report-'));
+    const databasePath = join(root, 'state.sqlite');
+    let store = createCatalogFixtureStore({ databasePath, workspaceRoot: join(root, 'work') });
+    t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });
+    const executable = join(root, 'provider.mjs'), started = join(root, 'started');
+    await writeFile(executable, `#!/usr/bin/env node
+import {readFileSync,writeFileSync,existsSync} from 'node:fs';
+const system=readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file')+1],'utf8');
+const manager=JSON.parse(system.match(/可咨询角色：(.*)/)[1]).find(x=>x.kind==='manager').id;
+const scenario=${JSON.stringify(scenario)};let result;
+if(!existsSync(${JSON.stringify(started)})){
+ writeFileSync(${JSON.stringify(started)},'consulted');
+ result={consultation:{audience:'human',question:'请确认是否继续交付？'}};
+ if(scenario!=='missing')result.summary=scenario==='same'?'  请确认是否继续交付？  ':scenario==='empty'?'':'H3耗时108分钟，Seedance耗时15分钟。';
+}else if(system.includes('任务级项目经理'))result={summary:'已收到确认，提交人类验收。',managerDecision:{nextNodeId:null,nextAgentId:null}};
+else result={summary:'已收到确认，交回经理。',handoff:{recipientAgentId:manager}};
+console.log(JSON.stringify({type:'result',is_error:false,result:JSON.stringify(result)}));
+`, { mode: 0o700 });
+    for (const employee of store.listAgents()) store.updateAgent(employee.id, { runtime: { provider: 'claude-code', executable } });
+    const manager = store.listAgents().find(employee => employee.kind === 'manager');
+    const task = store.createTask({ title: '咨询报告保留', objective: '回答耗时后再向人类澄清。', memberAgentIds: [manager.id, 'agent_analyst'] });
+    const run = store.createRun(task.id);
+    const input = store.submitHumanMessage(run.id, { content: '两路视频分别用了多久？', ...(scenario === 'employee' ? { recipientAgentId: 'agent_analyst' } : {}) });
+    const options = { runFilesRoot: join(root, 'audit') };
+    await executeRun(store, run.id, options);
+    let workspace = store.getRunWorkspace(run.id);
+    assert.equal(workspace.run.status, 'awaiting_human');
+    assert.equal(workspace.pendingQuestions.length, 1);
+    const question = workspace.pendingQuestions[0];
+    const reports = workspace.messages.filter(message => message.content.includes('H3耗时108分钟'));
+    const distinct = ['manager', 'employee'].includes(scenario);
+    assert.equal(reports.length, distinct ? 1 : 0);
+    assert.equal(workspace.messages.length, distinct ? 3 : 2, 'no duplicate question, invented fallback or JSON envelope');
+    if (distinct) {
+      const report = reports[0];
+      assert.equal(report.sender.id, question.sender.id);
+      assert.equal(report.traceId, question.traceId);
+      assert.equal(report.startMessageId, question.startMessageId);
+      assert.ok(report.startMessageId);
+      assert.ok(workspace.messages.indexOf(report) < workspace.messages.findIndex(message => message.id === question.id));
+      assert.ok(collaborationRecords(store.getRunCollaboration(run.id, { limit: 20 }).workspace).some(row => row.content === report.content));
+    }
+    const parent = workspace.dispatches.find(delivery => delivery.waitingMessageId === question.id);
+    assert.equal(parent.status, 'waiting');
+    assert.equal(store.claimDispatch(run.id), null);
+    store.close(); store = createCatalogFixtureStore({ databasePath, workspaceRoot: join(root, 'work') });
+    assert.equal(store.getRunWorkspace(run.id).messages.filter(message => message.content.includes('H3耗时108分钟')).length, distinct ? 1 : 0);
+    const answer = store.answerQuestion(run.id, question.id, '继续交付', { type: 'human', id: 'human_operator', name: '你' });
+    assert.equal(answer.replyToMessageId, question.id);
+    await executeRun(store, run.id, options);
+    workspace = store.getRunWorkspace(run.id);
+    assert.equal(workspace.run.status, 'awaiting_acceptance');
+    assert.equal(workspace.pendingQuestions.length, 0);
+    assert.equal(workspace.messages.filter(message => message.content.includes('H3耗时108分钟')).length, distinct ? 1 : 0);
+    assert.ok(workspace.dispatches.every(delivery => ['done', 'cancelled'].includes(delivery.status)));
+    store.confirmRunCompletion(run.id); assert.equal(store.getRun(run.id).status, 'completed');
+    assert.equal(store.getRunMessage(run.id, input.message.id).content, '两路视频分别用了多久？');
   });
 }

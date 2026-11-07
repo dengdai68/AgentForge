@@ -975,6 +975,7 @@
     },
     {
       "id": "server.orchestrator",
+      "consultationReports": "Persist a distinct nonempty summary as a role Message before its consultation question in the same acceptance transaction. Both retain Trace/input links; empty, missing or identical summaries add no duplicate. Invalid routing rolls back coordination and preserves the report through existing correction handling. No historical console-to-Message backfill.",
       "collaborationReadability": "Role-to-role Messages only; no system, dispatch or lifecycle event rows. Explicit saved references associate delivery/history metadata. Trace.inputMessageId and Message.startMessageId identify each invocation prompt; one console link loads and focuses that prompt across pagination. Native member sessions remain isolated. Failed tasks reject new messages; manual retry resumes the failed member with transient continue input. CLI shares message records without visual metadata.",
       "collaborationFlow": "Role-to-role Messages only; no system, dispatch or lifecycle event rows. Explicit saved references associate delivery/history metadata. Trace.inputMessageId and Message.startMessageId identify each invocation prompt; one console link loads and focuses that prompt across pagination. Native member sessions remain isolated. Failed tasks reject new messages; manual retry resumes the failed member with transient continue input. CLI shares message records without visual metadata.",
       "instructionDependency": "server/prompts.mjs pure Task composition.",

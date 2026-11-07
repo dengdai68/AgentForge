@@ -128,3 +128,5 @@ PUT /api/runs/:id/members 经认证交给 Store 更新当前成员投影，不�
 派工协议：单人 nextNodeId/nextAgentId/instruction 与 assignments 共用 enqueueManagerAssignments。原子路由拒收只回滚投递/咨询/验收，实际报告与文件仍记录；rejectDispatchRouting 保存具体错误到原投递，允许一次原会话纠正，重复拒收失败并由人类继续。Provider 故障不走此纠正。合法验收遇到在途工作使用 deferredRevisit，领取须等待其他工作结束且不阻塞后续经理消息。
 
 首次保存快照内集合时先完整物化，不能把“脏日志为空”当成“集合已落盘”；实体/事件初始化标记与主快照删除数组同事务提交。`state-journal` 回归覆盖已有安装 ID 的冷启动与再次重启。
+
+同一轮包含 `summary` 与 `consultation` 时，先将非空且与问题正文不同的报告保存为普通角色 Message，再保存问题和等待关系；两条消息关联同一 Trace/本轮输入。缺少报告或正文与问题相同不另造消息，协调失败仍回滚路由并保留原报告；不从控制台补造旧 Message。
