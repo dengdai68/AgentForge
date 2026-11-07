@@ -1,118 +1,107 @@
 <div align="center">
   <img src="web/icons/application-ui.png" alt="AgentForge" width="88" />
-  <h1>AgentForge</h1>
-  <p><strong>为使用 AI 编程工具的独立开发者，把多个 AI 员工的分工、沟通和文件交付集中到一个本机工作台。</strong></p>
-  <p>A local AI team workspace powered by Claude Code, Codex and DeepSeek Harness.</p>
-  <p><a href="https://github.com/dengdai68/AgentForge/releases/tag/v0.1.6-beta.1">下载 macOS Beta</a> · <a href="docs/quickstart.md">第一次使用</a> · <a href="https://github.com/dengdai68/AgentForge/releases/latest">正式版</a> · <a href="https://github.com/dengdai68/AgentForge/issues">反馈问题</a></p>
+  <h1>AgentForge · AI Team OS</h1>
+  <p><strong>面向超级个体的 AI 团队操作系统：像定制虚拟员工一样配置 Agent，组织多 Agent 小组或团队，协作完成任务并交付真实文件。</strong></p>
+  <p>你负责目标与决策，让 AI 员工各司其职。</p>
+  <p>Claude Code · Codex · DeepSeek Harness</p>
+  <p><a href="https://github.com/dengdai68/AgentForge/releases/latest">下载 macOS 版</a> · <a href="#快速上手">快速上手</a> · <a href="#cli让-ai-团队接入你的工具链">CLI</a> · <a href="https://github.com/dengdai68/AgentForge/issues">反馈</a></p>
 </div>
 
-**macOS 13+ / Apple Silicon（M 系列） · Apache-2.0 开源 · 模型费用由所用 Provider 另计 · 需自行安装并授权至少一种模型 CLI。**
+从代码开发、调研分析到知识整理和内容生产，你可以为 Agent 定义职责、提示词、模型与工具，与单个虚拟员工交流，也可以组建团队共同执行任务。AgentForge 将成员、协作、执行记录和交付文件组织在同一个本机工作空间中。
 
-![AgentForge v0.1.6-beta.1 数字员工界面：为项目经理、资料分析师、内容编辑和独立审校分别配置职责与 Runtime](https://github.com/dengdai68/AgentForge/releases/download/v0.1.6-beta.1/agentforge-employees-preview-20261107.png)
+## 能做什么
 
-*v0.1.6-beta.1 的真实界面，展示隔离实例中的示例员工配置；不代表模型任务执行结果。*
-
-AgentForge 将 Claude Code、Codex 和 DeepSeek Harness 接入同一个协作空间，让拥有不同职责、提示词和工具的数字员工共同推进任务，并将沟通、执行过程、文件成果与变更记录关联起来。适合需要反复协调需求分析、实现、审校或内容交付的独立开发者与小团队。
-
-从需求分析、代码实现与测试，到知识整理、研究分析和内容生产，你可以按工作需要组织员工，选择工作流，或把重复工作配置为定时自动化。
-
-## 先试一次：把素材整理成发布说明
-
-1. 从 [v0.1.6-beta.1 下载页](https://github.com/dengdai68/AgentForge/releases/tag/v0.1.6-beta.1) 下载 DMG，拖入 Applications。也可从[正式版入口](https://github.com/dengdai68/AgentForge/releases/latest)选择稳定版本；下文以 Beta 为例。
-2. 首次打开创建本机管理员，在「设置」检查已安装、已授权的 Claude Code、Codex 或 DeepSeek Harness。无需部署服务器；目前没有在线体验版。
-3. 在「数字员工」创建一位项目经理和至少一位普通员工，选择可用 Runtime；也可先使用已有员工。
-4. 在「任务中心」新建任务，选入这些成员，描述素材、目标文件和要求，然后「保存并开始」。工作流可使用默认协作。
-5. 在协作记录查看交接，在工作目录打开实际文件，检查后由你确认普通任务完成。
-
-可直接复制的任务素材、员工提示词和故障排查见[第一次使用教程](docs/quickstart.md)。源码运行见 [CONTRIBUTING](CONTRIBUTING.md#安装与本机运行)。
-
-## 与现有用法有什么区别
-
-| 你现在的用法 | AgentForge 提供的具体变化 |
+| 能力 | 用法 |
 | --- | --- |
-| 打开多个 CLI 窗口，手动复制上下文、分配工作 | 在同一任务中选择经理与员工，用协作记录保留派工、交接和咨询；每位员工保留独立会话。 |
-| 用一个助手同时承担分析、实现和审校 | 分别配置员工职责、Runtime 和工具，由经理协调；可以混用已支持的模型 CLI。 |
-| 自己拼接脚本、定时器、文件目录和执行日志 | 在桌面界面管理周期任务，把每次执行与沟通、文件、CHANGE 和控制台关联起来。 |
+| 定制虚拟员工 | 配置职责、系统提示词、Runtime、模型和思考等级；用角色复用提示词、插件与 MCP。 |
+| 组织 AI 团队 | 保存常用团队，也可跨团队挑选成员；经理协调分工，不同员工并行执行、独立保留会话。 |
+| 任务中心 | 创建、保存草稿或启动任务，搜索与筛选进展，在同一任务里查看协作、控制台和工作目录。 |
+| 工作流 | 定义职责节点、交付要求与交接关系，让多 Agent 围绕同一个目标推进工作。 |
+| 私聊与群聊 | 与员工讨论需求，通过 @ 定向交流，上传图片和文件，在协作中补充指令或回答澄清。 |
+| 定时自动化 | 用 Cron 安排重复任务，独立记录每轮执行、触发状态和成果。 |
+| 工具与文件 | 为员工选择插件、Skill 和 MCP；预览、下载实际文件，通过 CHANGE 查看累计修改。 |
 
-这些差异描述产品的组织方式；实际质量、速度与费用取决于模型、任务和成员配置，没有性能提升承诺。
+## 快速上手
 
-## 支持范围、成本与当前限制
+```mermaid
+flowchart LR
+    A[定制员工与团队] --> B[描述目标并创建任务]
+    B --> C[经理协调与成员执行]
+    C --> D[任务中心查看协作与文件]
+    D --> E[检查成果并确认交付]
+```
 
-| 项目 | 当前情况 |
+1. **配置成员**：在「数字员工」设置各自的职责与 Runtime。创建任务时，从团队或员工中选择成员，保留一位可用项目经理。
+2. **创建任务**：填写目标、背景与可选验收标准，选择工作流或使用默认协作；可以先存草稿，也可以「保存并开始」。
+3. **跟进执行**：在任务中心查看派工和交接，回答澄清、追加指令；从「本轮控制台」查看对应执行。发生错误时，修复原因后可继续原员工会话。
+4. **检查交付**：直接打开工作目录中的文件与 CHANGE，核对成果后在客户端确认普通任务完成。
+
+<details>
+  <summary>查看任务创建界面</summary>
+  <p><img src="https://github.com/dengdai68/AgentForge/releases/download/v0.1.6-beta.1/agentforge-task-preview-20261107.png" alt="AgentForge 任务创建：填写目标、选择团队成员与工作流，保存草稿或开始执行" width="960" /></p>
+  <p>v0.1.6-beta.1 隔离实例的真实界面，展示示例任务草稿。</p>
+</details>
+
+想直接试一次，可以照着[第一次使用教程](docs/quickstart.md)，让编辑与审校协作整理一份产品发布说明。
+
+## CLI：让 AI 团队接入你的工具链
+
+数字员工、角色、团队、工作流、插件、MCP、Runtime、自动化，以及任务的创建、执行与查询，都可以通过 `agentforge` 操作。CLI 与 App 共用认证和业务规则，支持可读文本、JSON 输出及逐级帮助，适合接入脚本或交给其他 Agent 调用。
+
+| 命令组 | 主要命令 |
 | --- | --- |
-| 安装平台 | 发布包支持 macOS 13+ / Apple Silicon；尚无 Intel Mac、Windows 或 Linux 安装包。 |
-| 软件与模型费用 | 应用按 [Apache-2.0](LICENSE) 开源，不包含模型额度。所用 CLI 的订阅、API 和第三方工具费用由对应服务计收；多员工、多轮任务会增加调用量。 |
-| 本机与联网 | 应用自带本机服务，保存配置与任务记录；模型和远程工具调用仍可能把任务内容发送给相应 Provider。 |
-| 安装信任提示 | 当前安装包为 ad-hoc 签名，未做 Apple 公证；macOS 可能拦截。仅在确认来源可信后按系统设置允许打开，勿关闭系统安全保护。 |
-| 使用边界 | 当前为本机单管理员应用；员工以当前系统用户权限运行，不提供 Agent 沙箱或多租户隔离。 |
-| 版本与任务结果 | 开发迭代中，不承诺旧版本数据兼容；升级先读 Release 说明。普通任务的成果须由你检查并最终确认。 |
+| `agents` · `roles` · `teams` · `workflows` | `list` / `get` / `create` / `update` / `delete`，管理员工、角色、团队和工作流。 |
+| `plugins` | `list` / `get` / `import` / `delete`，以及 `updates` / `check-updates` / `auto-update`。 |
+| `mcps` | `list` / `get` / `create` / `update` / `delete`，管理 MCP 服务。 |
+| `runtimes` | `list` / `get` / `update` / `test` / `models`，配置和测试模型连接。 |
+| `automations` | `list` / `get` / `create` / `update` / `delete` / `trigger` / `triggers`。 |
+| `tasks` | `list` / `get` / `create` / `start` / `terminate` / `delete`；用 `progress` / `collaboration` / `artifacts` 查询，用 `members` / `message` / `questions` / `reply` 参与协作。 |
+| `auth` | `login` / `status` / `logout`，管理独立 CLI 会话；默认可复用已登录客户端的授权。 |
 
-## 从一个目标，到完整交付
+保持客户端运行并登录，即可在终端使用：
 
-描述目标 → 选择执行成员 → 经理协调与员工协作 → 查看过程与成果 → 确认交付。
+```bash
+agentforge help
+agentforge agents list --json
+agentforge schema tasks
+agentforge tasks create --file task.json --start
+agentforge tasks progress TASK_ID
+agentforge tasks collaboration TASK_ID
+```
 
-普通任务由经理开始推进，员工之间可以交接工作、提出问题并返回澄清结果。需要人类决策时，在协作记录中直接回答；发生错误时，从中断员工继续执行。任务中心将协作记录、工作目录和控制台放在同一任务空间中，便于掌握进展、核对成果和追溯过程。
+按 `schema tasks` 的字段与模板编写 `task.json`，成员 ID 可从 `agents list` 或 `teams list` 查询；将 `TASK_ID` 替换为创建返回的任务 ID。任意命令后加 `--help` 查看参数，脚本加 `--json` 获取结构化结果。首次找不到命令时，进入「设置 → 命令行 CLI」修复安装。
 
-## 一套工作台，组织完整的 AI 工作流程
+普通任务最终验收、私聊群聊、失败后的人工恢复及当前文件浏览仍在客户端完成。完整用法见 [CLI 指南](docs/21-configuration-cli.md)。
 
-| 能力 | 可以完成的工作 |
-| --- | --- |
-| 数字员工与角色 | 为员工配置职责、工作提示词、模型、思考等级、插件和 MCP；复用多个角色的共同能力。 |
-| 团队与工作流 | 组织可复用的团队，组合跨团队成员，通过可选工作流定义协作流程与交接关系。 |
-| 任务中心 | 创建与启动任务，按名称、状态和工作流查找，查看协作、执行控制台与文件成果。 |
-| 定时自动化 | 使用 Cron 周期性创建并执行独立任务，在专属触发记录中查看每次执行。 |
-| 私聊与群聊 | 与单个员工讨论，或在群聊中通过 @ 发起定向交流，支持附件和员工间追问。 |
-| 插件与 MCP | 导入和管理能力扩展，为不同员工选择所需工具，并查看 Runtime 兼容情况。 |
-| 工作目录与 CHANGE | 浏览、预览和下载实际文件，比较初始基准与当前成果，包括已提交的代码修改。 |
-| 命令行 CLI | 通过终端管理配置、创建任务、查询进展与执行记录，接入自己的脚本工作流。 |
+## 安装
 
-## 数字员工：职责、模型与工具自由组合
+当前安装包支持 **macOS 13+ / Apple Silicon（M 系列）**。
 
-每位数字员工拥有独立身份、简介和工作提示词，可以绑定多个角色，共享专业指令、插件与 MCP，也可以选择不同 Runtime、模型和思考等级。
+1. 从 [GitHub Releases](https://github.com/dengdai68/AgentForge/releases/latest) 下载 DMG，将 **AgentForge** 拖入 **Applications**。
+2. 当前版本采用 ad-hoc 签名，尚无 Developer ID 签名和 Apple 公证。如果 macOS 提示无法验证或应用已损坏，确认下载来源可信后，在终端执行：
 
-- **多 Runtime 协作**：在同一应用中管理 Claude Code、Codex 与 DeepSeek Harness 员工。
-- **按员工配置能力**：分别选择插件、Skill 与 MCP，避免把所有工具堆给每个员工。
-- **角色复用**：将通用职责、插件和 MCP 维护为角色，再组合到不同员工身上；员工自己的扩展选择独立保留。
-- **团队复用**：按场景组织团队，创建任务时选择团队或独立成员。
-- **执行配置快照**：保留任务开始时的成员与配置事实，让历史记录能够被准确追溯。
+   ```bash
+   sudo xattr -dr com.apple.quarantine "/Applications/AgentForge.app"
+   ```
 
-## 协作执行：交接有上下文，过程可追踪
+   此命令只移除该应用的隔离属性，随后重新打开应用。
+3. 首次打开创建本机管理员，在设置中检查 Runtime 和工作目录。提前安装并授权至少一种 **Claude Code、Codex 或 DeepSeek Harness**，即可配置员工并开始使用。
 
-经理根据目标推进工作，员工通过协作消息交接、咨询与反馈；每位参与者保留自己的执行会话。
+应用自带本机服务，无需部署服务器。软件按 Apache-2.0 开源，模型订阅、API 和第三方工具费用另计。目前为本机单管理员应用，员工以当前系统用户权限执行，不提供 Agent 沙箱；模型调用仍会连接对应服务。尚无 Intel Mac、Windows 或 Linux 安装包。
 
-- **并行分工**：经理可同时安排多位员工执行独立工作，部分结果返回后即可推进后续步骤；同一员工的对话按队列处理。
-- **员工间澄清**：把问题交给具体员工，答复后继续原来的工作。
-- **人类参与**：普通任务支持回答澄清、补充指令与最终确认。
-- **中断续接**：错误重试继续原失败员工的工作，保留已有上下文和执行记录。
-- **空闲巡检**：进行中的任务如果没有员工执行，由经理结合当前记录接续推进。
-- **协作直达控制台**：从一条协作记录定位到对应轮次的输入，查看提示词、输出、工具活动和错误诊断。
+## 从源码启动
 
-## 自动化：把重复工作变成周期性执行
+需要 **Node.js 22.12+（推荐 Node 24）**、npm 和 Git：
 
-预先定义目标、执行成员、可选工作流和 Cron 表达式，按当地时间定时生成任务。每次执行拥有独立任务、工作目录和完整过程记录。
+```bash
+git clone https://github.com/dengdai68/AgentForge.git
+cd AgentForge
+npm ci
+npm start
+```
 
-自动化任务集中在自动化入口，普通任务中心保持清晰。触发记录支持分页，展示任务标题、计划时间、触发方式与状态；已创建任务始终可以进入完整详情。任务名称包含具体触发时间，便于区分每一轮结果。
-
-自动化采用无需人类澄清或交接的协作方式；下一轮实际启动前自动确认上一轮待验收结果。执行中的任务不会被重复触发覆盖，异常与跳过原因保留在记录中。
-
-## 沟通：让讨论发生在同一个上下文里
-
-一对一交流用于了解能力、讨论需求和答疑；群聊支持多位员工共同参与、附件共享和 @ 定向提问。员工之间的明确 @ 会产生后续投递，接收方正在回复时进入其队列，按顺序继续交流。
-
-从成员列表可以查看员工简介、工作提示词和个人控制台；需要实际交付时，将目标放入任务中心推进。
-
-## 文件与差异：看见真正完成的工作
-
-每个任务拥有实际工作目录。当前文件与 CHANGE 共用目录结构，支持文件预览、下载、单页差异、左右对比及全文查看。
-
-对于任务中克隆的代码仓库，工具执行 Hook 会登记可信的克隆初始基准。即使员工已经提交代码，CHANGE 仍能展示相对初始基准的累计变化；多仓库按各自基准比较。历史交付文件、执行记录与当前文件关联保留，便于复核产出。
-
-## 扩展与 CLI：融入现有工具链
-
-插件市场支持导入 Claude Code / Codex 来源的插件，管理 Skill、Hook、Subagent 等组件，并按 Runtime 展示可用性；MCP 支持 stdio、HTTP 与 SSE 工具服务。员工只绑定选中的扩展，运行中的冻结配置与后续配置变更分开保存。
-
-App 与 CLI 共用认证服务和业务规则。团队、工作流、数字员工、角色、MCP、插件管理与任务创建提供等价业务能力；CLI 支持逐级帮助、可读文本和 JSON 输出，并覆盖自动化配置、执行查询和任务协作操作。普通任务的最终验收在客户端完成。
+`npm start` 启动 Electron 及其自有随机端口后台；`npm run dev` 使用相同入口。源码 CLI 使用 `npm run cli -- help`。更多开发与构建说明见 [CONTRIBUTING](CONTRIBUTING.md)。
 
 ---
 
-采用 [Apache-2.0](LICENSE) 许可证；第三方资源声明见 [NOTICE](NOTICE)。
+[使用文档](docs/README.md) · [更新记录](CHANGELOG.md) · [Apache-2.0](LICENSE) · [第三方声明](NOTICE)

@@ -1,6 +1,6 @@
 # 代码导航
 
-仓库更名为 `dengdai68/AgentForge`：应用更新 API、严格附件来源、设置 GitHub 链接与打包发布配置使用新地址；应用身份、数据目录和 CLI 业务协议保持不变。README 提供产品定位、真实配置界面、下载入口、区别和成本/限制；首次体验见 docs/quickstart.md，源码安装/开发入口见 CONTRIBUTING。首轮中文推广成稿见 docs/development/promotion-kit.md；不改变 App/CLI/HTTP/Store 契约。
+仓库更名为 `dengdai68/AgentForge`：应用更新 API、严格附件来源、设置 GitHub 链接与打包发布配置使用新地址；应用身份、数据目录和 CLI 业务协议保持不变。README 面向超级个体介绍 AI Team OS，依次提供能力概览、任务主流程图、CLI 命令目录、macOS 安装和源码启动；首次体验见 docs/quickstart.md，详细开发入口见 CONTRIBUTING。首轮中文推广成稿见 docs/development/promotion-kit.md；不改变 App/CLI/HTTP/Store 契约。
 
 GitHub 发布入口：`.codex/skills/agentforge-release/SKILL.md`；默认 Beta、正式版补丁递增、仅正式版显式打 tag，以及版本标题/简洁说明规则由该 skill 定义。现有旧 CI 发布入口的差异在 skill 中列明。
 
