@@ -46,9 +46,9 @@ AgentForge 尝试把这部分工作放进同一个本机工作台：为数字员
 
 目前接入 Claude Code、Codex 和 DeepSeek Harness。除了任务协作，也支持员工私聊/群聊、插件与 MCP、Cron 自动化，以及配置和任务操作的 CLI。普通任务最终由人来检查和确认。
 
-![AgentForge 数字员工配置界面](https://github.com/dengdai68/AgentForge/releases/download/v0.1.6-beta.1/agentforge-employees-preview-20261107.png)
+![AgentForge 数字员工配置界面](../media/employees.png)
 
-上图是 v0.1.6-beta.1 隔离实例的真实配置界面，展示示例员工，不是模型已经完成任务的效果图；功能以对应 Release 说明为准。
+上图是 v0.1.6 隔离实例的真实员工界面，展示示例员工，不是模型已经完成任务的效果图；功能以对应 Release 说明为准。
 
 第一次建议用一个小任务试：给出几条产品素材，让编辑生成 `release-note.md`，审校生成 `review.md`，最后自己打开文件核对。我整理了可直接复制的素材和员工提示词：
 
@@ -131,9 +131,9 @@ Markdown 导出。仅提供 macOS 测试版，价格尚未确定。
 
 加入经理、资料分析师、编辑和审校，流程使用默认协作。暂不调用模型时点击「保存草稿」，准备开始时选择「保存并开始」。
 
-![Beta 任务创建界面：示例素材与成员选择](https://github.com/dengdai68/AgentForge/releases/download/v0.1.6-beta.1/agentforge-task-preview-20261107.png)
+![任务创建界面：示例素材与成员选择](../media/task-create.png)
 
-这张图展示输入方式，不是任务已经执行成功的证据。截图版本为 v0.1.6-beta.1。
+这张图展示输入方式，不是任务已经执行成功的证据。截图版本为 v0.1.6。
 
 ### 检查过程和实际文件
 
