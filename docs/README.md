@@ -7,7 +7,7 @@
 | 产品 | [功能与协作方式](01-product-requirements.md) |
 | 架构 | [系统分层](02-system-architecture.md)、[领域模型](03-domain-model.md)、[性能架构决策](28-performance-architecture.md) |
 | 界面 | [设计约定](06-design-system.md) |
-| 存储 | [SQLite](07-sqlite-persistence.md)、[文件与 Diff](13-local-artifact-rendering.md) |
+| 存储 | [SQLite](07-sqlite-persistence.md)、[文件与 Diff](13-local-artifact-rendering.md)、[统一数据根与目录事务](30-storage-layout.md) |
 | 运行 | [本机 Runtime](08-real-local-agent-runtime.md)、[员工配置](15-employee-runtime-configuration.md) |
 | 提示词 | [每次员工调用、澄清与新指令的组装逻辑](22-prompt-assembly.md) |
 | 登录 | [认证与会话](14-console-authentication.md) |
@@ -25,3 +25,7 @@
 - [自动化](27-automations.md)：定时配置、触发历史、全自动协作、分页和下一轮自动确认；含 Cron 依赖架构决策。
 
 - [29：多 Runtime 原生 CLI 接入](29-runtime-providers.md)：九项目录、会话及原生适配能力边界。
+
+提示词原文对照：[当前安装版逐字导出](development/current-prompt-wording-export.md)。固定文案来自真实组装函数，并核对安装包源码；仅身份配置、消息和路径等动态数据使用 mock，未执行示例任务。
+
+待实施设计：[团队共享协作记录与分层提示词方案](development/prompt-assembly-and-shared-collaboration-design.md)。分别提供 Leader、成员、自动化、私聊和群聊的完整 systemPrompt 与每轮 userPrompt，另列响应协议和模型回复。固定文案是拟实施全文，动态数据使用 mock；尚未修改运行逻辑，不与上方当前行为混用。

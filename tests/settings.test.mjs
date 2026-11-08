@@ -42,16 +42,15 @@ test('task console defaults to the latest executed known member, not the last fi
   assert.equal(select(agents,[{agentId:'manager',startedAt:'2026-10-02'},{agentId:'worker',startedAt:'2026-10-03',status:'running'}]),'worker');
   assert.match(source,/if \(!consoleAgents.some\(\(agent\) => agent.id === state.selectedAgentId\)\) state.selectedAgentId = tab === 'console' \? latestExecutedAgentId/);
 });
-test('workspace HTTP save creates missing directories, preserves existing files and never persists invalid paths',async t=>{
-  await mkdir('.data',{recursive:true});const root=await mkdtemp(resolve('.data/workspace-create-'));t.after(()=>rm(root,{recursive:true,force:true}));
+test('storage HTTP validates before its single restart request and refuses busy writes',async t=>{
+  const {validateStorageDestination}=await import('../server/storage-layout.mjs');
+  await mkdir('.data',{recursive:true});const root=await mkdtemp(resolve('.data/storage-route-'));t.after(()=>rm(root,{recursive:true,force:true}));const data=join(root,'source');await mkdir(data);
   const source=await readFile(new URL('../server/index.mjs',import.meta.url),'utf8'),start=source.indexOf('  if (pathname === "/api/settings/workspace" && request.method === "PUT")'),end=source.indexOf('  // CLI paths',start);
-  let saved=null,writes=0;
-  async function save(workspaceRoot){let result;await runWithCache(`(async()=>{${source.slice(start,end)}})()`,{pathname:'/api/settings/workspace',request:{method:'PUT'},response:{},readJson:async()=>({workspaceRoot}),isAbsolute,normalize,parse,mkdir,realpath,stat,access,constants,version:'test',store:{updateWorkspaceSettings(input){saved=input.workspaceRoot;writes++;return input;}},sendJson(response,status,value){assert.equal(status,200);result=value;}});return result;}
-  for(const invalid of ['/',root+'/../'.repeat(root.split('/').length),'relative','',null,'/bad\0path'])await assert.rejects(save(invalid));
-  assert.equal(writes,0);
-  const target=join(root,'任务 根','nested');assert.equal((await save(target)).workspaceRoot,await realpath(target));assert.equal((await stat(target)).isDirectory(),true);
-  await writeFile(join(target,'keep.txt'),'keep');await save(target);assert.equal(await readFile(join(target,'keep.txt'),'utf8'),'keep');
-  const blocker=join(root,'file');await writeFile(blocker,'file');await assert.rejects(save(join(blocker,'child')),error=>/目录无法创建/.test(error.message)&&Boolean(error.cause));assert.equal(saved,await realpath(target));assert.equal(writes,2);
+  const requests=[];let busy=false;
+  async function save(workspaceRoot){let result,finish;await runWithCache(`(async()=>{${source.slice(start,end)}})()`,{pathname:'/api/settings/workspace',request:{method:'PUT'},response:{once(event,callback){assert.equal(event,'finish');finish=callback;}},readJson:async()=>({workspaceRoot}),version:'test',validateStorageDestination,storage:{dataRoot:data,controlRoot:data},updateRestartLease:null,resettingData:false,writeRequests:1,runtimeTestActive:false,taskDeletionLocks:new Set(),pluginUpdates:{status:()=>({running:false})},communications:{isActive:()=>false},store:{pendingCommunications:()=>[],listPatrolRunIds:()=>busy?['active']:[],listRecoveryRunIds:()=>[]},hasActiveExecution:()=>false,randomUUID:()=> 'lease',process:{env:{},send:value=>requests.push(value)},sendJson(response,status,value){result={status,value};}});finish?.();return result;}
+  for(const invalid of ['/',root+'/../'.repeat(root.split('/').length),'relative','',null,'/bad\0path'])await assert.rejects(save(invalid));assert.equal(requests.length,0);
+  const target=join(root,'任务 根');const result=await save(target);assert.equal(result.status,200);assert.equal(result.value.restarting,true);assert.equal(requests.length,1);assert.equal(requests[0].workspaceRoot,await realpath(target));
+  await writeFile(join(target,'keep.txt'),'keep');busy=true;assert.equal((await save(target)).status,409);assert.equal(requests.length,1);assert.equal(await readFile(join(target,'keep.txt'),'utf8'),'keep');
 });
 test('collaboration aligns by sender, never by the human recipient or human filter',async()=>{
   const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8'),start=source.indexOf('function renderCollaboration('),end=source.indexOf('/* ---------- 任务空间数据与动作',start),dock={querySelector(){return null;}};
@@ -584,7 +583,7 @@ test("workspace settings persist and affect only new Tasks with atomic audit", a
   const nextRoot = join(directory, "new");
   store.updateWorkspaceSettings({ workspaceRoot: nextRoot });
   const next = store.createTask(input);
-  assert.equal(next.workspacePath, join(nextRoot, next.id));
+  assert.equal(next.workspacePath, join(nextRoot, "tasks", next.id));
   assert.equal(store.snapshot().tasks.find(t => t.id === old.id).workspacePath, old.workspacePath);
   assert.equal(store.listRuns().find(r => r.id === run.id).workspacePath, run.workspacePath);
   const restored = createStore({ databasePath, workspaceRoot: join(directory, "other-startup-default") });
@@ -1013,3 +1012,5 @@ test("thinking hydration displays recorded public text and explains empty histor
 });
 
 function runWithCache(source,context={},...options){context.ByteCache=ByteCache;context.runtimeLabel=runtimeLabel;context.RUNTIME_IDS=RUNTIME_IDS;return vm.runInNewContext(source,context,...options);}
+
+test('work-root reset preserves presentation preferences and reloads the retained login',async()=>{const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8');const callback=source.slice(source.indexOf('onDataReset:'),source.indexOf('onWorkspaceSaved:'));assert.doesNotMatch(callback,/removeItem|clear\(/);assert.match(callback,/location.replace/);});

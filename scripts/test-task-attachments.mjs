@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated task attachment UI/HTTP/CLI acceptance; REAL=1 uses the operator's configured Claude account read-only.
 import assert from 'node:assert/strict';
 import {_electron as electron} from 'playwright-core';
@@ -12,7 +13,7 @@ import {createMarketplace} from '../server/runtime/marketplace.mjs';
 const real=process.env.AGENTFORGE_ATTACHMENTS_REAL==='1';
 await mkdir('.data',{recursive:true});const root=await mkdtemp(resolve('.data/task-attachments-')),home=join(root,'home'),data=join(root,'client');await mkdir(home,{recursive:true});
 const auth=createAuth({databasePath:join(data,'auth.sqlite')}),password=randomBytes(20).toString('hex');await auth.setAdministrator('attachments-qa',password);auth.close();
-const store=createCatalogFixtureStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});store.updateWorkspaceSettings({workspaceRoot:join(root,'work')});store.setPluginUpdateSettings({enabled:false});
+const store=createCatalogFixtureStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});store.updateWorkspaceSettings({workspaceRoot:join(root,'work')});store.setPluginUpdateSettings({enabled:false});
 store.updateAgent('system_project_manager',{systemPrompt:'你是附件验收经理。先向人类 consultation audience=human 索取一张图片和一个文本文件。得到回复后，必须实际读取消息 attachments 中的绝对路径，回复文本中的验证串以及图片内容描述；不要派工，不要再次询问，使用 managerDecision nextNodeId:null,nextAgentId:null 提交验收。'});
 let roleProof;
 if(real && process.env.AGENTFORGE_ROLE_EXTENSIONS_REAL==='1') {
@@ -33,6 +34,7 @@ for(const name of real?['真实附件']:['附件 minimal','附件 warm','CLI附�
 store.close();
 const imageBytes=await readFile('web/icons/application.png'),marker='ATTACHMENT_'+randomBytes(12).toString('hex'),fileBytes=Buffer.from('文件验证串：'+marker+'\n');
 await writeFile(join(root,'binary.png'),imageBytes);
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,...(real?{CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude')} :{}),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:180000});
 const evidence={root,real,cases:[]};console.log('EVIDENCE '+root);
 try{

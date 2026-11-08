@@ -1,23 +1,26 @@
-// Persistent data paths for the Electron-owned local service. Mutable state lives
-// under per-instance subdirectories of ~/.agentforge; explicit environment
-// overrides and saved settings always win over these defaults.
+// Persistent data paths for the Electron-owned local service. Business data lives
+// on the configured workspace volume; local authentication and startup state stay
+// in the private home directory. Explicit host environment paths take precedence.
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { lstat } from "node:fs/promises";
+import {storageBusinessRoot} from './storage-layout.mjs';
 
 export function agentforgeDataHome(home = homedir()) { return join(home, ".agentforge"); }
 export function desktopServiceDataRoot(home = homedir()) { return join(agentforgeDataHome(home), "desktop"); }
-export function defaultTaskWorkspaceRoot(home = homedir()) { return join(home, "agentforge"); }
+export function defaultTaskWorkspaceRoot(home = homedir()) { return join(agentforgeDataHome(home), "workspace"); }
 
 export function desktopServiceStoragePaths({ home = homedir(), env = process.env } = {}) {
-  const dataRoot = desktopServiceDataRoot(home);
+  const controlRoot = env.AGENTFORGE_DESKTOP_CONTROL_ROOT || desktopServiceDataRoot(home);
+  const workspaceRoot=env.AGENTFORGE_WORKSPACE_ROOT || defaultTaskWorkspaceRoot(home);
+  const dataRoot = env.AGENTFORGE_DB_PATH?resolve(env.AGENTFORGE_DB_PATH,'..'):storageBusinessRoot(workspaceRoot);
   return {
     dataRoot,
     databasePath: env.AGENTFORGE_DB_PATH || join(dataRoot, "agentforge.sqlite"),
-    authDatabasePath: env.AGENTFORGE_AUTH_DB_PATH || join(dataRoot, "auth.sqlite"),
-    runFilesRoot: env.AGENTFORGE_RUN_FILES_ROOT || join(dataRoot, "agentforge-runs"),
-    runtimeConfigRoot: env.AGENTFORGE_RUNTIME_CONFIG_ROOT || join(dataRoot, "runtime-configs"),
-    workspaceRoot: env.AGENTFORGE_WORKSPACE_ROOT || defaultTaskWorkspaceRoot(home)
+    authDatabasePath: env.AGENTFORGE_AUTH_DB_PATH || join(controlRoot, "auth.sqlite"),
+    runFilesRoot: env.AGENTFORGE_RUN_FILES_ROOT || dataRoot,
+    runtimeConfigRoot: env.AGENTFORGE_RUNTIME_CONFIG_ROOT || join(controlRoot, "runtime-configs"),
+    workspaceRoot,controlRoot,credentialsRoot:env.AGENTFORGE_CREDENTIALS_ROOT || join(controlRoot,'credentials')
   };
 }
 

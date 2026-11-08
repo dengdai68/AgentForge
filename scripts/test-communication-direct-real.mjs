@@ -17,7 +17,7 @@ Object.assign(process.env,await loadLoginShellEnvironment());
 await mkdir('.data',{recursive:true});const resume=process.env.AGENTFORGE_DIRECT_COMMUNICATION_RESUME;const root=resume?resolve(resume):await mkdtemp(resolve('.data/direct-communication-real-'));
 assert.ok(root.startsWith(resolve('.data/direct-communication-real-')),'resume only isolated evidence data');
 process.env.AGENTFORGE_LOG_DIR=join(root,'logs');process.env.AGENTFORGE_RUNTIME_CONFIG_ROOT=join(root,'runtime');
-const store=createStore({databasePath:join(root,'state.sqlite')}),files=createRunFiles({root:join(root,'files')}),chatRoot=join(root,'communications');
+const store=createStore({databasePath:join(root,'state.sqlite')}),files=createRunFiles({root:join(root,'files'),communicationsRoot:join(root,'communications'),resolveCommunicationWorkspace:key=>store.getCommunicationWorkspace(key)}),chatRoot=join(root,'communications');
 const evidence={root,cases:[]},versions={};console.log('EVIDENCE '+root);
 const oldSchema={type:'object',additionalProperties:false,properties:{reply:{type:'string'},handoffToAgentId:{type:['string','null']}},required:['reply','handoffToAgentId']};
 const schemaPath=join(root,'legacy-response-schema.json');await writeFile(schemaPath,JSON.stringify(oldSchema),{mode:0o600});

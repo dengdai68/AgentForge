@@ -161,7 +161,7 @@ test('a malformed consultation inside managerDecision cannot request human accep
   } finally {store.close();}
 });
 
-test("a team message reaches the next real subprocess without broadcasting or leaking a private message", async (t) => {
+test("public Run messages reach the next real subprocess without waking background recipients", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "af-team-context-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const executable = join(root, "provider.mjs"), capture = join(root, "prompt.txt");
@@ -183,13 +183,13 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(result) }));
   const run = store.createRun(task.id);
   store.updateRun(run.id, { status: "running" }); store.setTaskStatus(task.id, "running");
   const shared = store.addMessage({ runId: run.id, sender: { type: "agent", id: run.manager.id, name: run.manager.name }, content: "TEAM_SHARED_SENTINEL", kind: "manager_decision" });
-  store.addMessage({ runId: run.id, sender: { type: "agent", id: run.manager.id, name: run.manager.name }, recipientAgentId: "agent_tester", content: "PRIVATE_TESTER_SENTINEL", kind: "instruction" });
+  store.addMessage({ runId: run.id, sender: { type: "agent", id: run.manager.id, name: run.manager.name }, recipientAgentId: "agent_tester", content: "DIRECTED_TESTER_SENTINEL", kind: "instruction" });
   assert.equal(store.listDispatches(run.id).length, 0, "broadcast creates no deliveries");
   store.enqueueDispatch(run.id, { recipientAgentId: "agent_analyst", workflowNodeId: "requirements", purpose: "node", messageIds: [], dedupeKey: "next-real-work" });
   await executeRun(store, run.id, { runFilesRoot: join(root, "audit") });
   const prompt = await (await import("node:fs/promises")).readFile(capture, "utf8");
   assert.match(prompt, /TEAM_SHARED_SENTINEL/);
-  assert.doesNotMatch(prompt, /PRIVATE_TESTER_SENTINEL/);
+  assert.match(prompt, /DIRECTED_TESTER_SENTINEL/);
   assert.equal(store.getRunWorkspace(run.id).traces.filter((trace) => trace.agentId === "agent_tester").length, 0);
   assert.equal(store.getRun(run.id).status, "awaiting_human");
   assert.equal(store.getRunWorkspace(run.id).messages.find((message) => message.id === shared.id).recipient.type, "team");

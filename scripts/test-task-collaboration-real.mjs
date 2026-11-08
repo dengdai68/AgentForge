@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Real Claude task, isolated Electron data, deliberate first worker process failure.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -32,7 +33,8 @@ p.on('exit',code=>{if(worker&&code===0&&!existsSync(${JSON.stringify(join(root,'
 const quote=v=>"'"+v.replaceAll("'","'\\''")+"'";
 for(const name of ['.zprofile','.zshrc'])await writeFile(join(home,name),'export PATH='+quote(root)+':"$PATH"\n');
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('retry-qa',password);auth.close();
-const seed=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});seed.updateWorkspaceSettings({workspaceRoot:join(root,'work')});const profileId=seed.listRuntimeProfiles().find(p=>p.provider==='claude-code').id;seed.close();
+const seed=createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});seed.updateWorkspaceSettings({workspaceRoot:join(root,'work')});const profileId=seed.listRuntimeProfiles().find(p=>p.provider==='claude-code').id;seed.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude'),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:180000});
 console.log('EVIDENCE '+root);const evidence={root,realModel:true,injectedFailure:'worker process exits 1 after first successful real turn'};
 try{
@@ -55,7 +57,7 @@ try{
  const failed=alreadyResumed?{...current,traces:current.traces.slice(0,current.traces.findIndex(t=>t.id===previous.failedTraceId)+1)}:await wait('worker failure',async()=>{const w=await workspace();return w.run.status==='failed'?w:null;});
  assert.ok(failed.events.some(e=>e.type==='run.routing_incomplete'&&e.data.correctionScheduled));
  const managerTraces=failed.traces.filter(t=>t.agentId===run.manager.id);assert.equal(managerTraces[0].status,'failed');assert.match(managerTraces[0].error,/缺少 managerDecision/);assert.equal(managerTraces[1].dispatchId,managerTraces[0].dispatchId);assert.equal(managerTraces[1].providerSessionId,managerTraces[0].providerSessionId);
- const managerResult=JSON.parse(await readFile(join(data,'agentforge-runs','runs',run.id,'traces',managerTraces[1].id,'internal','accepted-node-result.json'),'utf8'));assert.equal(managerResult.managerDecision.nextAgentId,worker.id);assert.match(managerResult.managerDecision.instruction,/add/);
+ const managerResult=JSON.parse(await readFile(join(root,'work','records','runs',run.id,'traces',managerTraces[1].id,'internal','accepted-node-result.json'),'utf8'));assert.equal(managerResult.managerDecision.nextAgentId,worker.id);assert.match(managerResult.managerDecision.instruction,/add/);
  const directed=failed.messages.find(m=>m.kind==='handoff'&&m.sender.id===run.manager.id&&m.recipient.id===worker.id);assert.equal(directed.content,managerResult.managerDecision.instruction);assert.ok(failed.traces.filter(t=>t.agentId===run.manager.id).length>=2);
  const failure=failed.traces.at(-1);assert.equal(failure.agentId,worker.id);assert.match(failure.error,/token expired/);assert.ok(failure.providerSessionId);const dispatchId=failure.dispatchId;
  evidence.failedTraceId=failure.id;evidence.sessionId=failure.providerSessionId;

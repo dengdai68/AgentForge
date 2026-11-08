@@ -39,7 +39,8 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (operation === 'login') allowed.push('username', 'password-stdin');
   } else {
     if (!Object.hasOwn(resources, group) || !resources[group].operations.includes(operation)) throw usage('不存在此配置命令');
-    if (['get', 'update', 'delete', 'test', 'start', 'terminate', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers', 'members', 'tools', 'check-compatibility'].includes(operation)) { if (args.length !== 3 || !(group === 'runtimes' && Object.values(RUNTIME_PROVIDERS).some(item=>item.label===id)) && !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw usage('需要精确资源ID，不能使用名称或路径'); }
+    if(group==='storage'){if(args.length!==2)throw usage('storage 不接受资源 ID');}
+    else if (['get', 'update', 'delete', 'test', 'start', 'terminate', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers', 'members', 'tools', 'check-compatibility'].includes(operation)) { if (args.length !== 3 || !(group === 'runtimes' && Object.values(RUNTIME_PROVIDERS).some(item=>item.label===id)) && !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw usage('需要精确资源ID，不能使用名称或路径'); }
     else if (operation === 'models') { if (args.length !== 3 || !RUNTIME_IDS.includes(id)) throw usage('models 需要已支持的 Provider ID'); }
     else if (args.length !== 2) throw usage('此命令不接受额外参数');
     if (['create', 'update', 'import', 'auto-update'].includes(operation)) allowed.push('file');
@@ -78,6 +79,11 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     const query=(flags.search || '').trim().toLowerCase(),tools=result.tools.filter(tool=>`${tool.name} ${tool.title || ''} ${tool.description}`.toLowerCase().includes(query));
     const totalPages=Math.max(1,Math.ceil(tools.length/20)),current=Math.min(page,totalPages);
     return {...result,tools:flags.all?tools:tools.slice((current-1)*20,current*20),total:tools.length,availableTotal:result.total,page:flags.all?null:current,pageSize:flags.all?null:20,totalPages,hasMore:!flags.all&&current<totalPages};
+  }
+  if(group==='storage'){
+    if(operation==='get')return client.request(resources.storage.path);
+    const input=await readInput(flags.file,stdin);validateInput(input,resources.storage.schema);
+    return client.request(resources.storage.path,{method:'PUT',body:input});
   }
   if (group === 'automations') return executeAutomationCommand(client, operation, id, flags, page, stdin);
   if (group === 'tasks') return executeTaskCommand(client, operation, id, flags, page, stdin);

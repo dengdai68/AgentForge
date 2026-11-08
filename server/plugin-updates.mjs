@@ -63,8 +63,9 @@ export function createPluginUpdates({getStore,marketplace,probe=remotePluginRevi
         result.updatedPlugins+=receipt.plugins.length;result.updates.push(...receipt.plugins);
         diagnostic('plugins.updated',{source:group.url,...receipt});
       }catch(error){
+        if(error.committed)committed=true;
         diagnostic('plugins.update_failed',{source:group.url,error});
-        if(!signal.aborted)result.errors.push({source:group.url,message:'更新未应用，当前版本保留；详情见本机日志'});
+        if(!signal.aborted)result.errors.push({source:group.url,message:error.committed?'更新已提交但配置发布未完成，请修复目录后重启恢复':'更新未应用，当前版本保留；详情见本机日志'});
       }finally{
         if(candidates && !committed && getStore()===store)for(const item of candidates.plugins){
           try{store.removeExtension({kind:'plugin',id:item.id,name:item.name},{type:'system',id:'plugin-updater',name:'插件更新'});}catch(error){diagnostic('plugins.candidate_cleanup_failed',{error});}

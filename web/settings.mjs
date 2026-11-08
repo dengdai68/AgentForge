@@ -190,6 +190,7 @@ export function createPluginUpdateSettingsUI(panel, api) {
 }
 
 export function createSettingsUI({ api, notify, navigate, getPreferences, updatePreferences, clearInvalid, setInvalid, onWorkspaceSaved = () => {}, openModal, closeModal, confirmDialog, onDataReset, onResetStarted = () => {}, onResetFailed = () => {} }) {
+  let workspaceLocation = null;
   let root = null, repositoriesLoaded = false, workspaceLoaded = false, runtimeLoaded = false;
   let logRequest = 0, currentPage = null;
   let closePreferenceUI = null, cliInstallationUI = null, pluginUpdateUI = null, appUpdateUI = null;
@@ -200,7 +201,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
     if (currentPage === "updates") void appUpdateUI?.refresh();
   };
   function confirmDataReset() {
-    openModal(`<h2>清除所有数据</h2><p class="modal-intro">永久删除此工作区的账号、任务与沟通记录、数字员工、团队、工作流、Runtime 与扩展配置、仓库 Token、交付文件及系统创建的任务目录。清除后重新设置管理员。</p><p class="settings-note">外部已有项目目录、工作根目录及本机 Claude Code / Codex / DeepSeek Harness 登录与会话保留。请先停止正在执行的任务和沟通。此操作无法撤销。</p><form id="reset-data-form"><div class="form-field"><label for="reset-current-password">当前密码</label><input id="reset-current-password" name="password" type="password" autocomplete="current-password" required /></div><div class="form-field"><label for="reset-confirmation">输入「清除所有数据」确认</label><input id="reset-confirmation" name="confirmation" autocomplete="off" required /></div><p data-reset-error role="alert"></p><div class="form-actions"><button class="ghost-button" type="button" data-cancel-reset>取消</button><button class="danger-button" type="submit" disabled>清除并重新开始</button></div></form>`);
+    openModal(`<h2>清除所有数据</h2><p class="modal-intro">永久删除整个当前工作目录 <code>${escape(workspaceLocation || "请先确认工作目录")}</code>，包括任务与沟通记录、数字员工、角色、团队、工作流、自动化、执行记录和该目录中的所有文件。</p><p class="settings-note">配置目录保留：登录认证、界面偏好、Runtime、插件、MCP、Git 凭据及日志不受影响。请先停止正在执行的任务和沟通。此操作无法撤销。</p><form id="reset-data-form"><div class="form-field"><label for="reset-current-password">当前密码</label><input id="reset-current-password" name="password" type="password" autocomplete="current-password" required /></div><div class="form-field"><label for="reset-confirmation">输入「清除所有数据」确认</label><input id="reset-confirmation" name="confirmation" autocomplete="off" required /></div><p data-reset-error role="alert"></p><div class="form-actions"><button class="ghost-button" type="button" data-cancel-reset>取消</button><button class="danger-button" type="submit" disabled>清除工作目录</button></div></form>`);
     const form = document.querySelector("#reset-data-form"), button = form.querySelector('[type="submit"]');
     form.oninput = () => { button.disabled = !form.elements.password.value || form.elements.confirmation.value !== "清除所有数据"; };
     form.querySelector('[data-cancel-reset]').onclick = closeModal;
@@ -407,7 +408,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
     try {
       const result = await api("/api/settings/workspace");
       if (!container.isConnected) return;
-      container.innerHTML = `<form id="workspace-settings-form"><div class="form-field"><label for="default-workspace-root">默认工作目录</label><input id="default-workspace-root" name="workspaceRoot" value="${escape(result.workspaceRoot || "")}" spellcheck="false" required /><p class="field-hint">输入绝对目录，例如 /Users/你的用户名/agentforge。不存在的目录会在保存时自动创建，每个新任务使用独立子目录。</p><div class="field-error" role="alert"></div></div><p class="settings-note">保存后立即用于新建任务，重启后保留。已有任务和交付快照不会迁移；只修改任务工作目录，不改变应用数据位置。</p><div class="form-actions"><button class="primary-button compact" type="submit">保存目录</button><span data-workspace-status role="status"></span></div></form>`;
+      container.innerHTML = `<form id="workspace-settings-form"><div class="form-field"><label for="default-workspace-root">工作目录</label><input id="default-workspace-root" name="workspaceRoot" value="${escape((workspaceLocation=result.workspaceRoot) || "")}" spellcheck="false" required /><p class="field-hint">员工、角色、团队、工作流、自动化、任务、沟通与执行文件保存在此目录。默认 ~/.agentforge/workspace，请输入绝对路径。</p><div class="field-error" role="alert"></div></div><p class="settings-note">更换目录会整理应用资料并重启本机服务；有任务或沟通执行时不能更换。已有任务的工作路径保持原位。设置、认证、Runtime、插件、MCP、Git 凭据和日志保留在 ~/.agentforge。</p><p class="settings-note">业务资料：<code>${escape(result.businessRoot || '')}</code></p><p class="settings-note">配置目录：<code>${escape(result.configurationRoot || '')}</code></p><div class="form-actions"><button class="primary-button compact" type="submit">保存并整理目录</button><span data-workspace-status role="status"></span></div></form>`;
       const form = container.querySelector("form");
       form.addEventListener("submit", async (event) => {
         event.preventDefault(); clearInvalid(form);
@@ -418,7 +419,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
           onWorkspaceSaved(saved);
           if (!form.isConnected) return;
           form.elements.workspaceRoot.value = saved.workspaceRoot;
-          status.textContent = "已保存，仅新任务使用此目录。";
+          status.textContent = saved.restarting ? "正在整理资料并重启本机服务，请勿退出应用。" : "当前已使用此数据目录。";
         } catch (error) { if (form.isConnected) setInvalid(form.elements.workspaceRoot, error.message); }
         finally { button.disabled = false; }
       });
@@ -568,10 +569,10 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
             <div id="git-credential-config" class="repository-access-grid" aria-live="polite"></div>
           </section>
           <section class="settings-section" data-settings-panel="workspace" aria-labelledby="workspace-settings-title" hidden>
-            <h3 id="workspace-settings-title">任务工作目录</h3><p class="settings-description">仅管理后续任务的文件存放位置，不改变应用数据位置。配置、鉴权、插件和应用缓存默认保存在 ~/.agentforge 下。</p>
+            <h3 id="workspace-settings-title">数据与工作目录</h3><p class="settings-description">集中管理任务文件、配置、执行记录和扩展的存放位置。</p>
             <div data-workspace-config></div>
             <hr class="settings-divider" />
-            <h3 id="data-management-title">数据管理</h3><p class="settings-description">清除工作区数据，回到首次使用状态。</p><p class="settings-note">包含账号与会话、任务与沟通、数字员工与团队、工作流、Runtime、插件与 MCP 配置、仓库 Token、交付文件、系统创建的任务目录和当前实例诊断日志。外部已有项目及本机 CLI 登录与会话保留。旧版共用日志不自动删除。</p><button type="button" class="danger-button" data-reset-all>清除所有数据</button>
+            <h3 id="data-management-title">数据管理</h3><p class="settings-description">删除整个当前工作目录，保留设置与登录。</p><p class="settings-note">包含当前工作目录中的所有文件和业务记录；配置目录中的账号、认证、Runtime、插件、MCP、Git 凭据、偏好和日志保留。</p><button type="button" class="danger-button" data-reset-all>清除所有数据</button>
           </section>
           <section class="settings-section" data-settings-panel="runtime" aria-labelledby="runtime-title" hidden>
             <h3 id="runtime-title">Runtime</h3><p class="settings-description">保存后用于后续调用；留空使用 CLI 默认配置。</p>

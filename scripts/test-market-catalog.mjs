@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated full HTTP/CLI/renderer catalog acceptance. No Provider or operator data.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -17,7 +18,8 @@ const plugins=[];for(let i=0;i<45;i++){
 }
 await writeFile(join(source,'.claude-plugin/marketplace.json'),JSON.stringify({name:'catalog-benchmark',plugins}));
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('catalog-qa',password);auth.close();
-const store=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});const manager=store.createAgent({name:'目录验收经理',kind:'manager'});store.setPluginUpdateSettings({enabled:false});store.close();
+const store=createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});const manager=store.createAgent({name:'目录验收经理',kind:'manager'});store.setPluginUpdateSettings({enabled:false});store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:180000});const evidence={root};console.log('EVIDENCE '+root);
 try{
  const page=await app.firstWindow({timeout:180000});await page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:90000});const origin=new URL(page.url()).origin;

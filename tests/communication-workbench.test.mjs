@@ -96,7 +96,7 @@ test('communication console owns bounded attempts and private content without le
   assert.throws(() => store.getCommunicationContentReference(other.id, text.id), /不存在|不属于/);
   assert.throws(() => store.getCommunicationConsole(chat.id, { agentId: 'agent_designer' }), /不属于/);
   const prompt = await files.readConsoleContent(store.getCommunicationContentReference(chat.id, all.traces[0].id, { prompt: true }));
-  assert.match(prompt.prompt.text, /会话主目录/);
+  assert.match(prompt.prompt.text, /会话共享工作目录/);assert.doesNotMatch(prompt.prompt.text,/会话资料目录/);
   const events = store.getCommunicationEvents(chat.id, store.getCommunication(chat.id).deliveries[0].id).items;
   assert.doesNotMatch(JSON.stringify(events), /sessionId|session_id|private-file-runtime-text/);
   assert.doesNotMatch(JSON.stringify(store.snapshot()), /private-file-runtime-text/);

@@ -56,3 +56,7 @@ Runtime 原生 thinking 与最终回复使用不同事件类型；Cursor thinkin
 市场兼容标签复用 RUNTIME_IDS 九项；原生扩展适配与组件边界见 docs/29。市场详情显式检查兼容性后刷新当前目录，不变更员工选择或历史。
 
 runtime-providers 思考集合同步新增六项；OpenCode 可用档位是模型返回的 native variant，服务端最终按所选模型验证。
+
+## 共享协作输入与报告通知
+
+合并经理报告以 coalescedSourceMessageIds 明确关联全部来源，每条消息展示同一个真实 Dispatch/Trace 的处理状态；不把背景阅读当业务投递，不推断正文来源。Web/Electron 与 CLI 继续共用 collaborationRecords。

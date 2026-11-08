@@ -22,7 +22,7 @@ MCP 编辑生成不可变新版本；Store.replaceMcpExtension 在一个事务�
 
 沟通附件属于 Conversation，消息冻结 ID、名称、相对路径、字节和 SHA-256，引用只能来自同会话。CommunicationDelivery 每次 attempt 保存自己的原生会话绑定，ID 不进入通用审计事件；控制台投影实际投递/尝试，不创建 Task/Run。只有员工新回复计入未读，人类发送与 pending 均不计入。
 
-任务默认工作根统一为 `~/agentforge`，不分 Web/Desktop；配置与鉴权仍按实例隔离。新 taskId 使用 `task_<随机UUID>` 这一不透明引用，避免跨实例同毫秒任务共用目录；目录层次仍为 `<workspaceRoot>/<taskId>/<runId>`。清除受管目录同步接受 UUID 连字符，仍要求路径和标记归属完全匹配、拒绝路径穿越，不删除外部兄弟文件。保存的工作根与已有任务/运行路径不变，不自动搬迁。
+任务默认工作根统一为 `~/.agentforge/workspace`，不分 Web/Desktop；配置与鉴权仍按实例隔离。新 taskId 使用 `task_<随机UUID>` 这一不透明引用，避免跨实例同毫秒任务共用目录；目录层次仍为 `<workspaceRoot>/tasks/<taskId>/<runId>`。目录分配使用不透明 ID，拒绝路径穿越；清除所有数据以整个当前工作目录为范围，工作目录外的文件保留。保存的工作根与已有任务/运行路径不变，不自动搬迁。
 
 已安装插件/MCP 可由人类删除：认证 HTTP 验证安装 ID 后调用 Store `removeExtension`。当前员工（包括停用员工）仍选择该版本时拒绝，不隐式解除绑定；Store 同步拒绝删除后到达的过期绑定写入。`extensionRemovals` 与 `configuration.extension_deleted` 事件在同一事务持久化，目录与详情不再暴露已删项。不可变文件与冻结 Task/Run 不变，历史执行仍可核验/恢复；插件删除不连带删除独立 MCP。
 
@@ -71,7 +71,7 @@ Run 不持久化一套独立的节点状态机；界面的当前焦点由 Trace�
 
 Task 创建时冻结独立员工集合与工作流配置；历史已冻结的仓库配置保留，角色提示词文本随员工快照一并冻结。修改配置仅影响后续任务。
 
-受管工作根：`<workspaceRoot>/<taskId>/<runId>`。`taskId` 区分任务，`runId` 区分该任务的一次执行。新任务所有成员从 Run 根启动；仓库操作按提示词/任务内容处理。已有历史任务仍按冻结仓库绑定选择启动目录，启动目录不是访问限制。
+受管工作根：`<workspaceRoot>/tasks/<taskId>/<runId>`。`taskId` 区分任务，`runId` 区分该任务的一次执行。新任务所有成员从 Run 根启动；仓库操作按提示词/任务内容处理。已有历史任务仍按冻结仓库绑定选择启动目录，启动目录不是访问限制。
 
 新 Run 工作根初始化 Git，克隆仓库注册为 `repos/` 下的 gitlink。初始化失败记诊断，不阻止员工交接或替经理评价任务。
 
@@ -133,7 +133,7 @@ Runtime 展示名称为Claude Code、Codex、DeepSeek Harness、Cursor、Gemini 
 
 普通任务草稿复用 Task.status=backlog：保存时按现有创建规则校验标题、目标、成员、可选工作流和验收标准，持久化冻结快照；不创建 Run、投递或工作目录，不调用 Provider。App「保存草稿」与 CLI tasks create 等价；显式「启动」或 tasks start 才创建 Run。「保存并开始」/create --start 顺序调用相同创建及启动命令，启动被拒绝时保留草稿，启动响应不确定时先查询再决定下一步。此处草稿是完整且待启动的任务，不新增部分字段协议、自动保存或草稿编辑接口。
 
-扩展目录由 Store 拥有：extensionCatalog 作为 SQLite 独立表保存摘要和 deletedAt，导入登记与当前员工替换在同一事务。removeExtension 软删除并从所有员工当前 runtime 清除对应 ID、manifest 与派生路径，保持员工其他配置及 Task/Run/已排队会话快照。回执 employees 仅 ID/名称。删除后旧输入被拒绝，历史文件不清理；当前安装目录协议及旧目录重新导入要求见 docs/15。
+扩展目录由 Store 拥有：extensionCatalog 在配置 JSON 保存摘要和 deletedAt，通过阶段 JSON 与 SQLite revision 指针协调导入登记和当前员工替换。removeExtension 软删除并从所有员工当前 runtime 清除对应 ID、manifest 与派生路径，保持员工其他配置及 Task/Run/已排队会话快照。回执 employees 仅 ID/名称。删除后旧输入被拒绝，历史文件不清理；当前安装目录协议及旧目录重新导入要求见 docs/15。
 
 任务协作附件：runAttachments 保存 id/runId/name/path/bytes/sha256/createdAt 元数据；消息以 attachmentIds 引用同一 Run 已登记文件并冻结 attachments。每条最多10个、单文件20 MiB；有附件可无文字。普通指令及精确澄清回答共用附件校验，错误/归档/自动化不接受人类上传；任务删除随 Run 删除元数据和文件，历史消息引用不随员工变更重写。Store 深拷贝使用 structuredClone，避免 JSON 中间字符串上限；工作区 Trace/Artifact 的 agent 仅含 id/name，完整冻结成员保留于 Run。
 
@@ -141,7 +141,7 @@ Runtime 展示名称为Claude Code、Codex、DeepSeek Harness、Cursor、Gemini 
 
 Role.extensionSelection 保存 pluginIds/mcpIds，省略创建为空、更新保持，显式两个空数组清空。Store 保留按 Provider 解析的内部引用，不向配置 API 暴露。员工 runtime.extensionSelection 是直接选择；inheritedExtensionSelection 是只读角色继承 ID。执行快照按 ID 合并去重，解绑角色保留员工直接选择。角色更改只影响新 Task 与后续沟通投递，不改冻结历史。角色扩展与员工 Runtime 不兼容或合并后命名空间冲突时，配置保存失败。
 
-扩展软删除清除当前角色和员工关联；插件更新、重复导入及 MCP 编辑同事务替换当前角色和员工关联。内容仍在文件中，SQLite 保存目录元数据、角色和员工关联及冻结引用，不搬迁源码或凭据。
+扩展软删除清除当前角色和员工关联；插件更新、重复导入及 MCP 编辑同事务替换当前角色和员工关联。内容仍在文件中，配置 JSON 保存当前扩展主清单，SQLite 保存角色和员工关联及冻结引用，不搬迁源码或凭据。
 
 仅已停用自动化允许永久删除。客户端确认或 CLI --yes 后，服务锁定该自动化及关联任务，终止尚未结束的执行，等待退出，再暂存 Run 文件并在单一 Store 事务中删除所有关联 Task/Run/触发记录。数据库失败恢复暂存文件；文件最终清理失败返回202及 runFileCleanup=pending。普通任务及其他自动化保持独立。
 
@@ -177,3 +177,17 @@ Role.extensionSelection 保存 pluginIds/mcpIds，省略创建为空、更新保
 扩展兼容性检查只更新当前目录派生摘要；不可变安装、冻结计划与 Task/Run/角色/员工引用不重写。新增 Runtime 的冻结插件计划包含所选原生 Skill 元信息；旧三种 Runtime 的计划摘要结构保持。
 
 员工选择新 Runtime 并绑定既有角色时，HTTP 先验证组合扩展，再由 Store 按该角色相同不可变扩展 ID 补齐缺失目标的派生执行计划；已有目标计划、角色选择及历史快照不修改。此为配置命令的按需解析，不在启动或读列表时迁移数据。
+
+工作根是宿主当前启动配置，生产 Store 通过 workspaceRootAuthoritative 使用该根创建新 Task，不再用业务库内旧工作目录设置决定资料位置。既有 Task/Run.workspacePath、冻结成员/扩展、不可变消息及原生会话 ID 保持；物理文件搬运与地址解析不产生业务重判或新派工，见 docs/30。
+
+当前存储归属以 [配置目录与工作目录](30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。
+
+沟通 workspacePath 为首次执行时分配的持久业务目录，形如 `<workspaceRoot>/communications/<conversationId>`；所有成员共享 cwd，原生会话仍保存在各自 sessions[agentId] 下。工作根变化不改已分配路径，改变成员启动目录按既有协议显式重建原生上下文，历史消息和调用事实保留。
+
+## 提示词输入精简
+
+输入回执属于成员原生会话：任务延续原有消息 ID/摘要；沟通新增 inputMessageIds，与成功回复状态独立。原生会话确认及真实模型活动后消费输入，业务结果解析失败不抹去已接收事实；新原生会话清空沟通消息回执并重新投递当前目标。经理状态按实体 ID/内容摘要投递变化，移出最近窗口不等于领域完成。大正文文件是原始消息的派生读取资料，不新增领域消息或授权，详见 docs/22。
+
+## 共享协作输入与报告通知
+
+Run 公开消息按每位成员的原生会话回执增量补齐，阅读背景与处理待办分离，当前待办保留明确消息 ID。经理队尾未尝试报告可合并为一个投递，保留多来源引用与幂等键；不合并人工指令、咨询、恢复及已领取调用。合并不自动结算业务，仍由该次协调成功结算。前置自然正文不被尾部协调 JSON 的摘要替换，原始响应和历史事实保留。

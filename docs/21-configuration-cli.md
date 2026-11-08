@@ -36,7 +36,9 @@ pluginIds 仍选择完整插件；所选 Skill 经 Runtime 原生注册、按需
 
 CLI 专属于客户端：源码和安装版都只发现运行中的客户端，校验私有 endpoint 的实例 ID 后才读取会话/发送凭据；无 Web 目标、无 4310 回退。客户端退出、连接文件不安全或实例失配返回 CLIENT_UNAVAILABLE（退出码 5）。已移除 --target，废弃选项明确拒绝；help/schema 和输入校验保持离线。开发/隔离测试可用 --endpoint-file 指定客户端私有连接文件，不手填 origin。默认会话统一为 ~/.agentforge/cli-session.json（可显式 --session-file）；旧安装版 CLI 需要重新登录，不搬迁会话。普通 Web 设置不提供 CLI 安装入口。
 
-新实例默认任务工作根统一为 ~/agentforge，不分 Web/Desktop；设置中已保存的目录仍优先，已有 Task/Run 路径不改写。CLI 创建任务使用当前实例工作根，应用数据仍按实例隔离于 ~/.agentforge。
+新实例数据根默认 ~/.agentforge/workspace，当前位置由宿主私有启动定位提供；业务 SQLite、Trace、插件/MCP 与任务文件使用同一配置根，认证、CLI 连接发现和运行日志保留 ~/.agentforge。已有 Task/Run 路径不改写。
+
+`agentforge storage get` 无 ID，返回实际数据根、业务资料、数据库、Run Files、扩展、认证和日志位置；`agentforge storage update --file location.json` 接受唯一必填 `workspaceRoot`（非文件系统根的绝对路径）。与设置页同一 HTTP：忙碌返回 409，不排队搬运；空闲时验证目标、锁住实例并返回 `restarting:true`，表示已接受整理，不代表搬运已完成。客户端停机校验整理后重新发布原位置的 endpoint/CLI 委托。调用者应再次 `storage get` 验证实际位置，不能因切换期间连接中断盲目重发。help/schema 离线可用；不支持直连数据库、目标路径参数或额外权限。完整目录协议见 docs/30。
 
 `plugins import --file source.json` 安装时展开来源目录/所属 Git 仓库内的符号链接，形成不依赖原目录的普通文件副本；中文、空格等文件名保留。断链、循环、越界目标和特殊文件返回插件名/相对路径，整批不发布，不静默忽略。输入仍只有 url/path 二选一，`--help` 和 schema 同步说明，无额外兼容开关；员工选择及详情查询协议不变。
 
@@ -166,3 +168,13 @@ mcps tools支持--search名称/说明筛选后分页，默认每页20条，--pag
 新增六种 Runtime 的基础 Skill/可适配 Command 插件、原生 MCP、私有配置及不兼容组件边界见 [多 Runtime 接入](../docs/29-runtime-providers.md)。App 市场详情“检查兼容性”与 CLI `plugins check-compatibility ID` / `mcps check-compatibility ID` 等价；仅刷新当前目录摘要，不改写安装、员工/角色绑定或历史。
 
 runtimes models 的新增目标返回原生可选模型与逐模型 levels，非统一空目录；runtimes update 同一 model/effort 校验。OpenCode effort 可以是模型目录里的自定义 variant（单行安全标识），其余按 Provider 集合校验；Cursor/Gemini/OpenCode 非空 effort 需 model。工作目录视频播放器为客户端能力，不新增 CLI 播放命令；已有下载命令返回原字节。
+
+当前存储归属以 [配置目录与工作目录](30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。
+
+员工启动目录：新普通任务与自动化采用 `<工作目录>/tasks/<TaskID>/<RunID>`；沟通采用 Store 首次分配并持久保存的 `<工作目录>/communications/<会话ID>`，群聊成员共享文件目录但原生会话独立。既有任务路径不重写，已分配的沟通目录不随工作根切换；目录变更重建模型上下文并保留聊天历史。内部附件、提示词和执行内容仍由 Run Files 管理，详见 docs/30-storage-layout.md 与 docs/17-communication.md。
+
+工作目录定位只持久化 workspaceRoot，records 路径固定由 workspaceRoot/records 推导；storage.json 不接受 businessRoot。App/CLI 返回的 businessRoot 为只读计算结果，开发实例通过独立工作根隔离，见 docs/30。
+
+## 共享协作输入与报告通知
+
+任务协作与 App 共用 Run 公开消息增量和经理报告通知合并。collaboration 的多条来源可关联同一个 dispatchId/Trace，代表同一次协调，不代表独立调用；progress 不重复列出已合并通知。当前消息输入、管理字段、创建/启动及最终客户端验收协议不变。

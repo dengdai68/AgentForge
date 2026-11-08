@@ -51,3 +51,11 @@ Artifact 内容使用冻结 SHA-256 与字节信息验证；错误不冒充为�
 
 ## 工作目录视频
 当前文件对 MP4/M4V、MOV、WebM、OGV 显示原生视频播放器（控件、拖动进度及全屏，不自动播放）。元数据只读固定大小文件头，不受文本预览上限限制；解码能力以本机 Chromium 为准，失败显示下载/本地播放建议。认证 GET/HEAD content?media=1 使用同一工作根、敏感路径和无链接检查及 no-follow 文件描述符，校验容器文件头；单段 Range 支持有界、开放结尾和后缀范围，返回206/416与真实字节数，完整请求200。使用有界流，不缓存整个媒体，不转码、不新增文件/进程宿主桥。当前文件可变化，不冒充冻结 Artifact。CLI 既有文件下载不变，播放器属纯客户端能力。
+
+Run Files 的物理根为 `<工作目录>/records`，集中保存任务与沟通的 Trace、快照、提示词和正文。任务 cwd 为 tasks/TaskID/RunID，沟通 cwd 为 communications/会话ID，沟通附件直接保存在该 cwd 的 attachments 子目录。内容逻辑引用与实际物理目录由 Run Files 解析，工作树不混入平台执行记录。现有业务路径不搬动，存储根搬运保留相对引用与内容摘要，见 docs/30。
+
+员工启动目录：新普通任务与自动化采用 `<工作目录>/tasks/<TaskID>/<RunID>`；沟通采用 Store 首次分配并持久保存的 `<工作目录>/communications/<会话ID>`，群聊成员共享文件目录但原生会话独立。既有任务路径不重写，已分配的沟通目录不随工作根切换；目录变更重建模型上下文并保留聊天历史。内部附件、提示词和执行内容仍由 Run Files 管理，详见 docs/30-storage-layout.md 与 docs/17-communication.md。
+
+## 提示词输入精简
+
+提示词资料文件不是业务 Artifact：长目标/职责/消息原文存 records/runs/<RunID>/input-materials 或 records/communications/<会话ID>/input-materials，按 SHA256 寻址，0700目录/0600文件、排他创建，重用前核对原文且拒绝链接。workflow/<SHA256>/workflow.md 为冻结工作流稳定入口，每个 Trace 的 workflow.md 证据仍保留。资料物化失败停止调用，消息/历史接口仍返回原文，不将这些私有文件公开为额外交付。

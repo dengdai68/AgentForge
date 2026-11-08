@@ -3,6 +3,7 @@ import { mkdtemp, chmod, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { runtimeStorageReferences } from "../storage-layout.mjs";
 
 const adapter = fileURLToPath(new URL("./mcp.mjs",import.meta.url));
 const socketPathBudget = 96;
@@ -34,6 +35,9 @@ export async function queryHistory(store, agentId, tool, args, files) {
 
 // Lifetime is exactly one provider invocation. No public listener, cookies or selectable identity.
 export async function withHistoryTools(store, agent, input, invoke, files) {
+  // Resolve frozen physical references before the reserved-name preflight, not
+  // only later in the Provider adapter. Leave the stored snapshot untouched.
+  input = { ...input, runtime: runtimeStorageReferences(input.runtime) };
   const agentId = agent.sourceAgentId || agent.id;
   for (const path of input.runtime?.mcpConfigPaths || []) {
     const config = JSON.parse(await readFile(path,"utf8"));

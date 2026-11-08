@@ -1,16 +1,17 @@
 import { executionBudget } from "./execution-budget.mjs";
 import { registerExecution } from "./runtime/registry.mjs";
-import { mkdir, writeFile, realpath } from "node:fs/promises";
-import { join, resolve, sep, dirname } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { join, resolve, dirname } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
 import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
+import { createRunFiles } from "./run-files.mjs";
 import { communicationPrompt } from "./prompts.mjs";
 import { runRuntime, RuntimeSessionMissingError, redactExternalText, separateRuntimeSession, promptSnapshot } from "./runtime/local-cli.mjs";
 
 // Private replies have one body; groups may explicitly address peer members.
 const replySchema = {type:"object",additionalProperties:false,properties:{reply:{type:"string"}},required:["reply"]};
 
-export function createCommunicationService(store, { root, invoke, files } = {}) {
+export function createCommunicationService(store, { root, invoke, files = createRunFiles({root:join(dirname(root),'records'),communicationsRoot:root,resolveCommunicationWorkspace:key=>store.getCommunicationWorkspace(key)}) } = {}) {
   const active = new Map();
   async function execute(key, item) {
       const controller=new AbortController();let release;
@@ -21,21 +22,24 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
         if (!item.available) throw new Error("被 @ 的成员已离开群聊、停用或删除");
         const group = store.getCommunication(key, { limit: 1 }).conversation.kind === "group";
         const schema = group ? { ...replySchema, properties: { ...replySchema.properties, mentionAgentIds: { type: "array", items: { type: "string" } } }, required: ["reply", "mentionAgentIds"] } : replySchema;
-        const agent = item.agentSnapshot, cwd = resolve(root, key, agent.id);
+        const agent = item.agentSnapshot, cwd = store.prepareCommunicationWorkspace(key,root);
         store.assertRuntimeEnabled(agent.runtime);
-        await mkdir(cwd, { recursive: true, mode: 0o700 });
-        const canonicalRoot = await realpath(root), actual = await realpath(cwd);
-        if (!actual.startsWith(canonicalRoot + sep)) throw new Error("沟通目录越界");
-        const directory = join(cwd, item.id, String(item.attempts));
-        await mkdir(directory, { recursive: true, mode: 0o700 });
-        if (!(await realpath(directory)).startsWith(actual + sep)) throw new Error("沟通记录目录越界");
+        if(files.communicationPath(key)!==cwd)throw new Error('沟通资料与共享工作目录不一致');
+        const directory=await files.prepareCommunicationAttempt(key,agent.id,item.id,item.attempts);
         const schemaPath = join(directory, "response-schema.json"), finalPath = join(directory, "response.json");
         await writeFile(schemaPath, JSON.stringify(schema), { mode: 0o600 });
         const session = store.prepareCommunicationSession(key, item.id, cwd);
         store.appendCommunicationEvent(key, item.id, { providerEventType: session.resume ? 'session.resumed' : 'session.created', message: session.resume ? '继续该成员的独立会话。' : '为该成员建立独立会话。' });
         const context = store.communicationContext(key, item.id);
-        const message = ({ id, sender, content, attachments = [], replyToMessageId, createdAt }) => ({ id, sender, content, replyToMessageId, createdAt, attachments: attachments.map(file => ({ name: file.name, bytes: file.bytes, sha256: file.sha256, path: resolve(root, key, file.path) })) });
-        const input = communicationPrompt({ agent, context: { ...context, message: message(context.message) }, root: resolve(root, key), cwd, messages: context.messages.map(message) });
+        const message = ({ id, sender, content, attachments = [], replyToMessageId, createdAt }) => ({ id, sender, content, replyToMessageId, createdAt, attachments: attachments.map(file => ({ name: file.name, bytes: file.bytes, sha256: file.sha256, path: resolve(cwd, file.path) })) });
+        const input = communicationPrompt({ agent, context: { ...context, message: message(context.message) }, cwd, messages: context.messages.map(message), materialDirectory: files.communicationInputDirectory(key) });
+        await files.writeCommunicationInputMaterials(key, input.materials);
+        let inputAcknowledged = false, inputProgress = false, nativeConfirmed = session.resume;
+        const acknowledgeInput = () => {
+          if (inputAcknowledged) return;
+          store.confirmCommunicationInput(key, item.id, [...new Set([...context.messages.map(message => message.id), context.message.id])]);
+          inputAcknowledged = true;
+        };
         const onPrompt = async value => {
           if (!files?.writeCommunicationContent) return;
           try {
@@ -43,7 +47,7 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
             store.appendCommunicationEvent(key, item.id, { providerEventType: 'prompt.snapshot', data: { contentRef } });
           } catch (error) { diagnostic('communication.prompt_snapshot_failed', { error }); }
         };
-        const contextDirectories=[...new Set([context.message,...context.messages].flatMap(item=>(item.attachments || []).map(file=>dirname(resolve(root,key,file.path)))))];
+        const contextDirectories=[...new Set([...context.messages.flatMap(item=>(item.attachments || []).map(file=>dirname(resolve(cwd,file.path)))), ...input.materials.map(file=>dirname(file.path))])];
         const provider = invoke || runRuntime;
         const result = await withHistoryTools(store, agent, {
           runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, schemaPath, finalPath, outputSchema: schema,
@@ -51,10 +55,13 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
           onEvent: async (event) => {
             const { sessionId, auditEvent, content } = separateRuntimeSession(event);
             if (content && files) auditEvent.data.contentRef = await files.writeCommunicationContent(key, item.id, item.attempts, content);
-            if ((auditEvent.providerEventType === "system" || auditEvent.providerEventType === "thread.started") && sessionId) store.confirmCommunicationSession(key, item.id, sessionId);
+            if ((auditEvent.providerEventType === "system" || auditEvent.providerEventType === "thread.started") && sessionId) { store.confirmCommunicationSession(key, item.id, sessionId); nativeConfirmed = true; }
+            if (content && ['output','thinking','tool','tool_result'].includes(auditEvent.data?.presentation) && ['text','thinking','input','output'].some(key => content.fields?.[key]?.text)) inputProgress = true;
+            if (nativeConfirmed && inputProgress) acknowledgeInput();
             store.appendCommunicationEvent(key, item.id, auditEvent);
           }
         }, provider, files);
+        acknowledgeInput();
         let parsed;
         try { parsed = JSON.parse(result.finalText); } catch (error) { diagnostic("communication.result_parse_error", { error }); throw new Error("Agent 未返回有效的沟通回复 JSON"); }
         if (!parsed || typeof parsed.reply !== "string" || !parsed.reply.trim()) throw new Error("Agent 沟通回复为空");

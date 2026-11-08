@@ -204,3 +204,23 @@ scripts/test-portable-extensions-real.mjs 需要 AGENTFORGE_PORTABLE_EXTENSIONS_
 test-portable-runtimes 支持 AGENTFORGE_PORTABLE_EFFORT，真实模式先经 CLI 查询原生目录、在 App 选择模型和档位并保存回读，再执行完整任务/续接/确认。AGENTFORGE_VIDEO_PROOF=1 额外生成隔离 H264 视频，验证播放、seek、Range/416/认证及宽窄布局；可对签名包运行。
 
 正式包验收 test-packaged-electron 从共享 RUNTIME_IDS 核对九项配置，任务创建显式选择所选成员中的经理；协议夹具按 taskRole 派工，不依赖员工类型或已移除的全量 Trace 上下文。真实模型验收仍独立记录。
+
+`node scripts/test-storage-layout.mjs` 在独立 HOME/locator 中验证设置与 CLI 查询、资料校验搬运、自有服务重启、旧资料清理、认证保留和冻结引用；`AGENTFORGE_STORAGE_APP=/absolute/AgentForge.app` 改验安装包，`AGENTFORGE_STORAGE_REAL=1` 额外执行真实 Claude 原生 Skill 完整任务、客户端人类确认及搬运后精确会话续接。不是用协议夹具冒充真实模型。其他专项脚本显式设置当前协议的隔离 locator，打包总验收另检查默认数据/认证分离。
+
+存储布局引入的控制根、认证根、先前 Runtime 根和实例类型环境变量同样由测试入口清除，防止客户端内发起测试时继承真实实例位置。
+
+安装包冒烟的工作目录配置现在按“业务数据整理并重启服务”验收：核验新端点与当前根、客户端登录保留，以及独立 CLI 按新 origin 重新登录；不再等待旧的仅保存工作目录提示。
+
+存储生命周期验收绑定真实 stdio MCP 探针；REAL 模式除原生 Skill 外，须实际调用工具取得随机事实，搬运后原会话再调用一次，不能仅以目录可读替代调用前链路验证。
+
+存储验收可用 AGENTFORGE_STORAGE_TEST_ROOT 指定专用临时父目录；默认仍保存到忽略的 .data。NAS 源码冷启动超时时优先使用已构建 ASAR 与系统临时数据目录复核，不能用调整产品重试次数掩盖读取入口错误。
+
+员工启动目录：新普通任务与自动化采用 `<工作目录>/tasks/<TaskID>/<RunID>`；沟通采用 Store 首次分配并持久保存的 `<工作目录>/communications/<会话ID>`，群聊成员共享文件目录但原生会话独立。既有任务路径不重写，已分配的沟通目录不随工作根切换；目录变更重建模型上下文并保留聊天历史。内部附件、提示词和执行内容仍由 Run Files 管理，详见 docs/30-storage-layout.md 与 docs/17-communication.md。
+
+`test-storage-layout.mjs` 的真实模式同时验收 tasks/TaskID/RunID、两名群成员读取同一相对文件并报告真实 pwd、私聊目录与原生会话隔离；工作根更换后沟通已分配目录保持，最后在隔离客户端清除工作根并确认配置/认证保留。
+
+提示词精简验收：test-workflow-editor 的 REAL 模式额外验证长沟通正文 contentRef 真实读取、同一原生会话无正文重放的记忆、长任务目标与长节点正文文件读取，以及跨经理轮次稳定的冻结工作流路径；普通任务与单人自动化均在客户端最终确认。tests/prompts、communication、run-files-security 覆盖巡检/群聊去重、状态增量及清空、失败输入回执、资料完整性/链接拒绝。
+
+`AGENTFORGE_SHARED_COLLABORATION_REAL=1 node scripts/test-shared-collaboration-real.mjs` 使用隔离HOME/实例与真实Claude：分别发言、读取发给经理的同伴公开报告、员工间咨询及原生续接、完整公开正文、无背景唤醒与客户端最终确认。可指定 AGENTFORGE_SHARED_COLLABORATION_APP=/absolute/AgentForge.app 核验构建包；不修改操作者实例，证据仅在忽略的 .data/shared-collaboration-*。
+
+共享协作真实验收可用 `AGENTFORGE_SHARED_COLLABORATION_RESUME=/absolute/.data/shared-collaboration-XXX` 重新核对同一隔离实例并完成客户端验收；只允许本脚本证据目录且 Run 须已待验收，不重新派工、不覆盖首次失败记录。

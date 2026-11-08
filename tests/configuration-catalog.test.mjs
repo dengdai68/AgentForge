@@ -24,7 +24,7 @@ test('independent instances share a workspace root without same-millisecond task
   assert.match(a.id, /^task_[a-f0-9-]{36}$/);
   assert.notEqual(a.id, b.id);
   assert.notEqual(a.path, b.path);
-  assert.equal(a.path, join(root, a.id)); assert.equal(b.path, join(root, b.id));
+  assert.equal(a.path, join(root, "tasks", a.id)); assert.equal(b.path, join(root, "tasks", b.id));
 });
 
 test('fresh catalogs are minimal, all examples can be deleted and stay deleted after restart', () => {

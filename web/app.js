@@ -203,7 +203,7 @@ const settingsUI = createSettingsUI({
   openModal, closeModal, confirmDialog,
   onResetStarted: () => { resetRequestActive = true; $("#modal-close").disabled = true; state.eventSource?.close(); communicationUI.unmount(); },
   onResetFailed: () => { resetRequestActive = false; $("#modal-close").disabled = false; },
-  onDataReset: (next) => { try { localStorage.removeItem(PREFERENCES_KEY); } catch {} location.replace(next); },
+  onDataReset: (next) => { location.replace(next); },
   onWorkspaceSaved: (settings) => { state.settings = settings; },
   navigate: (page) => { state.settingsPage = page; setView("settings"); },
   getPreferences: () => presentationPreferences,
@@ -2256,7 +2256,7 @@ async function newTaskModal({ automation = false, existing = null } = {}) {
           <div class="form-field"><label for="task-workflow">流程模板（选填）</label>
             <select id="task-workflow" name="workflowTemplateId"><option value="">默认协作</option>${state.workflowTemplates.map((template) => `<option value="${template.id}">${esc(template.name)}</option>`).join("")}</select></div>
         </div>
-        <small class="task-workspace-hint">系统工作根目录 ${esc(state.settings?.workspaceRoot || "/tmp/AgentForge")}/任务ID/RunID</small>
+        <small class="task-workspace-hint">系统工作根目录 ${esc(state.settings?.workspaceRoot || "/tmp/AgentForge")}/tasks/任务ID/RunID</small>
       <div class="form-actions task-form-footer">
         <div class="task-submit-actions"><button type="button" class="ghost-button" data-close-modal>取消</button>${automation && !existing ? '<button type="submit" class="ghost-button" value="disabled">保存为停用</button>' : !automation ? '<button type="submit" class="ghost-button" value="draft">保存草稿</button>' : ''}<button type="submit" class="primary-button" value="start">${automation ? existing ? "保存修改" : "创建并启用" : "保存并开始"}</button></div>
       </div>

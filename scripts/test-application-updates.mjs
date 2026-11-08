@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated real Electron renderer/IPC and streamed-file QA. Native signed
 // installation is an injected fixture, never a replacement of the operator app.
 import assert from 'node:assert/strict';
@@ -14,7 +15,8 @@ const data=bundle?join(home,'.agentforge/desktop'):join(root,'client');
 await mkdir(home,{recursive:true});
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});
 await auth.setAdministrator('updates-qa',password);auth.close();
-const store=createCatalogFixtureStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});store.close();
+const store=createCatalogFixtureStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const desktop=await electron.launch({...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')}:{args:['apps/electron/main.mjs']}),env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
 const evidence={root,bundle:bundle||'source',cases:[]};
 try{

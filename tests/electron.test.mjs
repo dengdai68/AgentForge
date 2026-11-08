@@ -378,7 +378,7 @@ test('app dialog accepts only exact local main-frame choices, sizes to content a
   const module = await readFile(new URL('../apps/electron/app-dialog.mjs', import.meta.url), 'utf8');
   assert.match(module, /Math\.max\(document\.documentElement\.scrollHeight, document\.body\.scrollHeight\)/);
   const main = await readFile(new URL('../apps/electron/main.mjs', import.meta.url), 'utf8');
-  assert.equal((main.match(/appDialog\(\{/g) || []).length, 7, 'all five former system dialog scenes plus About and the legacy-data refusal use the app dialog');
+  assert.equal((main.match(/appDialog\(\{/g) || []).length, 8, 'system dialog scenes, About, legacy refusal and storage relocation errors use the shared app dialog');
   assert.match(main, /需要先搬迁实例数据/);
   assert.doesNotMatch(main, /role:\s*["']about["']/, 'the macOS menu no longer triggers the system About panel');
   assert.match(main, /关于 AgentForge/);
@@ -498,7 +498,8 @@ test("packaged Electron keeps mutable control-plane data outside its resources",
   const storage = desktopStoragePaths("/private/var/folders/agentforge-profile", { home: "/fixture-home" });
   assert.equal(storage.AGENTFORGE_AUTH_DB_PATH, "/private/var/folders/agentforge-profile/auth.sqlite");
   assert.equal(storage.AGENTFORGE_RUNTIME_CONFIG_ROOT, "/private/var/folders/agentforge-profile/runtime-configs");
-  assert.equal(storage.AGENTFORGE_WORKSPACE_ROOT, "/fixture-home/agentforge");
+  assert.equal(storage.AGENTFORGE_WORKSPACE_ROOT, "/fixture-home/.agentforge/workspace");
+  assert.equal(storage.AGENTFORGE_DB_PATH, "/fixture-home/.agentforge/workspace/records/agentforge.sqlite");
   const environment = desktopControlPlaneEnvironment({ environment: { PATH: "/usr/bin", AGENTFORGE_DB_PATH: "/existing/state.sqlite", AGENTFORGE_RUNTIME_CONFIG_ROOT: "/existing/config", AGENTFORGE_PUBLIC_ORIGIN: "https://unexpected.example", HOST: "0.0.0.0" }, storage, electronExecutable: "/Applications/AgentForge.app/Contents/MacOS/AgentForge", bootstrapToken: "a".repeat(64) });
   assert.equal(environment.PATH, "/usr/bin");
   assert.equal(environment.AGENTFORGE_DB_PATH, storage.AGENTFORGE_DB_PATH);
@@ -522,8 +523,8 @@ test("desktop data roots default under ~/.agentforge with per-instance isolation
   assert.equal(legacyDesktopDataRoot({ packaged: false, env: {}, sourceRoot: "/repo" }), "/repo/.data/desktop-dev");
   assert.equal(legacyDesktopDataRoot({ packaged: false, env: { AGENTFORGE_DESKTOP_DATA_ROOT: "/isolated/e2e" }, sourceRoot: "/repo" }), null);
   const storage = desktopStoragePaths(resolveDesktopDataRoot({ packaged: true, env: {}, home }), { home });
-  assert.equal(storage.AGENTFORGE_DB_PATH, "/private/var/fixture-home/.agentforge/desktop/agentforge.sqlite");
-  assert.equal(storage.AGENTFORGE_WORKSPACE_ROOT, "/private/var/fixture-home/agentforge");
+  assert.equal(storage.AGENTFORGE_DB_PATH, "/private/var/fixture-home/.agentforge/workspace/records/agentforge.sqlite");
+  assert.equal(storage.AGENTFORGE_WORKSPACE_ROOT, "/private/var/fixture-home/.agentforge/workspace");
 });
 test("macOS package configuration is local-only and contains the control plane", async () => {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));

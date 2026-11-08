@@ -215,10 +215,10 @@ test("HTTP save diagnostic injection logs errors and inclusive slow saves withou
   let options;
   const calls = [];
   const databasePath = "PRIVATE_DATABASE_SENTINEL", workspaceRoot = "PRIVATE_WORKSPACE_SENTINEL";
-  const evaluate = new Function("createStore", "databasePath", "workspaceRoot", "diagnostic", "runtimeInstalled", `${source.slice(start, end)}; return store;`);
+  const evaluate = new Function("createStore", "databasePath", "workspaceRoot", "diagnostic", "runtimeInstalled", "storage", `${source.slice(start, end)}; return store;`);
   const sentinelStore = {};
   const installation = () => true;
-  assert.equal(evaluate(input => { options = input; return sentinelStore; }, databasePath, workspaceRoot, (...args) => calls.push(args), installation), sentinelStore);
+  assert.equal(evaluate(input => { options = input; return sentinelStore; }, databasePath, workspaceRoot, (...args) => calls.push(args), installation, {controlRoot:"PRIVATE_CONFIG_SENTINEL"}), sentinelStore);
   assert.equal(options.runtimeInstalled, installation);
   assert.equal(options.databasePath, databasePath); assert.equal(options.workspaceRoot, workspaceRoot);
   const record = (outcome, elapsedMs) => ({ operation: "save", outcome, elapsedMs, transactionOutcome: outcome === "success" ? "committed" : "not_started", phases: [] });
@@ -333,7 +333,7 @@ test("system workspace root assigns isolated Task/Run paths and survives configu
     assert.throws(() => store.createTask({ ...input, workspacePath: root }), /系统自动分配/);
     assert.throws(() => store.createTask({ ...input, repositorySources: [{ path: "repos/app", url: "https://token@example.com/repo.git" }] }), /不再接受仓库绑定/);
     const a = store.createTask(input), b = store.createTask(input), run = store.createRun(a.id);
-    assert.equal(a.workspacePath, join(root, "work", a.id)); assert.notEqual(a.workspacePath, b.workspacePath);
+    assert.equal(a.workspacePath, join(root, "work", "tasks", a.id)); assert.notEqual(a.workspacePath, b.workspacePath);
     assert.equal(run.workspacePath, join(a.workspacePath, run.id));
     assert.equal(store.getRunWorkspace(run.id).run.task.workspacePath, run.workspacePath);
     const taskSummary = store.getBootstrap().tasks.find((task) => task.id === a.id);
@@ -347,7 +347,7 @@ test("system workspace root assigns isolated Task/Run paths and survives configu
     assert.deepEqual(a.workflowSnapshot.nodes.map(node => node.repositoryPath), a.workflowSnapshot.nodes.map(() => null));
     const reopened = createStore({ databasePath: db, workspaceRoot: join(root, "new-root") });
     assert.equal(reopened.getRunTask(run.id).workspacePath, run.workspacePath);
-    const future = reopened.createTask(input); assert.equal(future.workspacePath, join(root, "new-root", future.id));
+    const future = reopened.createTask(input); assert.equal(future.workspacePath, join(root, "new-root", "tasks", future.id));
     const second = reopened.createRun(b.id); assert.equal(second.workspacePath, join(b.workspacePath, second.id));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -2145,6 +2145,15 @@ test("coordination JSON embedded in manager prose is delivered without rejecting
   assert.equal(parseEmployeeResponse(unfenced).rawResponse, unfenced);
   assert.equal(parseEmployeeResponse(unfenced + '\n以上仅作示例。').managerDecision, null);
   assert.equal(parseEmployeeResponse(JSON.stringify(envelope) + '\n' + JSON.stringify(envelope)).managerDecision, null);
+});
+
+test('full prose is the public message when a trailing coordination envelope contains an abbreviated summary', () => {
+  const body='我想去湖边坐着，带一本书，吃一碗热面。\n这是我的完整聊天正文。';
+  const action={summary:'参与了闲聊，未写报告。',handoff:{recipientAgentId:'manager'}};
+  for(const raw of [body+'\n\n'+JSON.stringify(action),body+'\n```json\n'+JSON.stringify(action)+'\n```']){
+    const output=parseEmployeeResponse(raw);assert.equal(output.summary,body);assert.equal(output.handoff.recipientAgentId,'manager');assert.equal(output.rawResponse,raw);
+  }
+  assert.equal(parseEmployeeResponse(JSON.stringify({...action,summary:body})).summary,body);
 });
 
 test("retired issue-ledger inputs reject without creating side effects; issues use role messages",()=>{

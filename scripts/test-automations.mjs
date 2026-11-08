@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated real Electron UI/API/CLI acceptance; no Provider is invoked.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -11,13 +12,14 @@ import { createStore } from '../server/store.mjs';
 await mkdir('.data',{recursive:true});
 const root=await mkdtemp(resolve('.data/automations-ui-')),home=join(root,'home'),data=process.env.AGENTFORGE_AUTOMATIONS_APP?join(home,'.agentforge','desktop'):join(root,'client');await mkdir(home,{recursive:true});
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('automation-qa',password);auth.close();
-const store=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});
+const store=createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});
 const input={managerAgentId:'system_project_manager',title:'验收自动化',objective:'只用于隔离界面检查',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'0 9 * * 1-5',enabled:false};
 const automation=store.saveAutomation(input);const first=store.triggerAutomation(automation.id);assert.ok(first.runId,first.reason);store.requestHumanAcceptance(first.runId);
 store.updateAgent('agent_analyst',{status:'inactive'});for(let i=0;i<24;i++)store.triggerAutomation(automation.id);store.updateAgent('agent_analyst',{status:'active'});
 for(let i=0;i<24;i++)store.saveAutomation({...input,title:`分页自动化 ${i}`});
 const task=store.createTask({managerAgentId:'system_project_manager',title:'唯一普通任务',objective:'普通流程保持',memberAgentIds:input.memberAgentIds,workflowTemplateId:input.workflowTemplateId});const run=store.createRun(task.id);store.requestHumanAcceptance(run.id);
 const storeTitle=store.getRunTask(first.runId).title;assert.match(storeTitle,/^验收自动化#\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({...process.env.AGENTFORGE_AUTOMATIONS_APP ? {executablePath:resolve(process.env.AGENTFORGE_AUTOMATIONS_APP,'Contents/MacOS/AgentForge'),args:['--user-data-dir='+join(root,'profile')]} : {args:['apps/electron/main.mjs']},env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
 const errors=[],evidence={root,cases:[]};
 try {

@@ -1,12 +1,36 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunFiles } from "../server/run-files.mjs";
 import { createFixtureStore as createStore } from "./fixture-store.mjs";
 import { executeRun } from "../server/orchestrator.mjs";
 import { createRuntimeConfiguration } from "../server/runtime/configuration.mjs";
+import { createHash } from 'node:crypto';
+
+test('input material files are lossless, private, reusable and reject tampering, links and forged paths', async t => {
+  const root=await mkdtemp(join(tmpdir(),'af-input-materials-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const files=createRunFiles({root}),content='原始长正文🌍\n'.repeat(1100),sha256=createHash('sha256').update(content).digest('hex'),name=`input-${sha256}.txt`;
+  const directory=files.taskInputDirectory('run_test'),material={content,sha256,name,path:join(directory,name)};
+  await files.writeTaskInputMaterials('run_test',[material]);await files.writeTaskInputMaterials('run_test',[material]);
+  assert.equal(await readFile(material.path,'utf8'),content);assert.equal((await lstat(material.path)).mode&0o777,0o600);assert.equal((await lstat(directory)).mode&0o777,0o700);
+  await assert.rejects(files.writeTaskInputMaterials('run_test',[{...material,path:join(root,'outside.txt')}]),/引用无效/);
+  await writeFile(material.path,'tampered');await assert.rejects(files.writeTaskInputMaterials('run_test',[material]),/完整性/);
+  await rm(material.path);const outside=join(root,'outside.txt');await writeFile(outside,content);await symlink(outside,material.path);await assert.rejects(files.writeTaskInputMaterials('run_test',[material]));
+  assert.equal(await readFile(outside,'utf8'),content);
+  const chatDirectory=files.communicationInputDirectory('chat_test');await files.writeCommunicationInputMaterials('chat_test',[{...material,path:join(chatDirectory,name)}]);assert.equal(await readFile(join(chatDirectory,name),'utf8'),content);
+});
+
+test('frozen workflow reuses a stable read path while preserving each Trace evidence file', async t => {
+  const root=await mkdtemp(join(tmpdir(),'af-workflow-reference-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const files=createRunFiles({root}),workflow={name:'Frozen',nodes:[{id:'n',title:'Original',description:'UNCHANGED'}]};
+  const first=await files.writeWorkflowContext('run_test','trace_first',workflow),next=await files.writeWorkflowContext('run_test','trace_next',workflow);
+  assert.equal(first.path,next.path);assert.match(first.path,/workflow\/[^/]+\/workflow.md$/);
+  assert.equal(await readFile(first.path,'utf8'),await readFile(join(files.traceDirectory('run_test','trace_first'),'workflow.md'),'utf8'));
+  await readFile(join(files.traceDirectory('run_test','trace_next'),'workflow.md'));
+  await writeFile(first.path,'corrupted');await assert.rejects(files.writeWorkflowContext('run_test','trace_failed',workflow),/完整性/);
+});
 
 test('working video metadata and descriptor streams do not read full media or weaken path checks',async t=>{
  const root=await mkdtemp(join(tmpdir(),'af-video-'));t.after(()=>rm(root,{recursive:true,force:true}));const task={workspacePath:root},files=createRunFiles({root:join(root,'audit')});
@@ -251,4 +275,33 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(result) }));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test('managed tasks reject a linked tasks parent before creating a task directory outside the workspace',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'af-tasks-parent-'));t.after(()=>rm(root,{recursive:true,force:true}));const work=join(root,'work'),outside=join(root,'outside');await mkdir(work);await mkdir(outside);await symlink(outside,join(work,'tasks'));const files=createRunFiles({root:join(root,'records')});
+ await assert.rejects(files.prepareTaskWorkspace({workspaceManaged:true,workspacePath:join(work,'tasks','task_test')}),/上级目录不能是符号链接/);await assert.rejects(lstat(join(outside,'task_test')),{code:'ENOENT'});
+});
+
+
+test('common records preserve communication content refs while attachments stay in pinned shared cwd',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'af-comm-records-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const records=join(root,'workspace/records'),shared=join(root,'workspace/communications'),key='chat_recordtest',pinned=join(shared,key);
+ const files=createRunFiles({root:records,communicationsRoot:shared,resolveCommunicationWorkspace:()=>pinned});
+ const attachment=await files.writeCommunicationAttachment(key,'readme.txt',Buffer.from('shared bytes'));
+ assert.equal(await readFile(join(pinned,attachment.path),'utf8'),'shared bytes');
+ await assert.rejects(lstat(join(records,'communications',key,attachment.path)),{code:'ENOENT'});
+ const reference=await files.writeCommunicationContent(key,'chat_delivery_test',1,{type:'text',text:'immutable body'});
+ assert.match(reference.storagePath,/^communications\/chat_recordtest\/\.agentforge\//);
+ assert.deepEqual(await files.readConsoleContent(reference),{type:'text',text:'immutable body'});
+ await assert.rejects(lstat(join(pinned,'.agentforge')),{code:'ENOENT'});
+ const attempt=await files.prepareCommunicationAttempt(key,'agent_a','chat_delivery_test',1);
+ assert.equal(attempt,join(records,'communications',key,'agent_a/chat_delivery_test/1'));
+ const other=join(root,'other/records');await cp(records,other,{recursive:true});
+ const moved=createRunFiles({root:other,communicationsRoot:join(root,'other/communications'),resolveCommunicationWorkspace:()=>pinned});
+ assert.deepEqual(await moved.readConsoleContent(reference),await files.readConsoleContent(reference));
+ assert.deepEqual(await moved.readCommunicationAttachment(key,attachment),Buffer.from('shared bytes'));
+ const opened=await moved.openAttachment('communications',key,attachment);let result='';for await(const chunk of opened.stream)result+=chunk;assert.equal(result,'shared bytes');
+ await writeFile(join(pinned,attachment.path),'altered');await assert.rejects(moved.validateAttachment('communications',key,attachment),/完整性/);
+ await assert.rejects(moved.writeCommunicationContent('../outside','chat_delivery_test',1,{}),/ID/);
 });

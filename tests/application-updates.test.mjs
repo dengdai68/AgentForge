@@ -143,3 +143,11 @@ test('owned service restart lease atomically blocks writes, rejects busy writes 
     held.destroy();held=null;
   }finally{held?.destroy();const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;await rm(root,{recursive:true,force:true});}
 });
+
+// The host may move verified business storage while retaining update state.
+test('manual installer follows the active data root after verified relocation',async()=>{
+  let root='/before/updates',downloadedAt,opened;
+  const service=createApplicationUpdates(options({cacheRoot:()=>root,downloadInstaller:async(_release,cache)=>{downloadedAt=cache;return join(cache,'verified.dmg');},openInstaller:async path=>{opened=path;return '';}}));
+  await service.check();await service.download();assert.equal(downloadedAt,'/before/updates');
+  root='/after/updates';await service.install();assert.equal(opened,'/after/updates/verified.dmg');service.stop();
+});

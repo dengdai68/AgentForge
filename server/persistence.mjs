@@ -2,6 +2,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import {createConfigurationStore,configurationValues,CONFIGURATION_COLLECTIONS} from './configuration-store.mjs';
+
 const SNAPSHOT_ID = 1;
 
 // Cold rows retain identities/order only; bodies are loaded when a command reads them.
@@ -38,7 +40,7 @@ function lazyRows(metadata, read, readField, cacheLimit = 256) {
   });
 }
 
-export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagnostic } = {}) {
+export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagnostic, configurationDirectory, configurationPublish } = {}) {
   if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
   const database = new DatabaseSync(databasePath);
   database.exec(`
@@ -48,12 +50,7 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
       state_json TEXT NOT NULL,
       updated_at TEXT NOT NULL
     ) STRICT;
-    CREATE TABLE IF NOT EXISTS extension_catalog (
-      id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
-      search_text TEXT NOT NULL, created_at TEXT NOT NULL, deleted_at TEXT,
-      value_json TEXT NOT NULL
-    ) STRICT;
-    CREATE INDEX IF NOT EXISTS extension_catalog_listing ON extension_catalog(kind, deleted_at, created_at DESC, id);
+    CREATE TABLE IF NOT EXISTS configuration_revision (id INTEGER PRIMARY KEY CHECK(id=1), revision TEXT NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS workspace_revision (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL) STRICT;
     INSERT OR IGNORE INTO workspace_revision VALUES(1,0);
     CREATE TABLE IF NOT EXISTS workspace_changes(collection TEXT NOT NULL,id TEXT NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(collection,id)) STRICT;
@@ -100,21 +97,21 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
   const removeEvents = database.prepare("DELETE FROM workspace_event_rows WHERE collection=?");
   const removeEvent = database.prepare("DELETE FROM workspace_event_rows WHERE collection=? AND id=?");
   const writeEvent = database.prepare("INSERT INTO workspace_event_rows VALUES (?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET position=excluded.position,value_json=excluded.value_json");
-  const readCatalog = database.prepare("SELECT value_json FROM extension_catalog ORDER BY created_at DESC,id");
-  const writeCatalog = database.prepare("INSERT INTO extension_catalog VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,name=excluded.name,search_text=excluded.search_text,created_at=excluded.created_at,deleted_at=excluded.deleted_at,value_json=excluded.value_json");
-  const deleteCatalog = database.prepare("DELETE FROM extension_catalog WHERE id=?");
-  const catalogCount = database.prepare("SELECT COUNT(*) AS total FROM extension_catalog WHERE kind=? AND deleted_at IS NULL AND instr(search_text,?)>0");
-  const catalogPage = database.prepare("SELECT value_json FROM extension_catalog WHERE kind=? AND deleted_at IS NULL AND instr(search_text,?)>0 ORDER BY created_at DESC,id LIMIT ? OFFSET ?");
   const entityCollections = database.prepare('SELECT name FROM workspace_entity_collections');
   const entityRows = database.prepare('SELECT id,position,value_json FROM workspace_entities WHERE collection=? ORDER BY position');
   const entityWrite = database.prepare('INSERT INTO workspace_entities VALUES(?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET position=excluded.position,value_json=excluded.value_json');
   const entityDelete = database.prepare('DELETE FROM workspace_entities WHERE collection=? AND id=?');
   const entityCollectionWrite = database.prepare('INSERT OR IGNORE INTO workspace_entity_collections VALUES(?)');
   let entities = new Map();
-  let catalogCache = new Map();
+  if(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='extension_catalog'").get()){database.close();throw new Error('旧 SQLite 扩展清单已废弃；请停机显式整理为配置 JSON，不会自动迁移或清除业务数据');}
+  let configuration;
+  try{configuration=createConfigurationStore({directory:configurationDirectory??(databasePath===':memory:'?null:dirname(databasePath)),databasePath,committedRevision:database.prepare('SELECT revision FROM configuration_revision WHERE id=1').get()?.revision,publish:configurationPublish});}catch(error){database.close();throw error;}
+
   let cached = new Map();
 
   return {
+    configurationBlocked(){return configuration.blocked();},
+    configurationValues(){return configuration.values();},
     load({lazy = false} = {}) {
       const row = loadSnapshot.get(SNAPSHOT_ID);
       if (!row) { cached = new Map(); return null; }
@@ -133,9 +130,9 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
         } else state[name] = entityRows.all(name).map(item => {cache.set(item.id,{json:item.value_json,position:item.position});return JSON.parse(item.value_json);});
         entities.set(name,cache);
       }
-      const catalog = readCatalog.all().map(row => JSON.parse(row.value_json));
-      if (catalog.length) state.extensionCatalog = catalog;
-      catalogCache = new Map(catalog.map(entry => [entry.id, JSON.stringify(entry)]));
+      const values=configuration.values();
+      if(values.settings)state.settings={...values.settings,...state.settings};
+      for(const key of CONFIGURATION_COLLECTIONS)if(values[key])state[key]=values[key];
       const loaded = new Map();
       for (const { name } of readCollections.all()) {
         const entries = new Map();
@@ -281,18 +278,14 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
       return {items,total,page,pageSize,totalPages,hasMore:page<totalPages};
     },
     queryExtensions(kind, { search = '', page = 1, pageSize = 20 } = {}) {
-      const query = search.trim().toLocaleLowerCase();
-      const { total } = catalogCount.get(kind, query);
-      const totalPages = Math.max(1, Math.ceil(total / pageSize));
-      page = Math.min(page, totalPages);
-      const items = catalogPage.all(kind, query, pageSize, (page - 1) * pageSize).map(row => JSON.parse(row.value_json));
-      return { items, total, page, pageSize, totalPages, hasMore: page < totalPages };
+      return configuration.query(kind,{search,page,pageSize});
     },
     save(state, journal = null) {
+      configuration.assertReady();
       if (journal && !journal.changes.size) {
-        const uninitialized = Object.entries(state).some(([name, rows]) => {
+        const uninitialized = !configuration.initialized() || Object.entries(state).some(([name, rows]) => {
           if (!Array.isArray(rows)) return false;
-          if (name === 'extensionCatalog') return rows.length > 0 && !catalogCache.size;
+          if (CONFIGURATION_COLLECTIONS.has(name)) return false;
           return name === 'events' || name === 'communicationEvents' ? !cached.has(name) : !entities.has(name);
         });
         if (!uninitialized) return;
@@ -300,7 +293,7 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
       const observed = typeof onSaveDiagnostic === "function";
       const started = observed ? performance.now() : 0, phases = observed ? [] : null;
       let phase = null, phaseStarted = 0, count = 0;
-      let outcome = "error", transactionOutcome = "not_started", transactionStarted = false;
+      let outcome = "error", transactionOutcome = "not_started", transactionStarted = false, configurationStaged = false;
       const finishPhase = (result = "success") => {
         if (!observed || phase === null) return;
         phases.push({ phase, elapsedMs: performance.now() - phaseStarted, count, outcome: result });
@@ -336,9 +329,8 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
           if (!partial) for (const id of old.keys()) if (!entries.has(id)) removals.push([key, id]);
           next.set(key, partial ? {previous:old,updates:entries} : entries);
         }
-        const catalogChanged = !journal || journal.changes.has('extensionCatalog') || (!catalogCache.size && state.extensionCatalog?.length > 0);
-        const nextCatalog = catalogChanged ? new Map((state.extensionCatalog || []).map(entry => [entry.id, JSON.stringify(entry)])) : catalogCache;
-        delete snapshot.extensionCatalog;
+        for(const key of CONFIGURATION_COLLECTIONS)delete snapshot[key];
+        if(snapshot.settings)snapshot.settings={installationId:state.settings.installationId};
         startPhase("serialize");
         const entityUpdates = new Map(), entityRemovals = [], entityWrites = [];
         for (const [name, rows] of Object.entries(snapshot)) {
@@ -358,6 +350,10 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
           }
           if (!partial) for (const id of old.keys()) if (!updates.has(id)) entityRemovals.push([name,id]);
           entityUpdates.set(name,{old,updates,partial});
+        }
+        let configurationRevision=null;
+        if(!configuration.initialized()||!journal||['settings',...CONFIGURATION_COLLECTIONS].some(key=>journal.changes.has(key))||!loadSnapshot.get(SNAPSHOT_ID)){
+          configurationRevision=configuration.stage(configurationValues(state));configurationStaged=Boolean(configurationRevision);
         }
         const json = JSON.stringify(snapshot);
         if (observed) ++count;
@@ -385,10 +381,7 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
         for (const args of entityWrites) entityWrite.run(...args);
         startPhase("upsert_events");
         for (const args of writes) { writeEvent.run(...args); if (observed) ++count; }
-        for (const id of catalogCache.keys()) if (!nextCatalog.has(id)) deleteCatalog.run(id);
-        for (const entry of catalogChanged ? state.extensionCatalog || [] : []) if (catalogCache.get(entry.id) !== nextCatalog.get(entry.id)) {
-          writeCatalog.run(entry.id, entry.kind, entry.name, `${entry.name} ${entry.description || ''}`.toLocaleLowerCase(), entry.createdAt, entry.deletedAt || null, nextCatalog.get(entry.id));
-        }
+        if(configurationRevision)database.prepare('INSERT INTO configuration_revision VALUES(1,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision').run(configurationRevision);
         startPhase("upsert_snapshot");
         saveSnapshot.run(SNAPSHOT_ID, json, new Date().toISOString());
         if (observed) ++count;
@@ -404,10 +397,11 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
         if (!journal) for (const name of entities.keys()) if (!Object.hasOwn(state,name)) entities.delete(name);
         if (observed) ++count;
         for (const [key,entry] of next) if (entry.previous) { for (const [id,value] of entry.updates) entry.previous.set(id,value); next.set(key,entry.previous); }
-        cached = next; catalogCache = nextCatalog;
+        cached = next;
         for (const [name,{old,updates,partial}] of entityUpdates) {
           if (partial) {for (const [id,value] of updates) old.set(id,value);entities.set(name,old);} else entities.set(name,updates);
         }
+        configuration.commit();
         outcome = "success";
         finishPhase();
       } catch (error) {
@@ -424,6 +418,7 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
             finishPhase("error");
           }
         }
+        if(configurationStaged && transactionOutcome!=="committed")configuration.abort();
         throw error;
       } finally {
         if (observed) {

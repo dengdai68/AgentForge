@@ -140,7 +140,7 @@ test('npm test entry pins diagnostics to a disposable fixture and strips inherit
   assert.equal(manifest.scripts.test, 'node scripts/run-tests.mjs', 'npm test must go through the isolating runner');
   const runner = await readFile(new URL('../scripts/run-tests.mjs', import.meta.url), 'utf8');
   assert.match(runner, /AGENTFORGE_LOG_DIR \|\|=/, 'runner pins a disposable log directory');
-  for (const name of ['AGENTFORGE_DB_PATH', 'AGENTFORGE_AUTH_DB_PATH', 'AGENTFORGE_RUN_FILES_ROOT', 'AGENTFORGE_RUNTIME_CONFIG_ROOT', 'AGENTFORGE_WORKSPACE_ROOT', 'AGENTFORGE_DESKTOP_DATA_ROOT', 'AGENTFORGE_BOOTSTRAP_TOKEN']) {
+  for (const name of ['AGENTFORGE_DB_PATH', 'AGENTFORGE_AUTH_DB_PATH', 'AGENTFORGE_RUN_FILES_ROOT', 'AGENTFORGE_RUNTIME_CONFIG_ROOT', 'AGENTFORGE_WORKSPACE_ROOT', 'AGENTFORGE_DESKTOP_DATA_ROOT', 'AGENTFORGE_BOOTSTRAP_TOKEN', 'AGENTFORGE_DESKTOP_CONTROL_ROOT', 'AGENTFORGE_CREDENTIALS_ROOT', 'AGENTFORGE_RUNTIME_PREVIOUS_ROOTS', 'AGENTFORGE_INSTANCE_KIND']) {
     assert.ok(runner.includes(`"${name}"`), `runner strips inherited ${name}`);
   }
 });

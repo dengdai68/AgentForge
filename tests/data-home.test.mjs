@@ -5,16 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentforgeDataHome, legacyDataRequiresMigration, migrationGuidance, desktopServiceDataRoot, desktopServiceStoragePaths } from "../server/data-home.mjs";
 
-test("local service storage defaults remain under ~/.agentforge/desktop", () => {
+test("business storage follows the work root while authentication stays private", () => {
   const home = "/fixture-home";
   assert.equal(agentforgeDataHome(home), "/fixture-home/.agentforge");
   assert.equal(desktopServiceDataRoot(home), "/fixture-home/.agentforge/desktop");
   const storage = desktopServiceStoragePaths({ home, env: {} });
-  assert.equal(storage.databasePath, "/fixture-home/.agentforge/desktop/agentforge.sqlite");
+  assert.equal(storage.databasePath, "/fixture-home/.agentforge/workspace/records/agentforge.sqlite");
   assert.equal(storage.authDatabasePath, "/fixture-home/.agentforge/desktop/auth.sqlite");
-  assert.equal(storage.runFilesRoot, "/fixture-home/.agentforge/desktop/agentforge-runs");
+  assert.equal(storage.runFilesRoot, "/fixture-home/.agentforge/workspace/records");
   assert.equal(storage.runtimeConfigRoot, "/fixture-home/.agentforge/desktop/runtime-configs");
-  assert.equal(storage.workspaceRoot, "/fixture-home/agentforge");
+  assert.equal(storage.workspaceRoot, "/fixture-home/.agentforge/workspace");
 });
 
 test("explicit environment overrides always win over the new defaults", () => {

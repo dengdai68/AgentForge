@@ -64,9 +64,9 @@ local-cli 将 Claude api_retry、Codex error/stderr 的明确诊断字段保存�
 
 任务 Runtime 使用 `executionKey = Run ID:员工 ID`，`registerExecution` 第三个参数为 Run 分组；同键不允许重叠，不同成员可并发，`terminateExecution(runId)` 停止该组所有调用。Claude CLI、Codex exec/app-server、DSH 共用注册逻辑；沟通/探测不传分组时保持原键语义。注册释放按 entry 身份核对，避免旧回调删除新调用。
 
-marketplace 负责安装文件准备、单项详情和实际绑定/执行校验；HTTP 列表不再调用磁盘 catalog() 全量解析，导入摘要交给 Store 登记 SQLite。低层 catalog() 仅保留文件诊断和 Runtime 测试用途，不作产品目录源。当前兼容性展示为导入快照；目录协议见 docs/15。
+marketplace 负责安装文件准备、单项详情和实际绑定/执行校验；HTTP 列表不再调用磁盘 catalog() 全量解析，导入摘要交给 Store 登记配置 JSON。低层 catalog() 仅保留文件诊断和 Runtime 测试用途，不作产品目录源。当前兼容性展示为导入快照；目录协议见 docs/15。
 
-Marketplace.resolveRole 解析角色选择到兼容Provider引用；resolveRoleReplacements 在插件更新、重复导入及MCP编辑时准备角色的新引用。源码/MCP内容保持不可变文件，角色与员工关联留在Store/SQLite。
+Marketplace.resolveRole 解析角色选择到兼容Provider引用；resolveRoleReplacements 在插件更新、重复导入及MCP编辑时准备角色的新引用。源码/MCP内容保持不可变文件，角色与员工关联留在 Store/SQLite。
 
 性能：市场 ID→安装目录索引按批次目录指纹失效，单操作共享解析/校验结果；跨操作摘要缓存仍校验文件元数据和链接，不跳过变化内容哈希。模型目录 30 秒缓存/in-flight 去重，Provider、二进制、环境摘要、账号/配置变动失效，支持显式 refresh。任务/沟通资源池属于编排层，Runtime 仍只适配 Provider，不拥有任务业务状态。
 
@@ -87,3 +87,7 @@ Cursor 在成员稳定的私有 HOME 中保存原生会话，仅引用已有钥�
 portable-extensions.mjs 复用 selectedExtensions/readPluginExecutionPlan 校验与 MCP 私有启动器，为六个新增 Runtime 生成命名空间 Skill 及原生 MCP 配置。Skill 相对资源保留，子代理映射各 Runtime 原生接口；pi-agents.mjs 只由原生 Pi 扩展加载器执行，独立进程/会话传递冻结正文、源工具选择、模型及取消，不拥有领域状态。Cursor 拒绝源工具约束，Pi 要求显式基础工具清单。Hook/未映射工具/专用字段整插件明确拒绝。不得用拼接 Skill 全文或 Shell 客户端替代原生加载。
 
 model-catalog 投影新增六种原生模型目录与思考档位，忽略提供方鉴权等非模型字段；错误不保留未脱敏 stdout/stderr。原生参数映射由 portable-cli/portable-extensions 完成，不写全局账号设置；OpenCode 模型元数据来自 api --standalone model.list。
+
+业务配置根与认证分离：插件/MCP、DSH 受管会话等位于配置数据根，Git 托管凭据位于宿主传入的 credentials/。local-cli 日志入口对 Runtime 副本解析受管旧地址，marketplace 读取目录/冻结清单也使用相同解析；完整性与计划摘要照常验证，不更改旧快照或全局 CLI 配置。docs/30 说明物理整理边界。
+
+当前存储归属以 [配置目录与工作目录](../../docs/30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。

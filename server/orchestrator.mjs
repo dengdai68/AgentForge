@@ -2,7 +2,7 @@ import { executionBudget } from "./execution-budget.mjs";
 import { withWorkspaceHooks } from './workspace-hooks.mjs';
 import { join, resolve, dirname } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
-import { desktopServiceDataRoot } from "./data-home.mjs";
+import { desktopServiceStoragePaths } from "./data-home.mjs";
 import { createRunFiles } from "./run-files.mjs";
 import { runRuntime, promptSnapshot, RuntimeCancelledError, RuntimeSessionMissingError, runtimeFailureDetail, separateRuntimeSession } from "./runtime/local-cli.mjs";
 import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
@@ -22,9 +22,9 @@ export function readNodeResult(value) {
 }
 export function parseEmployeeResponse(value) {
   const raw = String(value ?? "").trim();
-  const candidates = [raw, ...Array.from(raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi), match => match[1])];
+  const candidates = [{ text:raw, prefix:'' }, ...Array.from(raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi), match => ({ text:match[1], prefix:raw.slice(match.index + match[0].length).trim() ? '' : raw.slice(0,match.index).trim() }))];
   for (const candidate of candidates) {
-    try { return readNodeResult({ ...JSON.parse(candidate), rawResponse: raw }); }
+    try { return readNodeResult({ ...JSON.parse(candidate.text), ...(candidate.prefix ? {summary:candidate.prefix} : {}), rawResponse: raw }); }
     catch { /* Ordinary text remains a valid employee handoff. */ }
   }
   // CLI text may put one coordination envelope after a natural-language
@@ -48,7 +48,8 @@ export function parseEmployeeResponse(value) {
     const item = objects[0];
     if (!raw.slice(item.end).trim() && /(?:^|\n)\s*$/.test(raw.slice(0, item.start)) &&
         ["managerDecision", "consultation", "deliveryReview", "handoff"].some(key => item.value[key] && typeof item.value[key] === "object")) {
-      return readNodeResult({ ...item.value, rawResponse: raw });
+      const body = raw.slice(0,item.start).trim();
+      return readNodeResult({ ...item.value, ...(body ? {summary:body} : {}), rawResponse: raw });
     }
   }
   return readNodeResult({ summary: raw });
@@ -234,18 +235,17 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
     const before = ["node", "instruction"].includes(delivery.purpose)
       ? acceptedWorkspaceBaseline(runBaseline, workspace.artifacts)
       : await files.snapshotWorkspace(task.workspacePath, { excludeRunFiles: true }).catch(() => new Map());
-    // Only explicit inbox/chain messages or this responsibility's handoffs are
-    // shared. Other members' private model context is never forwarded.
+    // Public collaboration is shared; private native conversations stay isolated.
     const roster = run.participants.filter(member=>!(run.removedParticipantIds || []).includes(member.id)).map(({ id, type, name, description, capabilities }) => ({ id, type, name, taskRole:id===run.manager.id ? "manager" : type==="agent" ? "member" : "human", description, capabilities }));
     // A member keeps one cwd/session even when answering another node's question.
     const cwd = task.repositoryMode === "agent" ? (task.repositoryBindings[agent.id] ? resolve(task.workspacePath, task.repositoryBindings[agent.id].path) : task.workspacePath) : task.workspacePath;
     const session = store.prepareMemberSession(delivery.id, trace.id, cwd);
+    const inputThroughMessageId = store.latestRunMessageId(runId);
     const messages = store.memberInputMessages(delivery.id);
     for (const message of messages) for (const attachment of message.attachments || []) {
       await files.readRunAttachment(runId, attachment);
       attachment.path = files.runAttachmentPath(runId, attachment);
     }
-    const inputThroughMessageId = store.latestRunMessageId(runId);
     let input, inputAcknowledged = false, inputProgress = false, nativeSessionConfirmed = agent.runtime.provider === 'claude-code' || session.resume;
     const acknowledgeInput = () => {
       if (!inputAcknowledged) {
@@ -267,13 +267,14 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
     };
     const effectiveNode = delivery.purpose === "node" && task.repositoryMode === "agent" ? { ...node, repositoryPath: task.repositoryBindings?.[agent.id]?.path || null } : node;
     const workflowContext = agent.id === run.manager.id ? await files.writeWorkflowContext(runId, trace.id, task.workflowSnapshot) : null;
-    input = taskPrompt({ task, run, node: effectiveNode, trace, agent, directory, cwd, workspace, messages, roster, mode: delivery.purpose, delivery, session, workflowContext });
+    input = taskPrompt({ task, run, node: effectiveNode, trace, agent, directory, cwd, workspace, messages, roster, mode: delivery.purpose, delivery, session, workflowContext, materialDirectory: files.taskInputDirectory(runId) });
+    await files.writeTaskInputMaterials(runId, input.materials);
     const onPrompt = async value => {
       try { store.attachTracePrompt(trace.id, await files.writePromptSnapshot(runId, trace.id, promptSnapshot(value))); }
       catch (error) { diagnostic("task.prompt_snapshot_failed", { error, runId, traceId: trace.id }); }
     };
     // The runtime returns text; coordination fields are interpreted when present.
-    const contextDirectories=[...new Set(messages.flatMap(message=>(message.attachments || []).map(file=>dirname(file.path))))];
+    const contextDirectories=[...new Set([...messages.flatMap(message=>(message.attachments || []).map(file=>dirname(file.path))), ...input.materials.map(file=>dirname(file.path)), ...(workflowContext ? [dirname(workflowContext.path)] : [])])];
     const runtimeResult = await invokeRuntime(store, agent, { ...input, contextDirectories, onPrompt, traceId: trace.id, session, executionKey: `${runId}:${agent.id}`, canStart: () => store.canExecuteDispatch(delivery.id), runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, finalPath, runId, onEvent }, files);
     output = parseEmployeeResponse(runtimeResult.finalText);
     artifacts = await capture(files, runId, trace.id, task.workspacePath, before, output, effectiveNode, delivery.purpose);
@@ -324,7 +325,7 @@ export function executeRun(store, runId, options = {}) {
   control.promise = withDiagnosticContext({ source: "task", runId }, () => drainRun(store, runId, options, control)).finally(() => active.delete(runId));
   return control.promise;
 }
-async function drainRun(store, runId, { runFilesRoot = process.env.AGENTFORGE_RUN_FILES_ROOT || join(desktopServiceDataRoot(), "agentforge-runs"), resolveGitCredential = null } = {}, control = {}) {
+async function drainRun(store, runId, { runFilesRoot = desktopServiceStoragePaths().runFilesRoot, resolveGitCredential = null } = {}, control = {}) {
   const files = createRunFiles({ root: runFilesRoot, resolveGitCredential });
   try {
     let run = store.getRun(runId);

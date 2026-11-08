@@ -31,3 +31,7 @@ macOS Developer ID 签名的安装版使用原生自动安装。当前 ad-hoc �
 下载期间，进度条与百分比同行展示，不再另建下载进度说明框；完成后隐藏进度行并恢复既有安装方式说明。此为 renderer 展示调整，宿主状态、下载安装校验及 CLI/API 协议不变。
 
 大文件网络恢复：`recover-release-upload.yml` 仅接收已有草稿 ID、原始完整源码 SHA 和本机分片清单 SHA-256。操作者将同次构建的 DMG/ZIP 按不超过8MiB拆分，上传 `upload-part-<原文件名>-<三位序号>` 与 `upload-parts.json`；清单包含每个原文件及有序分片的 name/size/sha256。Runner 校验清单、分片、还原文件与原 SHA256SUMS.txt，一致才上传缺失安装包，不重建、不覆盖已有附件、不发布草稿。两个原文件远端校验成功后仅删除这些临时分片及清单；失败保留以便续传。这是现有 GitHub Actions 的传输恢复入口，不引入服务或改变应用签名。
+
+更新下载缓存位于私有配置目录的 `updates/`。更换工作目录时不允许并发下载；更新缓存不随业务目录搬运，打开安装包时解析当前配置缓存路径。
+
+当前存储归属以 [配置目录与工作目录](30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。

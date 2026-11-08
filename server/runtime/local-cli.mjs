@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 import { registerExecution, hasActiveExecution } from "./registry.mjs";
 import { withExtensionValidation } from "./marketplace.mjs";
 import { selectedExtensions, codexMarketArgs, claudeMarketEnvironment, nativePluginRuntime } from "./extensions.mjs";
+import {runtimeStorageReferences} from '../storage-layout.mjs';
 import { diagnostic, diagnosticRedactor, withDiagnosticContext } from "../diagnostics.mjs";
 import { diagnoseLaunch } from "./launch-diagnostics.mjs";
 import { cliEnvironment } from "./cli-environment.mjs";
@@ -588,6 +589,7 @@ async function invokeCodexCli(input) {
 }
 
 async function loggedInvocation(input, invoke) {
+  input={...input,runtime:runtimeStorageReferences(input.runtime)};
   const secrets = [input.prompt, input.systemPrompt, input.session?.sessionId].filter(Boolean);
   for (const path of input.runtime.mcpConfigPaths || []) {
     try {

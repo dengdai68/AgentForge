@@ -30,7 +30,7 @@
 
 沟通右侧半屏控制台使用共享 renderer，提供成员切换、真实 thinking/text/tools、提示词、失败与分页。附件用浏览器文件选择和认证 HTTP 保存到会话目录，下载保留原名；不新增通用宿主桥。compact.css 仅调整间距字号，市场头像沿用员工颜色。模型真实专项在源码隔离客户端执行，安装包另以隔离 HOME/受控 CLI 验证。
 
-任务工作根独立于应用数据：安装版和开发版均默认 ~/agentforge，无 desktop/web 子目录；已保存工作根优先，已有任务路径不搬动。新 Task UUID 避免共享工作根的跨实例目录碰撞。CLI 源码/安装版都只发现运行中的客户端，无 --target/Web 回退；会话统一 ~/.agentforge/cli-session.json，旧安装版需重新登录。CLI 安装入口仅客户端显示。
+数据根默认为 ~/.agentforge/workspace；任务文件与 records/ 下的业务数据库、Trace 共用此数据盘；插件/MCP 与 Runtime 设置保留配置目录。认证、CLI 发现与宿主 profile 留在 ~/.agentforge/<实例>/，日志留在 ~/.agentforge/logs。已有 Task/Run 业务路径保持创建时的位置。CLI 只发现当前客户端，不直读数据库。
 
 员工、插件/MCP 市场复用共享搜索/卡片/删除命令；桌面通过 compact.css 保持紧凑尺寸，隐藏重复页标题不产生工具栏前空白。删除确认使用现有应用弹框，不增加宿主进程桥或系统弹框。
 
@@ -42,17 +42,19 @@ Electron 使用本仓库 renderer 界面，宿主代码位于 `apps/electron/`�
 
 主进程启动自己的 loopback 子服务，随机端口与实例 ID 经 IPC 回传并匹配。子服务要求 IPC 父进程和 bootstrap 信息，父进程断开即退出，没有独立 Web 启动或部署配置。
 
-| 实例 | 默认数据根 |
+| 归属 | 默认位置 |
 | --- | --- |
-| 安装版 | `~/.agentforge/desktop/` |
-| 源码开发版 | `~/.agentforge/desktop-dev/` |
+| 安装版业务资料 | `~/.agentforge/workspace/records/` |
+| 开发版业务资料 | `~/.agentforge/workspace-dev/records/` |
+| 任务文件 | `<配置根>/task_<uuid>/run_<id>/` |
+| 认证/启动定位/宿主 profile | `~/.agentforge/desktop/` 或 `desktop-dev/` |
 | 日志 | `~/.agentforge/logs/<实例标识>/` |
 
-数据根包含业务 SQLite、认证数据库、Runtime 私有配置、插件/MCP 和 Run 文件。ready 前将 Electron userData/sessionData 指向数据根下的 `browser/`（Cookie、localStorage、缓存、偏好），日志与崩溃目录分别为 `electron-logs/`、`crash-dumps/`。源码测试可用 `AGENTFORGE_DESKTOP_DATA_ROOT` 隔离；工作目录设置仅影响任务文件。
+启动由私有 `storage.json` 定位业务根，不依赖先读取业务数据库。数据盘不可访问时拒绝启动，不回退到系统盘创建空实例。Chromium userData/sessionData 保持在认证实例的 `browser/`，日志与崩溃目录仍属宿主日志；原生 CLI 自身全局认证与会话不由此功能搬动。
 
-不自动搬迁旧 Chromium 登录态，升级后可能需要重新登录；原认证数据库不删除。浏览器自身目录、Provider CLI 的 ~/.claude 或 ~/.codex 以及用户主动下载导出的文件不属于 AgentForge 配置，不擅自移动。
+“设置 → 工作目录”及 `agentforge storage` 共用认证 HTTP；空闲锁覆盖执行、沟通、调度与并发写。宿主停止自己的子服务后整理明确的应用资料，逐文件校验，原子切换定位，再从新位置启动服务。旧业务资料在新服务健康后清理；清理记录放在新业务根，断电后仍能核对，源有变化则保留。身份认证不随数据移动，Git 托管凭据留在认证实例的 `credentials/`。现有冻结路径只在读取/调用边界解析实际位置，不改历史内容。完整决策、显式现有实例整理命令和失败边界见 [统一存储](30-storage-layout.md)。
 
-旧默认位置仍有数据而新目录为空时拒绝静默新建；一次性搬迁脚本 `scripts/migrate-data-home.mjs` 先演练，显式 `--yes` 后复制校验并保留备份。清理仓库不执行此脚本。
+开发可显式设置 `AGENTFORGE_DESKTOP_DATA_ROOT` 隔离启动资料，并用当前协议 locator 选择专用业务根；测试绝不改写真实安装。旧目录有实例而新目录空时拒绝静默新建，不自动执行旧数据转换或重置。
 
 ## 宿主边界
 
@@ -138,3 +140,11 @@ DeepSeek Harness 为第三个固定 Runtime，设置与员工选择复用现有�
 
 
 工作流画布仍是隔离renderer内的本地X6组件，使用既有认证HTTP保存结构；宿主只复用compact.css密度/模态布局，不新增文件或进程桥。经理读取的workflow.md由自有服务在Run Files生成，宿主不拼接工作流提示词。
+
+应用更新安装包缓存与业务数据一起使用配置数据盘。更换目录时禁止并发下载；已验证的安装包在 SHA256 搬运后按当前缓存目录打开，不继续使用旧盘路径。
+
+当前存储归属以 [配置目录与工作目录](30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。
+
+## 共享协作输入与报告通知
+
+协作共享投影识别经理报告的多来源合并引用，各条来源消息链接同一个真实投递/本轮控制台；不新增宿主接口，不把背景已读显示为已执行。

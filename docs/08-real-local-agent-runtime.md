@@ -102,3 +102,11 @@ Provider 重试和错误的详细正文通过 execution content 保存：错误�
 新增原生 CLI 的调用可携带内部 `contextDirectories`：只由任务/沟通服务从当前消息的已存储附件路径派生，不作为公开配置输入。适配器把本轮 Trace 与附件目录映射为 Cursor add-dir、Gemini/Qwen include-directories，保证可读取工作流和上传内容；这不是操作权限或文件沙箱。
 
 当前工作目录视频元数据不整读文件；播放以独立 no-follow 描述符验证容器签名，由认证 HTTP 按请求字节流传输。该读取不扩大工作根/符号链接/凭据路径边界，不声明员工沙箱。
+
+存储根切换不改变 Provider 协议、认证、原生会话 ID 或员工隔离。调用日志入口只复制 Runtime 路径引用并解析受管旧地址，随后仍执行清单/目录/计划 SHA256 校验；不改冻结 runtime、Skill 源字节或历史提示词。Git 托管凭据由认证实例的 credentials/ 单独读取，插件、MCP 位于本机配置目录，运行资料位于工作目录。详见 docs/30。
+
+员工启动目录：新普通任务与自动化采用 `<工作目录>/tasks/<TaskID>/<RunID>`；沟通采用 Store 首次分配并持久保存的 `<工作目录>/communications/<会话ID>`，群聊成员共享文件目录但原生会话独立。既有任务路径不重写，已分配的沟通目录不随工作根切换；目录变更重建模型上下文并保留聊天历史。内部附件、提示词和执行内容仍由 Run Files 管理，详见 docs/30-storage-layout.md 与 docs/17-communication.md。
+
+## 提示词输入精简
+
+大输入正文经 Run Files 在调用前物化为私有 SHA256 资料文件，Provider 收到真实 path/摘要并按需读取；资料目录通过现有 contextDirectories 传递。冻结工作流提供稳定 Run 级入口且保留 Trace 证据。未修改 Runtime CLI 接入、系统指令原生通道或会话协议，文件读取仍计入上下文，见 docs/22。

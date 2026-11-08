@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated real UI/API acceptance. REAL=1 uses the operator's existing Claude
 // login read-only; it never modifies credentials, real instances or projects.
 import assert from 'node:assert/strict';
@@ -21,7 +22,7 @@ const data = packaged ? join(home, '.agentforge/desktop') : join(root, 'client')
 const password = randomBytes(24).toString('hex');
 const auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
 await auth.setAdministrator('communication-qa', password); auth.close();
-const store = createStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') });
+const store = createStore({ databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data, workspaceRoot: join(root, 'work') });
 store.updateWorkspaceSettings({ workspaceRoot: join(root, 'work') });
 const missing = store.listRuntimeProfiles().find(item => item.provider === 'codex');
 const failedAgent = store.createAgent({ name: '失败诊断验收', runtime: { profileId: missing.id } });
@@ -48,6 +49,7 @@ if (!real) {
   store.completeCommunication(group.id, delivery.id, '隔离分页夹具完成，不是真实 Provider。');
 }
 store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app = await electron.launch({ ...(packaged ? { executablePath: join(appBundle,'Contents/MacOS/AgentForge') } : {}), args: packaged ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_LOG_DIR: join(root, 'logs'), AGENTFORGE_DESKTOP_DATA_ROOT: data }, timeout: 60000 });
 const errors = [], evidence = { root, real, packaged };
 const wait = async (label, check, timeout = 180000) => { const start = Date.now(); let reported = 0; while (Date.now() - start < timeout) { const value = await check(); if (value) return value; if (Date.now() - reported > 30000) { console.log('WAIT ' + label); reported = Date.now(); } await new Promise(done => setTimeout(done, 500)); } throw new Error('Timed out: ' + label); };
@@ -123,7 +125,7 @@ try {
   const initial = await api('/api/communications/' + chat.id), attachments = initial.messages[0].attachments;
   assert.notEqual(attachments[0].path, attachments[1].path);
   for (let index = 0; index < attachments.length; index++) {
-    const actual = await readFile(join(data, 'agentforge-runs/communications', chat.id, attachments[index].path)); assert.deepEqual(actual, buffers[index]);
+    const actual = await readFile(join(root,'work/communications',chat.id,attachments[index].path)); assert.deepEqual(actual, buffers[index]);
     assert.equal(createHash('sha256').update(actual).digest('hex'), attachments[index].sha256);
   }
   assert.equal(initial.conversation.unreadCount, 0); assert.equal(await page.locator('.communication-contact i').count(), 0);

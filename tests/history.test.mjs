@@ -367,3 +367,15 @@ test('durable history watermark updates only new records and resumes after resta
     send(store,chat.id,'third');assert.equal(query(store,'read_conversation',{conversationId:chat.id}).items.length,3);
   }finally{store.close();inspection?.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('relocated MCP resolves before history preflight and still rejects reserved names without mutating frozen input',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'af-history-relocated-')),oldRoot=join(root,'old/runtime-configs'),currentRoot=join(root,'current/runtime-configs'),path=join(oldRoot,'marketplace/proof/mcp.json'),current=join(currentRoot,'marketplace/proof/mcp.json');
+ t.after(()=>rm(root,{recursive:true,force:true}));await mkdir(join(currentRoot,'marketplace/proof'),{recursive:true});
+ const previous={root:process.env.AGENTFORGE_RUNTIME_CONFIG_ROOT,aliases:process.env.AGENTFORGE_RUNTIME_PREVIOUS_ROOTS};
+ t.after(()=>{for(const[key,value]of [['AGENTFORGE_RUNTIME_CONFIG_ROOT',previous.root],['AGENTFORGE_RUNTIME_PREVIOUS_ROOTS',previous.aliases]])if(value===undefined)delete process.env[key];else process.env[key]=value;});
+ process.env.AGENTFORGE_RUNTIME_CONFIG_ROOT=currentRoot;process.env.AGENTFORGE_RUNTIME_PREVIOUS_ROOTS=JSON.stringify([oldRoot]);
+ const s=createStore(),agent=s.listAgents().find(a=>a.id===employee),input={runtime:{mcpConfigPaths:[path],extensionManifest:[{kind:'mcp',path,sha256:'frozen'}]},prompt:'test'};
+ const original=structuredClone(input);await writeFile(current,JSON.stringify({mcpServers:{proof:{command:'unused'}}}));
+ await withHistoryTools(s,agent,input,async prepared=>{assert.equal(prepared.runtime.mcpConfigPaths[0],current);assert.equal(prepared.runtime.extensionManifest[0].path,current);assert.equal(prepared.runtime.extensionManifest[0].sha256,'frozen');});assert.deepEqual(input,original);
+ await writeFile(current,JSON.stringify({mcpServers:{agentforge_history:{command:'unused'}}}));await assert.rejects(withHistoryTools(s,agent,input,async()=>assert.fail('reserved server must not invoke provider')),/保留/);
+});

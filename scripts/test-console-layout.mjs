@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated presentation test. No real employee/provider invocation is started.
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile} from 'node:fs/promises';
@@ -11,9 +12,9 @@ import {createRunFiles} from '../server/run-files.mjs';
 
 await mkdir('.data',{recursive:true});
 const root=await mkdtemp(resolve('.data/console-layout-')),bundle=process.env.AGENTFORGE_CONSOLE_LAYOUT_APP;
-const storage=desktopStoragePaths(bundle?join(root,'.agentforge','desktop'):root,{home:root}),password=randomBytes(24).toString('hex');
+const storage=desktopStoragePaths(join(root,'.agentforge','desktop'),{home:root}),password=randomBytes(24).toString('hex');
 const auth=createAuth({databasePath:storage.AGENTFORGE_AUTH_DB_PATH});await auth.setAdministrator('layout-test',password);auth.close();
-const store=createStore({databasePath:storage.AGENTFORGE_DB_PATH,workspaceRoot:storage.AGENTFORGE_WORKSPACE_ROOT});
+const store=createStore({databasePath:storage.AGENTFORGE_DB_PATH,configurationDirectory:storage.AGENTFORGE_DESKTOP_CONTROL_ROOT,workspaceRoot:storage.AGENTFORGE_WORKSPACE_ROOT});
 const task=store.createTask({managerAgentId:'system_project_manager',title:'Console layout verification',objective:'Isolated visual check',memberAgentIds: store.listTeams()[0].memberAgentIds,workflowTemplateId:'software_delivery'}),run=store.createRun(task.id);
 const trace=store.createTrace(run.id,{agentId:run.manager.id,workflowNodeId:'development',type:'node'});
 store.completeTrace(trace.id,{status:'completed'});store.pauseRun(run.id,'Presentation only; never start Provider');
@@ -21,7 +22,8 @@ const markdown=['## 长正文排版','',...Array.from({length:18},(_,i)=>`${i+1}
 const files=createRunFiles({root:storage.AGENTFORGE_RUN_FILES_ROOT});
 const contentRef=await files.writeConsoleContent(run.id,trace.id,{version:1,fields:{text:{text:markdown,redacted:false,truncated:false}}});
 store.addEvent({type:'runtime.event',runId:run.id,actor:{type:'agent',id:run.manager.id,name:run.manager.name},message:'Markdown layout fixture',data:{auditVersion:2,traceId:trace.id,presentation:'text',providerEventType:'assistant',contentRef}});store.close();
-const app=await electron.launch({...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')}:{args:['apps/electron/main.mjs']}),env:{...process.env,HOME:root,AGENTFORGE_DESKTOP_DATA_ROOT:root},timeout:120000});
+await writeStorageLocation(storage.AGENTFORGE_DESKTOP_CONTROL_ROOT,{version:1,workspaceRoot:storage.AGENTFORGE_WORKSPACE_ROOT,previousRuntimeRoots:[]});
+const app=await electron.launch({...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')}:{args:['apps/electron/main.mjs']}),env:{...process.env,HOME:root,AGENTFORGE_DESKTOP_DATA_ROOT:storage.AGENTFORGE_DESKTOP_CONTROL_ROOT},timeout:120000});
 const evidence={root,cases:[]};console.log('EVIDENCE '+root);
 try {
   const page=await app.firstWindow();await page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:60000});const origin=new URL(page.url()).origin;

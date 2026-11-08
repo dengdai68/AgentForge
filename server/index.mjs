@@ -29,6 +29,7 @@ import { createCommunicationService } from "./communication.mjs";
 import { queryHistory } from "./history/bridge.mjs";
 import { createDataReset } from "./data-reset.mjs";
 import {createPluginUpdates} from './plugin-updates.mjs';
+import {validateStorageDestination} from './storage-layout.mjs';
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const webRoot = join(root, "web");
@@ -47,7 +48,7 @@ const host = "127.0.0.1";
 const instanceId = randomUUID();
 const storage = desktopServiceStoragePaths();
 const databasePath = storage.databasePath;
-installProcessDiagnostics("server", { instancePath: databasePath });
+installProcessDiagnostics("server", { instancePath: storage.authDatabasePath });
 const runFilesRoot = storage.runFilesRoot;
 const workspaceRoot = storage.workspaceRoot;
 const runtimeConfigRoot = storage.runtimeConfigRoot;
@@ -56,15 +57,16 @@ const runtimeConfigRoot = storage.runtimeConfigRoot;
 const usesDefaultRoot = [storage.databasePath, storage.authDatabasePath, storage.runFilesRoot, storage.runtimeConfigRoot, storage.workspaceRoot].some(path => path === storage.dataRoot || path.startsWith(storage.dataRoot + sep));
 if (usesDefaultRoot) { await mkdir(storage.dataRoot, { recursive: true, mode: 0o700 }); await chmod(storage.dataRoot, 0o700); }
 const authOptions = { databasePath: storage.authDatabasePath, origins: [], bootstrapToken };
-const dataReset = createDataReset({ databasePath, authDatabasePath: authOptions.databasePath, runFilesRoot, runtimeConfigRoot, logDirectory: diagnostics().status().directory, protectedPaths: [root] });
+const dataReset = createDataReset({workspaceRoot,configurationRoot:storage.controlRoot,protectedPaths:[root,diagnostics().status().directory]});
 await dataReset.recover();
 let auth;
-const storeOptions = { databasePath, workspaceRoot, runtimeInstalled, onSaveDiagnostic: (record) => {
+const storeOptions = { databasePath, workspaceRoot,workspaceRootAuthoritative:true, configurationDirectory:storage.controlRoot, runtimeInstalled, onSaveDiagnostic: (record) => {
   if (record.outcome === "error" || record.elapsedMs >= 250) diagnostic("persistence.save", record);
 } };
 let store = createStore(storeOptions);
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-const runFiles = createRunFiles({ root: runFilesRoot });
+const communicationFiles=()=>createRunFiles({root:runFilesRoot,communicationsRoot:join(workspaceRoot,'communications'),resolveCommunicationWorkspace:key=>store.getCommunicationWorkspace(key)});
+let runFiles = communicationFiles();
 const taskDeletionLocks = new Set();
 const automationDeletionLocks = new Set();
 const eventStreams = new Set();
@@ -96,6 +98,7 @@ function importExtensions(prepare) {
       const roleBindings=await marketplace.resolveRoleReplacements(targetStore.listRoles(),plan.replacements);
       return targetStore.transaction(()=>{ targetStore.registerExtensions(candidates); return {...result,...targetStore.replaceImportedExtensions(plan.replacements,bindings,roleBindings)}; });
     } catch(error) {
+      if(error.committed)throw error;
       for(const item of candidates)try{targetStore.removeExtension(item);}catch(cleanupError){diagnostic('extensions.import_cleanup_failed',{error:cleanupError});}
       throw error;
     }
@@ -103,10 +106,10 @@ function importExtensions(prepare) {
   extensionImportTail=operation.catch(()=>{});
   return operation;
 }
-const pluginUpdates=createPluginUpdates({getStore:()=>store,marketplace,canRun:()=>!resettingData && !updateRestartLease});
+const pluginUpdates=createPluginUpdates({getStore:()=>store,marketplace,canRun:()=>!resettingData && !updateRestartLease && !store.configurationBlocked()});
 const runExecutionOptions = { runFilesRoot, resolveGitCredential: (url) => runtimeConfiguration.resolveGitCredential(url) };
-let communications = createCommunicationService(store, { root: join(runFilesRoot, "communications"), files: runFiles });
-const wakeCommunication = (id) => setImmediate(() => { if (!resettingData && !updateRestartLease) communications.kick(id).catch(error => diagnostic("communication.dispatch_error", { conversationId: id, error })); });
+let communications = createCommunicationService(store, { root: join(workspaceRoot, "communications"), files: runFiles });
+const wakeCommunication = (id) => setImmediate(() => { if (!resettingData && !updateRestartLease && !store.configurationBlocked()) communications.kick(id).catch(error => diagnostic("communication.dispatch_error", { conversationId: id, error })); });
 async function employeeInput(request, agentId = null) {
   const input = await readJson(request);
   const allowed = ['name', 'kind', 'description', 'systemPrompt', 'capabilities', 'status', 'runtime', 'roleIds'];
@@ -246,15 +249,14 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
       resetCommitted = true;
       for (const stream of eventStreams) stream.end();
       eventStreams.clear();
-      closeExecutionBudget(store);store.close(); auth.close();
+      closeExecutionBudget(store);store.close();
       await dataReset.recover();
-      store = createStore(storeOptions); auth = createAuth(authOptions);
+      store = createStore(storeOptions); runFiles=communicationFiles();
       pluginUpdates.reset();
-      communications = createCommunicationService(store, { root: join(runFilesRoot, "communications"), files: runFiles });
-      auth.establishResetSetup(response, request.headers.origin);
+      communications = createCommunicationService(store, { root: join(workspaceRoot, "communications"), files: runFiles });
       diagnostic("instance.reset_completed");
       resetCommitted = false;
-      sendJson(response, 200, { ok: true, next: "/setup.html" });
+      sendJson(response, 200, { ok: true, next: "/" });
     } catch (error) {
       if (resetCommitted) { diagnostic("instance.reset_incomplete", { error }); sendJson(response, 503, { error: "清除尚未完成，请重启 AgentForge 后继续清除；正常使用已暂停。" }); }
       else throw error;
@@ -266,7 +268,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
   const taskAttachment = attachmentRoute?.[1] === 'runs';
   if (chatAttachment && request.method === 'POST' && !chatAttachment[2]) {
     if (!/^application\/octet-stream(?:;|$)/i.test(request.headers['content-type'] || '')) throw new Error('附件上传需要 application/octet-stream');
-    const key = chatAttachment[1]; if (taskAttachment) store.assertRunAttachmentUpload(key); else store.getCommunication(key, { limit: 1 });
+    const key = chatAttachment[1]; if (taskAttachment) store.assertRunAttachmentUpload(key); else store.prepareCommunicationWorkspace(key,join(workspaceRoot,"communications"));
     let record;
     try { record=await runFiles[taskAttachment?'writeRunAttachment':'writeCommunicationAttachment'](key,searchParams.get('name'),request.iterator({destroyOnReturn:false})); }
     catch(error){if(error.code==='ATTACHMENT_TOO_LARGE')throw new RequestBodyTooLargeError(error.message);throw error;}
@@ -403,22 +405,19 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     return true;
   }
   if (pathname === "/api/settings/workspace" && request.method === "GET") {
-    sendJson(response, 200, { ...store.getWorkspaceSettings(), version }); return true;
+    sendJson(response, 200, { ...store.getWorkspaceSettings(), version,businessRoot:storage.dataRoot,databasePath,runFilesRoot,runtimeConfigRoot,configurationRoot:storage.controlRoot,configurationFile:join(storage.controlRoot,'configuration.json'),authenticationRoot:storage.controlRoot,logDirectory:diagnostics().status().directory }); return true;
   }
   if (pathname === "/api/settings/workspace" && request.method === "PUT") {
     const input = await readJson(request);
-    const path = input.workspaceRoot;
-    if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0") || path.length > 4096) throw new Error("请输入有效的绝对目录路径");
-    if (normalize(path) === parse(path).root) throw new Error("不能使用文件系统根目录");
-    let canonical;
-    try {
-      await mkdir(path, { recursive: true, mode: 0o700 });
-      canonical = await realpath(path);
-      if (!(await stat(canonical)).isDirectory()) throw new Error();
-      await access(canonical, constants.R_OK | constants.W_OK | constants.X_OK);
-    } catch (cause) { throw new Error("目录无法创建或服务无法读写，请检查路径和权限", { cause }); }
-    if (canonical === parse(canonical).root) throw new Error("不能使用文件系统根目录");
-    sendJson(response, 200, { ...store.updateWorkspaceSettings({ workspaceRoot: canonical }), version }); return true;
+    if(!input||Object.keys(input).some(key=>key!=='workspaceRoot'))throw new Error('数据目录仅接受 workspaceRoot');
+    if(updateRestartLease||resettingData||writeRequests!==1||runtimeTestActive||taskDeletionLocks.size||pluginUpdates.status().running||communications.isActive()||store.pendingCommunications().length||store.listPatrolRunIds().length||store.listRecoveryRunIds().some(hasActiveExecution)){sendJson(response,409,{error:'仍有执行、排队任务或保存操作，请暂停执行并等待沟通结束后更换数据目录'});return true;}
+    updateRestartLease={id:randomUUID(),purpose:'storage',timer:null};
+    try{
+      const target=await validateStorageDestination({sourceRoot:storage.dataRoot,workspaceRoot:input.workspaceRoot,instance:process.env.AGENTFORGE_INSTANCE_KIND||'desktop',configurationRoot:storage.controlRoot});
+      if(target.unchanged){updateRestartLease=null;sendJson(response,200,{workspaceRoot:target.workspaceRoot,source:'startup',restarting:false,version});return true;}
+      response.once('finish',()=>process.send?.({type:'agentforge-storage-restart',id:updateRestartLease.id,workspaceRoot:target.workspaceRoot}));
+      sendJson(response,200,{workspaceRoot:target.workspaceRoot,businessRoot:target.businessRoot,restarting:true,version});return true;
+    }catch(error){updateRestartLease=null;throw error;}
   }
   // CLI paths are executed via execFile without a shell, so spaces and
   // non-ASCII are legitimate; only control characters/newlines are rejected.
@@ -536,6 +535,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
       const roleBindings=await marketplace.resolveRoleReplacements(store.listRoles(),[{kind:'mcp',previousId,id:replacement.id}]);
       sendJson(response,200,store.transaction(()=>{ store.registerExtensions([replacement]); return store.replaceMcpExtension(previousId,replacement,bindings,roleBindings); }));
     } catch(error) {
+      if(error.committed)throw error;
       // Failed candidates are hidden, not used to rewrite any frozen files.
       try{store.removeExtension({kind:'mcp',id:replacement.id,name:replacement.name});}catch(cleanupError){diagnostic('mcp.edit_cleanup_failed',{error:cleanupError});}
       throw error;
@@ -936,6 +936,7 @@ const server = createServer(async (request, response) => {
   if (!auth) { sendJson(response, 503, { error: "服务正在启动" }); return; }
   const write = !["GET", "HEAD"].includes(request.method);
   if (write && updateRestartLease) { sendJson(response, 503, { error: "应用正在准备重启更新，请稍后重试" }); return; }
+  if(store.configurationBlocked()){sendJson(response,503,{error:'配置发布尚未完成，请修复配置目录后重启恢复；不要重复提交'});return;}
   if (resettingData) { sendJson(response, 503, { error: "正在清除数据，请稍后重试" }); return; }
   if (write) ++writeRequests;
   try {
@@ -950,7 +951,7 @@ const server = createServer(async (request, response) => {
     await serveStatic(response, url.pathname);
   } catch (error) {
     diagnostic("http.request_failed", { method: request.method, pathname: (request.url || "").split("?")[0], error });
-    sendJson(response, error instanceof RequestBodyTooLargeError ? 413 : 400, { error: error.message || "请求处理失败" });
+    sendJson(response, error.committed ? 503 : error instanceof RequestBodyTooLargeError ? 413 : 400, { error: error.message || "请求处理失败" });
   } finally { if (write) --writeRequests; }
 });
 
@@ -999,16 +1000,16 @@ process.on('message', message => {
   }
   process.send?.({ type: 'agentforge-update-readiness', id: message.id, ready: !busy });
 });
-setInterval(() => { if (!resettingData && !updateRestartLease) communications.poll().catch(error => diagnostic("communication.poll_error", { error })); }, 15000).unref();
+setInterval(() => { if (!resettingData && !updateRestartLease && !store.configurationBlocked()) communications.poll().catch(error => diagnostic("communication.poll_error", { error })); }, 15000).unref();
 const taskPatrol = createTaskPatrol({
   store, execute: runId => executeRun(store, runId, runExecutionOptions),
   isExecuting: runId => isRunExecuting(store, runId) || hasActiveExecution(runId),
-  blocked: () => resettingData || Boolean(updateRestartLease),
+  blocked: () => resettingData || Boolean(updateRestartLease) || store.configurationBlocked(),
   onError: (error, runId) => diagnostic("task.patrol_failed", { error, runId })
 });
 taskPatrol.start();
 server.on("close", () => taskPatrol.stop());
 
-const automationScheduler = createAutomationScheduler({ getStore: () => store, execute: (current, runId) => executeRun(current, runId, runExecutionOptions), blocked: () => resettingData || Boolean(updateRestartLease), onError: (error, runId) => diagnostic("automation.scheduler_failed", { error, runId }) });
+const automationScheduler = createAutomationScheduler({ getStore: () => store, execute: (current, runId) => executeRun(current, runId, runExecutionOptions), blocked: () => resettingData || Boolean(updateRestartLease) || store.configurationBlocked(), onError: (error, runId) => diagnostic("automation.scheduler_failed", { error, runId }) });
 automationScheduler.start();
 server.on("close", () => automationScheduler.stop());

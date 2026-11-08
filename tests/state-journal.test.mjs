@@ -76,7 +76,7 @@ for (const edit of [false,true]) test(`snapshot-backed collections are fully mat
     const expected=copyState(journal.state);
     assert.equal(db.prepare("SELECT count(*) n FROM workspace_entities WHERE collection='tasks'").get().n,2);
     assert.equal(db.prepare('SELECT count(*) n FROM workspace_event_rows').get().n,2);
-    assert.equal(db.prepare('SELECT count(*) n FROM extension_catalog').get().n,1);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='extension_catalog'").get(),undefined);
     disk.close();disk=createSqlitePersistence(path);
     assert.deepEqual(disk.load(),expected);
     const reopened=createStateJournal(disk.load({lazy:true}));

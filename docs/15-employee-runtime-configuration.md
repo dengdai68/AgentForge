@@ -41,7 +41,7 @@ HTTP/CLI 拒绝 `skillIds`、员工 `mcpJson`、连接字段、手工路径及�
 ## 安装与详情
 
 - 插件首页只列已安装项。HTTPS Git 仓库或本机绝对目录直接一次安装全部条目。识别 `.claude-plugin/marketplace.json`、`.agents/plugins/marketplace.json`、`.claude-plugin/plugin.json`、`.codex-plugin/plugin.json` 和根 `plugin.json`。市场支持相对目录、Codex `local/path`、`url` 的同仓库 `./` 来源，以及 HTTPS `github`、`url`、`git-subdir` 远程来源。远程来源按 URL+ref/sha 复用检出，sha 优先；记录真实仓库与提交 ID。不提供读取来源/单插件选择/信任勾选。npm/archive/command 来源尚不支持，明确整批拒绝，不跳过条目或执行清单命令。
-- 安装复制完整插件及支持文件到 Runtime 根下 `installed-plugins/<批次ID>/plugins/<版本ID>/plugin/`，拆分 MCP 在同批次 `mcps/<版本ID>/`，独立手动 MCP 在 `marketplace/<版本ID>/`。默认根位于 `~/.agentforge/<实例>/runtime-configs/`。准备完整批次后一次 rename 发布，失败清理临时批次，不暴露部分已安装项。版本不可变，保存 manifest 及完整目录摘要；受管副本篡改会拒绝执行。
+- 安装复制完整插件及支持文件到 Runtime 根下 `installed-plugins/<批次ID>/plugins/<版本ID>/plugin/`，拆分 MCP 在同批次 `mcps/<版本ID>/`，独立手动 MCP 在 `marketplace/<版本ID>/`。根位于 `~/.agentforge/<实例>/runtime-configs/`；Git 托管凭据独立放在认证实例的 `credentials/`。更换根保留安装字节与冻结摘要，通过受管旧地址解析读取新位置，不重新导入或改写历史（docs/30）。准备完整批次后一次 rename 发布，失败清理临时批次，不暴露部分已安装项。版本不可变，保存 manifest 及完整目录摘要；受管副本篡改会拒绝执行。
 - 配置根的祖先目录允许 macOS `/tmp` → `/private/tmp`、卷挂载等正常别名，先解析实际位置再创建与记录路径；配置根本身及受管子目录仍拒绝符号链接，运行中实际位置改变则报错。目录错误在诊断中保留具体路径和错误码，不自动删除或重建真实数据。
 - 导入不运行安装脚本、Hook、依赖安装或 MCP；首次安装不自动绑定员工，重复导入按本页覆盖规则更新已有选择。拆分时解析默认或声明的 MCP JSON，把插件根变量替换成已安装目录；清空加载副本的默认 MCP 文件并移除 manifest 的 MCP 声明，避免 Provider 自动启用。选中员工实际执行 Hook，以本机用户权限运行；bypass 不是沙箱。
 - 插件卡片、详情及员工选择器分别标记九种 Runtime 支持情况；详情给出不兼容原因，组件标记适用 Runtime。列表只给组件数量与兼容性；详情按需读取 Skill、Subagent、Hook 元信息及 manifest。支持表示静态组件可加载，不代表本机 CLI、依赖、模型账号已实测。在线市场浏览本轮不提供。
@@ -87,7 +87,7 @@ Web 设置模型字段为可搜索筛选的建议列表 + 手工输入，思考�
 
 ### GitHub / GitLab 私有仓库拉取 Token（2026-10-12）
 
-「设置 → 仓库访问」（`/settings/repositories`）管理本机 `git-credentials.json`，它位于 `AGENTFORGE_RUNTIME_CONFIG_ROOT` 下、权限为 0600，格式固定为版本号和 GitHub/GitLab Token。`GET /api/runtime/git-credentials` 只返回两个公共 HTTPS 主机的 `{ id, label, host, configured }` 状态；`PUT`/`DELETE /api/runtime/git-credentials/github|gitlab` 仅在已登录管理员会话中写入或移除，读取后绝不回显 Token。托管根目录和文件均拒绝链接，文件拒绝异常结构与过大内容，并以临时文件重命名提交；它不是 Store 数据、员工配置字段或可导出的业务 metadata。主题和导航偏好使用单独的浏览器本地存储，绝不混入 Token；离开设置清除输入，页面刷新只恢复配置状态。
+「设置 → 仓库访问」（`/settings/repositories`）管理本机 `git-credentials.json`，它位于 私有配置实例的 `credentials/` 下、权限为 0600，格式固定为版本号和 GitHub/GitLab Token。`GET /api/runtime/git-credentials` 只返回两个公共 HTTPS 主机的 `{ id, label, host, configured }` 状态；`PUT`/`DELETE /api/runtime/git-credentials/github|gitlab` 仅在已登录管理员会话中写入或移除，读取后绝不回显 Token。托管根目录和文件均拒绝链接，文件拒绝异常结构与过大内容，并以临时文件重命名提交；它不是 Store 数据、员工配置字段或可导出的业务 metadata。主题和导航偏好使用单独的浏览器本地存储，绝不混入 Token；离开设置清除输入，页面刷新只恢复配置状态。
 
 已有历史 Task 保留冻结的不含凭据 repository URL/ref；新 Task 不再生成仓库绑定或自动检出。`server/index.mjs` 只把 URL 解析能力交给 Run Files；Run Files 只在 URL 精确匹配 `https://github.com/...` 或 `https://gitlab.com/...` 时，在 clone/fetch 子进程中以临时 credential helper 传入 Token（GitHub 用户名 `x-access-token`，GitLab 用户名 `oauth2`），按主机拒绝重定向/其他主机请求并在检出后删除 helper。Token 不进入 URL、命令参数、workspace-ready 标记、Task/Run/Trace/Event/Artifact、日志或 Agent Prompt。clone 禁用 Git hooks、子模块与 LFS 自动下载；既有本机 Git URL 重写并不成为平台 Token 授权。
 
@@ -114,19 +114,19 @@ Runtime 展示名称为Claude Code、Codex、DeepSeek Harness、Cursor、Gemini 
 
 ## 数据库目录与查询
 
-插件与 MCP 摘要在导入/创建时写入同一业务 SQLite 的 extension_catalog 表，记录名称、说明、来源/版本、Runtime 兼容性、组件数量和软删除时间。完整组件和私密 MCP JSON 保持不可变文件存储；不把正文或凭据复制到目录表。插件/MCP GET 列表只查询数据库，不遍历安装目录或重算兼容性；GET 详情按单条读取文件，绑定与执行仍校验内容完整性。
+插件与 MCP 摘要在导入/创建时写入配置目录的 `configuration.json`，记录名称、说明、来源/版本、Runtime 兼容性、组件数量和软删除时间；Runtime 设置同属此文件。完整组件和私密 MCP JSON 保持不可变文件存储。GET 列表查询启动时加载的元数据缓存，不遍历安装目录或重算兼容性；GET 详情按单条读取文件。员工/角色绑定保留业务 SQLite，跨文件提交由 revision 指针协调，详见 docs/30。
 
 列表接受 `page`（正整数，默认1）与 `search`（名称/说明包含匹配，最多200字符），固定每页20项；返回原资源键 plugins/entries，加 total/page/pageSize/totalPages/hasMore。先过滤软删除和搜索再分页，按 createdAt 降序、ID 稳定排序；超尾页收敛到最后一页。拒绝未知或重复参数。App 翻页和防抖搜索、CLI --page/--search/--all 使用同一查询，员工选择器按页收集摘要，不读取组件正文。
 
 导入候选文件准备完后，目录登记、重复来源替换、员工重绑定、旧版本软删除在同一事务提交；失败候选不进入当前目录。MCP 编辑和自动插件更新同步这一事务边界。自动更新只查询数据库中未删除的安装项；删除与在途更新竞争由原版本/员工快照检查拒绝，不会自动复活。兼容性展示取安装时结果，真正绑定/执行按当前解析规则检查。
 
-本次配置协议以数据库目录为唯一当前安装目录，不自动扫描旧版本安装记录或迁移旧格式。旧版只有磁盘记录的安装需显式重新导入，并重新选择员工绑定；原文件与冻结执行记录保留，不自动清除或重置真实实例。
+当前安装目录的唯一主数据是配置 JSON，不自动扫描旧目录或转换旧 SQLite 清单。现有实例仅在用户明确要求时停机显式整理；未整理的旧清单拒绝启动，不自动清除业务数据。
 
-角色支持 extensionSelection（pluginIds/mcpIds）并自动合并到员工执行快照；员工直接选择独立保存，解绑角色不清除直接选择。新增任务和后续沟通使用当前角色扩展，冻结历史保持原引用。删除扩展同步解除角色和员工关联，更新/编辑/重复导入同步替换两类关联。插件源码及 MCP 私有配置继续保存文件；SQLite 只维护索引与关联。
+角色支持 extensionSelection（pluginIds/mcpIds）并自动合并到员工执行快照；员工直接选择独立保存，解绑角色不清除直接选择。新增任务和后续沟通使用当前角色扩展，冻结历史保持原引用。删除扩展同步解除角色和员工关联，更新/编辑/重复导入同步替换两类关联。插件源码及 MCP 私有配置继续保存文件；SQLite 只维护业务关联与历史冻结事实；当前扩展清单保存在配置 JSON。
 
 扩展详情通过安装批次目录指纹维护版本 ID→路径索引；绑定/执行准备在单次操作内共享解析与完整性检查，后续操作按文件指纹重新判断。元数据或内容发生变化仍拒绝使用冻结版本，不跳过篡改检测。Runtime 模型目录使用 30 秒短缓存与在途请求合并，账号配置、环境和可执行文件变更使缓存失效，App/CLI 显式刷新可绕过已完成缓存。完整资源边界见 [docs/28](28-performance-architecture.md)。
 
-MCP工具发现：POST /api/runtime/mcp-marketplace/:id/tools，空对象或{refresh?:boolean}；只允许当前已安装项，读取不可变配置，使用与真实调用相同的mcp-launcher进行initialize/tools/list，支持stdio/SSE/HTTP，不调用业务工具。返回{tools:[{name,title?,description,inputSchema,outputSchema?,annotations?}],total,checkedAt}，名称/参数结构保留，真实凭据值脱敏。15秒总超时，成功缓存60秒且同配置请求合并，刷新绕过缓存，失败不缓存；进程与连接总会关闭，最多4个并发发现，每项最多2000工具/2MiB并限制分页。列表页仍只查询数据库元数据，不连接全部MCP。详情在静态展示的连接配置下独立加载并完整显示工具名称和说明，保留刷新；不显示搜索、分页和参数定义，失败不伪装成空列表。HTTP/CLI保留完整参数结构与既有查询能力，CLI mcps tools ID --all [--refresh]读取全部工具。
+MCP工具发现：POST /api/runtime/mcp-marketplace/:id/tools，空对象或{refresh?:boolean}；只允许当前已安装项，读取不可变配置，使用与真实调用相同的mcp-launcher进行initialize/tools/list，支持stdio/SSE/HTTP，不调用业务工具。返回{tools:[{name,title?,description,inputSchema,outputSchema?,annotations?}],total,checkedAt}，名称/参数结构保留，真实凭据值脱敏。15秒总超时，成功缓存60秒且同配置请求合并，刷新绕过缓存，失败不缓存；进程与连接总会关闭，最多4个并发发现，每项最多2000工具/2MiB并限制分页。列表页仍只查询配置元数据缓存，不连接全部MCP。详情在静态展示的连接配置下独立加载并完整显示工具名称和说明，保留刷新；不显示搜索、分页和参数定义，失败不伪装成空列表。HTTP/CLI保留完整参数结构与既有查询能力，CLI mcps tools ID --all [--refresh]读取全部工具。
 
 mcps tools支持--search名称/说明筛选后分页，默认每页20条，--page N与--all互斥；--all返回全部匹配工具。输出tools、匹配total、服务availableTotal、page/pageSize/totalPages/hasMore及checkedAt；与App详情搜索和20条分页相同，查询只读取一次工具定义。
 

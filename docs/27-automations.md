@@ -49,3 +49,5 @@ GET/POST /api/automations；GET/PUT/DELETE /api/automations/:id；GET /api/autom
 删除已停用自动化时一次构造全部 Task/Run ID，各关联集合一次过滤并在同一事务提交；文件暂存/清理的恢复机制保留，清理未完成仍返回 pending，不伪报完成。
 
 自动化配置必填managerAgentId，从所选员工（含团队展开成员）中单选。保存、编辑、每次触发均校验该员工存在、可用且属于成员集合；配置和触发快照保存其ID，生成Task时显式传递，不按员工kind推断。旧配置缺少该字段时须编辑选择，失败触发保留明确原因且不创建任务。正在执行的冻结经理不变。
+
+员工启动目录：新普通任务与自动化采用 `<工作目录>/tasks/<TaskID>/<RunID>`；沟通采用 Store 首次分配并持久保存的 `<工作目录>/communications/<会话ID>`，群聊成员共享文件目录但原生会话独立。既有任务路径不重写，已分配的沟通目录不随工作根切换；目录变更重建模型上下文并保留聊天历史。内部附件、提示词和执行内容仍由 Run Files 管理，详见 docs/30-storage-layout.md 与 docs/17-communication.md。

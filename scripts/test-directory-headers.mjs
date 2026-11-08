@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Visible, isolated directory header regression; no Provider execution.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -16,7 +17,7 @@ const data = packaged ? join(home, '.agentforge/desktop') : join(root, 'client')
 const password = randomBytes(24).toString('hex');
 const auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
 await auth.setAdministrator('directory-qa', password); auth.close();
-const store = createCatalogFixtureStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') });
+const store = createCatalogFixtureStore({ databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data, workspaceRoot: join(root, 'work') });
 store.updateWorkspaceSettings({ workspaceRoot: join(root, 'work') });
 const seedTeam = store.listTeams()[0], seedFlow = store.listWorkflowTemplates()[0];
 for (let i = 0; i < 22; i++) {
@@ -29,6 +30,7 @@ for (let i = 0; i < 23; i++) store.createTask({managerAgentId:'system_project_ma
 store.updateWorkflowTemplate(taskFlow.id, { name: '任务筛选流程新名', nodes: seedFlow.nodes });
 store.createRole({name:'布局验收角色',prompt:'用于检查角色目录。'});
 store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app = await electron.launch({ ...(packaged ? { executablePath: resolve('release/mac-arm64/AgentForge.app/Contents/MacOS/AgentForge') } : {}), args: packaged ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 60000 });
 const errors = [], evidence = { baseline, packaged, root, views: [] };
 try {

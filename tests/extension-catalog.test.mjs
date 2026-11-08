@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {createStore} from '../server/store.mjs';
 
-test('SQLite extension catalog persists summary-only pages, searches before paging, and rolls back soft deletion', t=>{
+test('JSON extension catalog persists summary-only pages, searches before paging, and rolls back soft deletion', t=>{
  const root=mkdtempSync(join(tmpdir(),'af-extension-index-')),databasePath=join(root,'state.sqlite');
  let store=createStore({databasePath,workspaceRoot:join(root,"work")});t.after(()=>{store.close();rmSync(root,{recursive:true,force:true});});
  const entries=Array.from({length:105},(_,i)=>({id:randomUUID(),kind:i<65?'plugin':'mcp',name:`条目 ${i}`,description:i%2?'MATCH':'other',createdAt:new Date(1700000000000+i).toISOString(),providers:['claude-code'],content:'PRIVATE_MCP_SECRET',manifest:{private:'PRIVATE_PROMPT'}}));
@@ -24,9 +24,10 @@ test('SQLite extension catalog persists summary-only pages, searches before pagi
  store.close();store=createStore({databasePath});
  assert.equal(store.queryExtensions('plugin').total,64);assert.equal(store.queryExtensions('mcp').total,40);assert.equal(store.getExtension('plugin',target.id),null);
  const db=new DatabaseSync(databasePath,{readOnly:true});try{
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM extension_catalog').get().count,105);
-  assert.ok(db.prepare('SELECT deleted_at FROM extension_catalog WHERE id=?').get(target.id).deleted_at);
-  const json=db.prepare('SELECT value_json FROM extension_catalog').all().map(row=>row.value_json).join('');assert.doesNotMatch(json,/PRIVATE_MCP_SECRET|PRIVATE_PROMPT/);
+  assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='extension_catalog'").get(),undefined);
+  const json=readFileSync(join(root,'configuration.json'),'utf8'),catalog=JSON.parse(json).values.extensionCatalog;
+  assert.equal(catalog.length,105);assert.ok(catalog.find(entry=>entry.id===target.id).deletedAt);
+  assert.doesNotMatch(json,/PRIVATE_MCP_SECRET|PRIVATE_PROMPT/);
   assert.equal(Object.hasOwn(JSON.parse(db.prepare('SELECT state_json FROM workspace_snapshots').get().state_json),'extensionCatalog'),false);
  }finally{db.close();}
 });

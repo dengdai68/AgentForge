@@ -51,6 +51,20 @@ function connected(command, args, options = {}) {
 const execute = (args, options) => connected(executeCommand, args, options);
 const run = (args, options) => connected(runCommand, args, options);
 
+test('storage commands share authenticated HTTP and report an accepted restart without claiming completion',async()=>{
+ const f=await fixture();let calls=0,busy=false;
+ const fetcher=async(url,init)=>{calls++;assert.equal(url,origin+'/api/settings/workspace');assert.equal(init.headers.Cookie,cookie);
+   if(busy)return new Response(JSON.stringify({error:'仍有执行'}),{status:409});
+   if(init.method==='GET')return new Response(JSON.stringify({workspaceRoot:'/work',businessRoot:'/work/records'}));
+   assert.equal(init.method,'PUT');assert.deepEqual(JSON.parse(init.body),{workspaceRoot:'/new-work'});return new Response(JSON.stringify({workspaceRoot:'/new-work',restarting:true}));
+ };
+ const invoke=(args,value)=>execute(['storage',...args,'--session-file',f.sessionFile],{fetcher,stdin:input(value??'')});
+ assert.equal((await invoke(['get'])).workspaceRoot,'/work');assert.equal((await invoke(['update','--file','-'],{workspaceRoot:'/new-work'})).restarting,true);
+ busy=true;await assert.rejects(invoke(['update','--file','-'],{workspaceRoot:'/new-work'}),error=>error.status===409);
+ const before=calls;await assert.rejects(invoke(['update','--file','-'],{workspaceRoot:'/new-work',businessRoot:'/override'}),error=>error.code==='USAGE');await assert.rejects(invoke(['update','--file','-'],{root:'/new-work'}),error=>error.code==='USAGE');await assert.rejects(invoke(['get','unexpected-id']),error=>error.code==='USAGE');assert.equal(calls,before);
+ const text=formatOutput(['storage','update'],await execute(['storage','update','--help']),{help:true});assert.match(text,/agentforge storage update --file/);assert.doesNotMatch(text,/storage update ID/);
+});
+
 test('CLI rejects removed targets offline and never contacts a service when the client is unavailable', async () => {
   for (const target of ['web', 'desktop']) await assert.rejects(executeCommand(['agents', 'list', '--target', target], { fetcher() { assert.fail('removed option is offline'); } }), error => error.code === 'USAGE');
   const unavailable = ['agents', 'list', '--endpoint-file', join(endpointRoot, 'absent.json')];
@@ -220,7 +234,7 @@ test('default CLI help progressively discloses root, groups and operation detail
   for (const group of Object.keys(resources)) {
     const result = await captured(['help', group], { columns: 160 });
     assert.equal(result.code, 0);
-    assert.match(result.stdout, /子命令/); assert.match(result.stdout, new RegExp(`例如 agentforge ${group} list --help`));
+    assert.match(result.stdout, /子命令/); assert.match(result.stdout, new RegExp(`例如 agentforge ${group} ${group==='storage'?'get':'list'} --help`));
     assert.doesNotMatch(result.stdout, /下一层帮助|GROUP|OPERATION/);
     assert.ok(!result.stdout.includes('完整字段说明') && !result.stdout.includes('JSON 输入模板'));
     for (const operation of resources[group].operations) assert.ok(result.stdout.includes(operation));
@@ -417,7 +431,7 @@ test('text failures go only to stderr with exit code and recovery; no raw errors
 test('AI CLI provides offline comprehensive group/command schemas and safe examples', async () => {
   const failFetch = () => { throw new Error('help must be offline'); };
   const help = await execute(['help'], { fetcher: failFetch });
-  assert.equal(Object.keys(help.resources).length, 9); assert.match(help.sequence.join(' '), /runtimes.*plugins.*mcps.*roles.*agents.*teams.*workflows/);
+  assert.equal(Object.keys(help.resources).length, 10); assert.match(help.sequence.join(' '), /runtimes.*plugins.*mcps.*roles.*agents.*teams.*workflows/);
   for (const group of Object.keys(resources)) {
     const schema = await execute(['schema', group], { fetcher: failFetch });
     assert.equal(schema.schema.additionalProperties, false); assert.ok(schema.notes.length);

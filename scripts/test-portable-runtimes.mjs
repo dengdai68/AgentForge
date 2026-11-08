@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated UI/HTTP/CLI acceptance. Default native executables are protocol
 // fixtures. Opt in to one actual model with AGENTFORGE_PORTABLE_REAL=opencode.
 import assert from 'node:assert/strict';
@@ -17,7 +18,7 @@ if(agentProof&&(!extensionProof||!real))throw Error('Agent proof requires real p
 if(real&&!PORTABLE_RUNTIME_IDS.includes(real))throw Error('Unknown real Provider');
 await mkdir('.data',{recursive:true});const root=await mkdtemp(resolve('.data/portable-runtimes-')),home=join(root,'home'),bin=join(home,'bin'),data=bundle?join(home,'.agentforge/desktop'):join(root,'client');await mkdir(bin,{recursive:true});
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('portable-qa',password);auth.close();
-const seed=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});seed.updateWorkspaceSettings({workspaceRoot:join(root,'work')});seed.close();
+const seed=createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});seed.updateWorkspaceSettings({workspaceRoot:join(root,'work')});seed.close();
 const fixtureBody=provider=>`#!/usr/bin/env node
 import{randomUUID,createHash}from'node:crypto';import{appendFile,mkdir,writeFile,readFile,realpath}from'node:fs/promises';import{join}from'node:path';
 if(process.argv[2]==='session'&&process.argv[3]==='export')process.exit(0);
@@ -55,6 +56,7 @@ if(real==='gemini')env.GEMINI_CLI_HOME=process.env.GEMINI_CLI_HOME || process.en
 if(real==='kimi')env.KIMI_CODE_HOME=process.env.KIMI_CODE_HOME || join(process.env.HOME,'.kimi-code');
 if(real==='pi')env.PI_CODING_AGENT_DIR=process.env.PI_CODING_AGENT_DIR || join(process.env.HOME,'.pi/agent');
 if(real==='opencode'){env.XDG_CONFIG_HOME ||= join(process.env.HOME,'.config');env.XDG_DATA_HOME ||= join(process.env.HOME,'.local/share');env.XDG_STATE_HOME ||= join(process.env.HOME,'.local/state');}
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')}:{}),args:[...(bundle?[]:['apps/electron/main.mjs']),'--user-data-dir='+join(root,'browser')],env,timeout:120000});const evidence={root,real:real || null,protocolFixtures:!real,providers:[],layouts:[]},errors=[];console.log('EVIDENCE '+root);
 try{
  const page=await app.firstWindow({timeout:120000});page.on('pageerror',e=>errors.push(e.message));await page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:60000});const origin=new URL(page.url()).origin;

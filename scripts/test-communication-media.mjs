@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated Electron attachment and automation presentation acceptance; no Provider.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -10,8 +11,8 @@ import { createAuth } from '../server/auth.mjs';
 await mkdir('.data',{recursive:true});
 const root=await mkdtemp(resolve('.data/communication-media-')),home=join(root,'home'),data=join(root,'client');await mkdir(home,{recursive:true});
 const auth=createAuth({databasePath:join(data,'auth.sqlite')}),password=randomBytes(24).toString('hex');await auth.setAdministrator('media-qa',password);auth.close();
-const store=createCatalogFixtureStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});
-const files=createRunFiles({root:join(data,'agentforge-runs')}),chat=store.openCommunication({kind:'agent',targetId:'agent_analyst'});
+const store=createCatalogFixtureStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});
+const files=createRunFiles({root:join(root,'work','records'),communicationsRoot:join(root,'work/communications')}),chat=store.openCommunication({kind:'agent',targetId:'agent_analyst'});
 const imageBytes=await readFile('web/icons/application.png'),fileBytes=Buffer.from('附件下载内容\n中文文件名与原字节保留。');
 const attachments=[];
 for(const [name,bytes] of [['参考图片.png',imageBytes],['说明文件.txt',fileBytes],['损坏图片.png',Buffer.from('not an image')]])attachments.push(store.registerCommunicationAttachment(chat.id,await files.writeCommunicationAttachment(chat.id,name,bytes)));
@@ -19,6 +20,7 @@ store.sendCommunication(chat.id,{content:'请参考图片和说明文件。',att
 store.completeCommunication(chat.id,store.claimCommunication(chat.id).id,'已收到参考材料。');
 const auto=store.saveAutomation({managerAgentId:'system_project_manager',title:'素材整理',objective:'读取参考图片与说明文件。\n生成本轮整理结果，并说明需要继续处理的内容。',memberAgentIds:['system_project_manager','agent_analyst'],cron:'0 9 * * *',enabled:false});
 const trigger=store.triggerAutomation(auto.id);store.requestHumanAcceptance(trigger.runId);store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:180000});
 const evidence={root,cases:[]};console.log('EVIDENCE '+root);
 try{

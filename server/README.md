@@ -32,7 +32,7 @@ Runtime 原始错误脱敏后保留，外部错误立即标记任务失败并等
 
 沟通附件由 Run Files 保存在会话 attachments 子目录，Store 只冻结引用和摘要；认证二进制上传最多 20 MiB，下载验证归属/字节/摘要/链接。调用正文和提示词在私有 .agentforge 目录，通用事件只持引用，原生会话绑定在投递尝试元数据；分页 API 供共享控制台，不制造 Task/Run。
 
-data-home.mjs 为客户端子服务 提供统一的默认任务根 ~/agentforge；应用数据仍按实例隔离于 ~/.agentforge。保存的工作根优先，历史路径不搬迁。Store 新 Task ID 使用随机 UUID，避免跨实例共享根目录时同毫秒/序号碰撞；HTTP/Store 命令不扩权，CLI 仅连接客户端。
+data-home.mjs 为客户端子服务提供统一的默认数据根 ~/.agentforge/workspace；数据库和 Run Files 按实例隔离于该根的 .agentforge，Runtime 配置保留私有配置目录，认证与启动资料留在 ~/.agentforge。宿主当前工作根优先，历史 Task/Run 路径不搬迁。Store 新 Task ID 使用随机 UUID，避免跨实例共享根目录时同毫秒/序号碰撞；HTTP/Store 命令不扩权，CLI 仅连接客户端。
 
 插件安装在来源复制阶段展开同仓库/目录内的符号链接，断链、循环、越界和特殊文件精确报错且整批回滚；执行用不可变普通文件副本，运行期完整性校验不放宽。HTTP/CLI 使用同一路径，契约见 docs/15。
 
@@ -71,7 +71,7 @@ Store 拥有状态，Runtime 不直接写领域对象。平台执行员工和经
 
 控制台展示已保存的公开 thinking 正文；敏感片段仍过滤，首尾空白与换行规范化不标为脱敏。历史正文为空时明确说明“未保存可显示的思考正文”，不以“已脱敏”占位，不补造未公开或未保存内容。
 
-固定 Runtime 目录/部分更新与 Store 可用门禁见 docs/15；调用前校验 enabled，冻结模型事实不改。auth.mjs 签发父会话关联的独立 CLI 委托，退出/重置/重启失效，正式端点与私有文件发布契约见 docs/14、18。
+固定 Runtime 目录/部分更新与 Store 可用门禁见 docs/15；调用前校验 enabled，冻结模型事实不改。auth.mjs 签发父会话关联的独立 CLI 委托，退出或宿主重启失效，清除工作目录保留当前登录，正式端点与私有文件发布契约见 docs/14、18。
 
 长任务的 Claude 后台等待使用原生生命周期，不以成功轮次后的安静误判执行失败。prompts 只投递必要上下文：成员消息来源与正文保留，内部路由元数据、空配置、员工选人说明及批量 Artifact 哈希不重复注入；交付证据按需查询，详见 docs/22。
 
@@ -117,7 +117,7 @@ PUT /api/runs/:id/members 经认证交给 Store 更新当前成员投影，不�
 
 沟通附件 GET 的 `preview=1` 分支在既有归属与完整性校验后按位图签名提供 image MIME；非位图返回 415，普通附件仍下载。鉴权、no-store/nosniff/CSP 和原文件记录保持，契约见 docs/17。
 
-插件/MCP 目录摘要在 Store.registerExtensions 中登记，由 persistence 的独立 SQLite extension_catalog 保存；queryExtensions 直接 SQL 搜索分页。index.mjs 将导入/编辑登记与绑定替换原子提交，plugin-updates 读取数据库活跃项并同步提交。removeExtension 软删除及全员工当前解绑原子完成，不碰冻结事实和文件。
+插件/MCP 目录摘要在 Store.registerExtensions 中登记，由 configuration-store 的私有 JSON 保存；queryExtensions 对缓存摘要搜索分页。persistence 协调 JSON revision 与业务绑定，导入、编辑、更新、软删除和全员工当前解绑保持提交一致性，不碰冻结事实和文件。
 
 任务协作上传共用认证二进制入口与位图预览；Run Files 保存原字节，Store 保存同 Run 引用，orchestrator 在投递前核验附件并传递绝对路径。调度上下文和工作目录/Artifact 查询不再构建全量 getRunWorkspace；深拷贝移除 JSON 字符串中间结果，避免长任务重复展开员工配置导致 Invalid string length。
 
@@ -144,3 +144,21 @@ workflow当前写入及新Task冻结模板时校验process最多一出口，cond
 Runtime 固定目录与本机安装门禁覆盖九项；任务/沟通/探测复用 runRuntime，Store 仅保存配置和已确认会话，OpenCode ses_ 标识不再因下划线被拒绝。新增适配边界见 docs/29。
 
 工作目录 content?media=1 的 GET/HEAD 使用 Run Files 视频描述符，单段 Range 返回206/416；保护认证及文件边界，有界流与断连清理，不转码。Runtime 保存的 model/effort 与 App/CLI 共用原生目录。
+
+工作目录由宿主启动参数提供，生产 Store 以当前启动工作根分配新任务，不再让旧库内工作目录设置覆盖它。数据库、Run Files、Runtime 配置同盘；认证及 Git 凭据独立。HTTP storage 查询/修改先冻结调度与写入，再通知唯一 IPC 父进程停机整理；Runtime 与目录读取只解析受管资源地址，不变更冻结事实。数据清理包含独立 Git 凭据，日志实例以稳定认证位置标识；完整协议见 docs/30。
+
+当前存储归属以 [配置目录与工作目录](../docs/30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。
+
+员工启动目录：新普通任务与自动化采用 `<工作目录>/tasks/<TaskID>/<RunID>`；沟通采用 Store 首次分配并持久保存的 `<工作目录>/communications/<会话ID>`，群聊成员共享文件目录但原生会话独立。既有任务路径不重写，已分配的沟通目录不随工作根切换；目录变更重建模型上下文并保留聊天历史。内部附件、提示词和执行内容仍由 Run Files 管理，详见 docs/30-storage-layout.md 与 docs/17-communication.md。
+
+业务记录统一位于 `<工作目录>/records`：数据库、历史索引及 runs/communications 执行正文与校验记录共享此根；沟通 cwd/上传附件在 `<工作目录>/communications/<会话ID>`。不再创建 `.agentforge/desktop/agentforge-runs`；配置仍在 Home。路径与目录切换契约见 docs/30。App/CLI storage get/update 使用同一 HTTP 定位，不直接读取数据库。
+
+工作目录定位只持久化 workspaceRoot，records 路径固定由 workspaceRoot/records 推导；storage.json 不接受 businessRoot。App/CLI 返回的 businessRoot 为只读计算结果，开发实例通过独立工作根隔离，见 docs/30。
+
+## 提示词输入精简
+
+输入精简：巡检复用成员消息回执，群聊不复制本人旧回复，沟通在原生会话确认及模型活动后确认接收，失败续接只引用已读目标。经理状态按实体ID投递增量；超过4096字符的正文由 prompts 生成计划，Run Files 写入私有内容寻址 input-materials，调用前失败即停止。冻结 workflow.md 同时保留 Trace 证据与 Run 稳定读取入口。App/CLI 配置和业务查询协议不变，详见 docs/22。
+
+## 共享协作输入与报告通知
+
+Run 全员在下一次合法调用自动补齐未读公开消息；本轮处理消息 ID 与背景阅读回执分别表示待办和已读。经理队尾未尝试的员工报告通知合并，人工指令/咨询/重试不合并，所有来源同一次真实投递。输出 summary 是完整正文，正文加尾部 JSON 时保留前文，不用短摘要替换。详见 docs/22。

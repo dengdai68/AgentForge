@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated real Electron UI acceptance for role management: directory CRUD,
 // search/pagination, employee inline multi-select binding and reference-rejected
 // deletion. No Provider calls; never touches the operator's data or session.
@@ -20,11 +21,12 @@ const password = randomBytes(24).toString('hex');
 const auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
 await auth.setAdministrator('roles-ui', password);
 auth.close();
-const seeded = createStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') });
+const seeded = createStore({ databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data, workspaceRoot: join(root, 'work') });
 const employee = seeded.listAgents().find(item => item.kind === 'business');
 assert.ok(employee, 'default catalog provides a business employee');
 seeded.close();
 
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app = await electron.launch({ ...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')}:{args:['apps/electron/main.mjs']}), env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 180000 });
 try {
   const page = await app.firstWindow({ timeout: 180000 });

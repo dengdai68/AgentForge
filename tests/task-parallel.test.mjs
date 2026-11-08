@@ -6,6 +6,37 @@ import { tmpdir } from 'node:os';
 import { createCatalogFixtureStore } from './fixture-store.mjs';
 import { executeRun, scheduleManagerFollowup, terminateRun, pauseRun } from '../server/orchestrator.mjs';
 import { registerExecution, hasActiveExecution, terminateExecution } from '../server/runtime/registry.mjs';
+import { collaborationRecords } from '../client/console-projections.mjs';
+
+test('queued manager reports coalesce with all sources, idempotency and shared App/CLI trace associations', async t => {
+ const {store,run}=await setup(t);store.updateRun(run.id,{status:'running'});
+ const sources=[];let grouped;
+ for(const agentId of ['agent_analyst','agent_engineer','agent_tester']){
+  const trace=store.createTrace(run.id,{agentId,workflowNodeId:'requirements'});
+  const message=store.addMessage({runId:run.id,sender:{type:'agent',id:agentId},recipientAgentId:run.manager.id,traceId:trace.id,kind:'handoff',content:agentId+' REPORT'});sources.push(message.id);store.completeTrace(trace.id);
+  grouped=store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager',messageIds:[message.id],sourceMessageId:message.id,dedupeKey:'report:'+message.id});
+ }
+ assert.equal(store.listDispatches(run.id).length,1);assert.deepEqual(grouped.messageIds,sources);assert.deepEqual(grouped.coalescedSourceMessageIds,sources);assert.equal(grouped.status,'queued');
+ const claimed=store.claimDispatch(run.id),trace=store.createTrace(run.id,{agentId:run.manager.id,workflowNodeId:'requirements',type:'manager'});store.attachDispatchTrace(claimed.id,trace.id);
+ const records=collaborationRecords(store.getRunWorkspace(run.id));
+ for(const id of sources){const record=records.find(row=>row.id===id);assert.equal(record.deliveries[0].dispatchId,claimed.id);assert.equal(record.deliveries[0].executionTraceId,trace.id);}
+ store.completeTrace(trace.id);store.completeDispatch(claimed.id);
+ assert.equal(store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager',messageIds:[sources[2]],sourceMessageId:sources[2],dedupeKey:'report:'+sources[2]}).id,claimed.id);
+ assert.equal(store.listDispatches(run.id).length,1);
+});
+
+test('report coalescing never amends claimed input, crosses a human FIFO boundary or absorbs a retry', async t => {
+ const {store,run}=await setup(t);store.updateRun(run.id,{status:'running'});
+ const report=()=>{const trace=store.createTrace(run.id,{agentId:'agent_analyst',workflowNodeId:'requirements'});const m=store.addMessage({runId:run.id,sender:{type:'agent',id:'agent_analyst'},recipientAgentId:run.manager.id,traceId:trace.id,kind:'handoff',content:'report'});store.completeTrace(trace.id);return store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager',sourceMessageId:m.id,messageIds:[m.id],dedupeKey:'r:'+m.id});};
+ const first=report(),claimed=store.claimDispatch(run.id);const second=report();assert.notEqual(first.id,second.id);assert.equal(store.getDispatch(claimed.id).messageIds.length,1);
+ const human=store.addMessage({runId:run.id,recipientAgentId:run.manager.id,content:'HUMAN_BOUNDARY'});
+ const instruction=store.enqueueDispatch(run.id,{recipientAgentId:run.manager.id,workflowNodeId:'requirements',purpose:'manager',sourceMessageId:human.id,messageIds:[human.id]});
+ const third=report();assert.notEqual(third.id,second.id);assert.notEqual(third.id,instruction.id);store.completeDispatch(claimed.id);
+ const retry=store.claimDispatch(run.id);assert.equal(retry.id,second.id);store.retryDispatch(retry.id,'fail',0);
+ // The queue tail is a fresh report; once attempted it must stay separate too.
+ store.completeDispatch(store.claimDispatch(run.id).id);store.completeDispatch(store.claimDispatch(run.id).id);
+ const last=store.claimDispatch(run.id);store.retryDispatch(last.id,'fail',0);const next=report();assert.notEqual(next.id,last.id);
+});
 
 async function setup(t) {
   const root = await mkdtemp(join(tmpdir(), 'af-parallel-'));

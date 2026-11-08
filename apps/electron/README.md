@@ -18,7 +18,7 @@
 
 沟通附件、未读与右侧半屏控制台复用认证 HTTP 和共享 renderer，compact.css 仅调整紧凑间距；不新增通用宿主桥。测试使用隔离 HOME、实例与下载目录；真实模型专项只在源码隔离客户端调用已授权 Claude Code，安装包使用受控 CLI。
 
-runtime-paths.mjs 复用 server/data-home.mjs 的纯路径函数，将默认任务根统一为 ~/agentforge，不跟随 desktop/web 应用数据目录。已保存值和已有任务路径不搬动。测试可传入 fixture home 隔离目录。CLI 源码/安装版统一只发现客户端，无 Web 目标；CLI 安装入口仅宿主界面显示。
+runtime-paths.mjs 与 server/data-home.mjs 共用存储布局，默认根 ~/.agentforge/workspace；当前 locator 指定业务根，认证实例保持独立。已有任务路径不搬动。测试使用显式 fixture locator。CLI 源码/安装版统一只发现客户端，无 Web 目标；CLI 安装入口仅宿主界面显示。
 
 员工、插件/MCP 目录共享同行搜索/操作与卡片；compact.css 只调整桌面密度。市场详情删除使用共享应用确认框与认证 HTTP，失败就地提示，不新增原生弹框或宿主接口。
 
@@ -35,7 +35,7 @@ runtime-paths.mjs 复用 server/data-home.mjs 的纯路径函数，将默认任�
 
 运行与边界见 [Electron 文档](../../docs/18-electron-client.md)。共享业务 UI 在 `web/`，此目录不拥有 Store 或 Provider 状态。
 
-`runtime-paths.mjs` 同时定义 Chromium userData/sessionData、日志和崩溃目录，全部默认位于 ~/.agentforge 的实例目录；main 在 ready 前设置。任务工作目录不是应用数据根。
+`runtime-paths.mjs` 同时定义 Chromium userData/sessionData、日志和崩溃目录，作为认证 profile/日志默认位于 ~/.agentforge 的实例目录；main 在 ready 前设置。业务资料与任务文件共用工作目录；设置、认证、Runtime、扩展与启动定位留在配置目录。
 
 员工和插件/MCP 市场使用响应式紧凑卡片，保留既有命令与信息；创建员工也可停用，插件与 MCP 搜索器分行。插件详情用概要和组件标签页，不扩展宿主接口。
 
@@ -87,3 +87,13 @@ runtime-paths.mjs 复用 server/data-home.mjs 的纯路径函数，将默认任�
 
 
 工作流极简编辑器沿用共享X6，compact.css仅约束模态宽度、工具栏密度及窄屏，不拥有领域状态或图形数据；底部保存保持可见，Graph/观察器由web/workflow-editor.mjs在关闭时释放。
+
+统一存储由 runtime-paths + server/storage-layout 解析当前 locator；storage-relocation 在独占空闲锁之后只整理白名单资料，服务健康后清理原位置。宿主不读取 Store/SQLite。认证 profile/端点不随数据根移动；数据盘断开拒绝新建空实例。设置与 CLI 同一 HTTP 触发，未新增 renderer 通用宿主方法。目录及显式现有实例整理入口见 docs/30。
+
+更新缓存属于配置目录，不随工作目录更换搬运；宿主仍保护正在下载的文件。
+
+当前存储归属以 [配置目录与工作目录](../../docs/30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。
+
+业务记录统一位于 `<工作目录>/records`：数据库、历史索引及 runs/communications 执行正文与校验记录共享此根；沟通 cwd/上传附件在 `<工作目录>/communications/<会话ID>`。不再创建 `.agentforge/desktop/agentforge-runs`；配置仍在 Home。路径与目录切换契约见 docs/30。App/CLI storage get/update 使用同一 HTTP 定位，不直接读取数据库。
+
+工作目录定位只持久化 workspaceRoot，records 路径固定由 workspaceRoot/records 推导；storage.json 不接受 businessRoot。App/CLI 返回的 businessRoot 为只读计算结果，开发实例通过独立工作根隔离，见 docs/30。

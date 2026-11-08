@@ -8,7 +8,9 @@ import { chmod, lstat, mkdir, rename, unlink, writeFile, readFile } from "node:f
 import { mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { isConsoleURL, isExternalURL, isPreferencesSender, isCliSender, isUpdateSender, health, initialRoute } from "./policy.mjs";
-import { desktopBrowserPaths, desktopControlPlaneEnvironment, desktopStoragePaths, legacyDesktopDataRoot, resolveDesktopDataRoot } from "./runtime-paths.mjs";
+import { desktopBrowserPaths, desktopControlPlaneEnvironment, desktopStoragePaths, legacyDesktopDataRoot, resolveDesktopDataRoot,defaultDesktopLocation } from "./runtime-paths.mjs";
+import {readStorageLocation,writeStorageLocation} from '../../server/storage-layout.mjs';
+import {relocateStorage,finishStorageRelocation} from './storage-relocation.mjs';
 import { diagnostic, diagnostics, installProcessDiagnostics } from "../../server/diagnostics.mjs";
 import { legacyDataRequiresMigration, migrationGuidance } from "../../server/data-home.mjs";
 import { createInterface } from "node:readline";
@@ -34,15 +36,16 @@ let installingCli = false;
 let applicationUpdates = null, restartReservation = null;
 const shellEnvironmentAbort = new AbortController();
 app.setName("AgentForge");
-const storage = desktopStoragePaths(resolveDesktopDataRoot({ packaged: app.isPackaged, env: process.env }));
+const controlRoot=resolveDesktopDataRoot({ packaged: app.isPackaged, env: process.env });
+let storage = desktopStoragePaths(controlRoot,{controlRoot,instance:app.isPackaged?'desktop':'desktop-dev'});
 const previousUserData = app.getPath('userData');
 // Set before the single-instance lock and before any Electron session exists.
-for(const [name,path] of Object.entries(desktopBrowserPaths(storage.dataRoot))) { mkdirSync(path,{recursive:true,mode:0o700}); app.setPath(name,path); }
-const endpointFile = join(storage.dataRoot, "desktop-endpoint.json");
-const cliSessionFile = join(storage.dataRoot, "desktop-cli-session.json");
+for(const [name,path] of Object.entries(desktopBrowserPaths(controlRoot))) { mkdirSync(path,{recursive:true,mode:0o700}); app.setPath(name,path); }
+const endpointFile = join(controlRoot, "desktop-endpoint.json");
+const cliSessionFile = join(controlRoot, "desktop-cli-session.json");
 let cliSessionSync = Promise.resolve(), publishedCliParent = null;
-const preferencesFile = join(storage.dataRoot, "desktop-preferences.json");
-installProcessDiagnostics("desktop", { instancePath: storage.AGENTFORGE_DB_PATH });
+const preferencesFile = join(controlRoot, "desktop-preferences.json");
+installProcessDiagnostics("desktop", { instancePath: storage.AGENTFORGE_AUTH_DB_PATH });
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on("second-instance", showWindow);
@@ -72,6 +75,10 @@ async function startControlPlane() {
     cwd: storage.dataRoot, env: { ...environment, ELECTRON_RUN_AS_NODE: "1" }, stdio: ["ignore", "pipe", "pipe", "ipc"]
   });
   const owned = child;
+  owned.on('message',message=>{
+    if(owned!==child||message?.type!=='agentforge-storage-restart'||typeof message.workspaceRoot!=='string')return;
+    void changeStorageRoot(message.workspaceRoot).catch(error=>diagnostic('desktop.storage_restart_failed',{error})).finally(()=>{if(child===owned&&owned.connected)owned.send({type:'agentforge-update-release',id:message.id},()=>{});});
+  });
   for (const stream of ["stdout", "stderr"]) createInterface({ input: owned[stream] }).on("line", text => diagnostic(`desktop.server_${stream}`, { text, childPid: owned.pid }));
   owned.once("exit", (code, signal) => { diagnostic("desktop.server_exit", { code, signal }); if (child === owned) { child = null; childBootstrapToken = null; controlOrigin = null; childInstanceId = null; } });
   owned.once("error", error => { diagnostic("desktop.server_error", { error }); if (child === owned) { child = null; childBootstrapToken = null; controlOrigin = null; childInstanceId = null; } });
@@ -95,6 +102,27 @@ async function startControlPlane() {
       await rename(temporary, endpointFile);
     } finally { await unlink(temporary).catch(() => {}); }
   } catch (error) { owned.kill(); throw new Error(`无法安全保存桌面连接信息：${error.message}`); }
+}
+
+async function changeStorageRoot(workspaceRoot){
+  if(connecting||quitting)throw new Error('客户端正在连接或退出，数据目录未更改');
+  connecting=true;const previous=storage;let moved;
+  try{
+    if(applicationUpdates?.snapshot().phase==='downloading')throw new Error('安装包正在下载，请下载完成后再更换数据目录');
+    window?.setTitle('AgentForge · 正在整理数据目录…');
+    const owned=child;if(!owned)throw new Error('没有可停止的本机服务');
+    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('本机服务未退出，未搬运数据')),15000);owned.once('exit',()=>{clearTimeout(timer);resolve();});owned.kill();});
+    moved=await relocateStorage({sourceRoot:previous.dataRoot,controlRoot,workspaceRoot,instance:app.isPackaged?'desktop':'desktop-dev',previousRuntimeRoots:JSON.parse(previous.AGENTFORGE_RUNTIME_PREVIOUS_ROOTS),onProgress:entry=>diagnostic('desktop.storage_copy',{entry})});
+    storage=desktopStoragePaths(controlRoot,{controlRoot,instance:app.isPackaged?'desktop':'desktop-dev',workspaceRoot:moved.location.workspaceRoot,previousRuntimeRoots:moved.location.previousRuntimeRoots});
+    await startControlPlane();
+    await moved.cleanup().catch(error=>diagnostic('desktop.storage_source_cleanup_failed',{error}));
+  }catch(error){
+    diagnostic('desktop.storage_move_failed',{error});
+    if(moved&&child){const failed=child;await new Promise(resolve=>{const timer=setTimeout(resolve,5000);failed.once('exit',()=>{clearTimeout(timer);resolve();});failed.kill();});}
+    if(!child&&moved){await writeStorageLocation(controlRoot,{version:1,workspaceRoot:previous.AGENTFORGE_WORKSPACE_ROOT,previousRuntimeRoots:JSON.parse(previous.AGENTFORGE_RUNTIME_PREVIOUS_ROOTS)});storage=previous;}
+    await appDialog({parent:window,kind:'error',title:'数据目录未切换',message:'未能完成数据目录整理，原始资料已保留。',detail:error.message,buttons:['好'],cancelIndex:0});
+  }finally{connecting=false;}
+  await connect('/settings/workspace');
 }
 
 function syncCliSession() {
@@ -131,7 +159,7 @@ async function installDefaultCli() {
   finally { installingCli = false; }
 }
 
-async function connect() {
+async function connect(preferredRoute=null) {
   if (connecting || quitting) return;
   connecting = true;
   window?.setTitle("AgentForge · 正在连接本机服务…");
@@ -140,10 +168,11 @@ async function connect() {
     if (!quitting) {
       const route = await initialRoute(controlOrigin);
       if (route === "/setup") await window.loadURL(`${controlOrigin}/setup`, { extraHeaders: `X-AgentForge-Bootstrap: ${childBootstrapToken}\n` });
-      else await window.loadURL(controlOrigin);
+      else await window.loadURL(controlOrigin+(preferredRoute||''));
       window.setTitle("AgentForge");
       publishedCliParent = null;
       await syncCliSession();
+      await finishStorageRelocation({businessRoot:storage.dataRoot,previousRuntimeRoots:JSON.parse(storage.AGENTFORGE_RUNTIME_PREVIOUS_ROOTS)}).catch(error=>diagnostic('desktop.storage_source_cleanup_failed',{error}));
     }
   } catch (error) {
     diagnostic("desktop.connection_failed", { error });
@@ -282,7 +311,7 @@ async function startApplicationUpdates() {
   }
   const currentVersion = app.isPackaged ? app.getVersion() : JSON.parse(await readFile(join(sourceRoot,'package.json'),'utf8')).version;
   applicationUpdates = createApplicationUpdates({ currentVersion, packaged: app.isPackaged && process.platform === 'darwin',
-    nativeInstall, cacheRoot: join(storage.dataRoot,'updates'), prepareRestart: prepareUpdateRestart, releaseRestart: releaseUpdateRestart,
+    nativeInstall, cacheRoot: () => join(controlRoot,'updates'), prepareRestart: prepareUpdateRestart, releaseRestart: releaseUpdateRestart,
     readLatest: () => fetchLatestRelease((url, options) => net.fetch(url, options)),
     downloadInstaller: (release, cache, progress, options) => downloadReleaseInstaller(release, cache, progress, { ...options, fetcher: (url, init) => net.fetch(url, init) }),
     openInstaller: path => shell.openPath(path), onDiagnostic: error => diagnostic('desktop.update_failed',{error}),
@@ -341,6 +370,15 @@ function installMenu() {
 }
 
 async function start() {
+  const location=await readStorageLocation(controlRoot,defaultDesktopLocation({controlRoot,packaged:app.isPackaged,env:process.env}));
+  storage=desktopStoragePaths(controlRoot,{controlRoot,instance:app.isPackaged?'desktop':'desktop-dev',workspaceRoot:location.workspaceRoot,previousRuntimeRoots:location.previousRuntimeRoots});
+  if(controlRoot!==storage.dataRoot&&await legacyDataRequiresMigration({legacyRoot:controlRoot,currentDatabasePath:storage.AGENTFORGE_DB_PATH}))throw new Error('旧位置仍有实例资料。请先退出 AgentForge，显式整理到配置的数据根目录；未创建空实例。参见 docs/30-storage-layout.md。');
+  // A saved locator is authoritative. A disconnected data volume must never
+  // look like a fresh instance on the system disk.
+  const savedLocator=await lstat(join(controlRoot,'storage.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+  if(savedLocator&&!(await lstat(storage.dataRoot).catch(error=>{if(error.code==='ENOENT')return null;throw error;}))?.isDirectory())throw new Error('配置的数据盘或实例目录不可访问，请重新连接原数据盘；未创建新实例。');
+  await mkdir(storage.dataRoot,{recursive:true,mode:0o700});
+  await writeStorageLocation(controlRoot,location);
   // Hard protection: a legacy default location with real instance data must
   // never be silently replaced by a fresh instance under the new data home.
   const legacyRoot = legacyDesktopDataRoot({ packaged: app.isPackaged, userData: previousUserData, env: process.env, sourceRoot });
@@ -373,7 +411,7 @@ async function start() {
   });
   for (const [command, method] of [['check','check'],['download','download'],['install','install']]) {
     ipcMain.handle('desktop:updates:' + command, (event, ...args) => {
-      if (args.length || !isUpdateSender(event,contents,controlOrigin) || !applicationUpdates) throw new Error('请在设置 → 更新中操作');
+      if (args.length || connecting || !isUpdateSender(event,contents,controlOrigin) || !applicationUpdates) throw new Error('请在设置 → 更新中操作');
       return applicationUpdates[method]();
     });
   }

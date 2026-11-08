@@ -26,8 +26,9 @@ const profile = join(evidenceRoot, "profile");
 // operator's real ~/.agentforge; Chromium-managed files stay in --user-data-dir.
 const home = join(evidenceRoot, "home");
 await mkdir(home, { mode: 0o700 });
-const storage = desktopStoragePaths(join(home, ".agentforge", "desktop"), { home });
-const endpointFile = join(storage.dataRoot, "desktop-endpoint.json");
+const controlRoot=join(home,".agentforge","desktop");
+const storage = desktopStoragePaths(controlRoot, { home });
+const endpointFile = join(controlRoot, "desktop-endpoint.json");
 const urlFor = (page, path) => new URL(path, page.url()).href;
 const execute = promisify(execFile);
 const cliLauncher = join(appBundle, 'Contents/Resources/cli/agentforge');
@@ -330,8 +331,16 @@ async function runPackagedTask(page) {
   await page.locator('[data-view="settings"]').click();
   await page.locator('[data-settings-page="workspace"]').click();
   await page.locator("#default-workspace-root").fill(workspaceRoot);
-  await page.getByRole("button", { name: "保存目录", exact: true }).click();
-  await page.getByText("已保存，仅新任务使用此目录。", { exact: true }).waitFor();
+  const previousOrigin=new URL(page.url()).origin;
+  await page.getByRole("button", { name: "保存并整理目录", exact: true }).click();
+  await waitFor('configured storage restarts the owned service',()=>new URL(page.url()).origin!==previousOrigin&&new URL(page.url()).pathname==='/settings/workspace');
+  await page.locator('#default-workspace-root').waitFor();
+  ownedOrigin=new URL(page.url()).origin;
+  assert.equal((await api(page,'/api/settings/workspace')).workspaceRoot,workspaceRoot);
+  // Independent CLI sessions bind the exact origin; authentication stays local
+  // but an explicit terminal must sign in to the new service origin.
+  await packagedCli(['auth','login','--username',username,'--password-stdin'],password);
+  console.log('PASS packaged App storage change copies business data, restarts its service and preserves the logged-in client');
   await page.screenshot({ path: join(evidenceRoot, "packaged-workspace-settings.png"), animations: "disabled" });
   const fixture = await installFixtureProvider();
   const connection = (await api(page,'/api/settings/runtime-profiles')).profiles.find(item=>item.provider==='claude-code');
@@ -383,7 +392,7 @@ async function runPackagedTask(page) {
     return current.run.status === "awaiting_acceptance" ? current : null;
   });
   const artifact = workspace.artifacts.find((item) => item.name === "docs/packaged/report.md");
-  assert.equal(workspace.run.task.taskWorkspacePath, join(workspaceRoot, started.task.id));
+  assert.equal(workspace.run.task.taskWorkspacePath, join(workspaceRoot, "tasks", started.task.id));
   assert.ok(artifact, "the worker must create a trace-bound Artifact");
   const content = await api(page, `/api/runs/${started.run.id}/artifacts/${artifact.id}/content`);
   assert.match(content.content, /Packaged Beta evidence/);
@@ -634,7 +643,7 @@ async function runPackagedTask(page) {
 
 async function runResetAndUnread(page, proof) {
   const externalFile = join(proof.workspaceRoot, "external-user-file.txt");
-  await writeFile(externalFile, "disposable external sibling must survive factory reset");
+  await writeFile(externalFile, "disposable work-root file must be deleted");
   const { conversation } = await api(page, "/api/communications", { method: "POST", body: { kind: "agent", targetId: proof.worker.id } });
   await api(page, `/api/communications/${conversation.id}/messages`, { method: "POST", body: { content: "Disposable unread fixture probe", clientRequestId: randomBytes(12).toString("hex") } });
   await waitFor("unread employee reply", async () => (await api(page, "/api/notifications")).communicationUnreadCount === 1);
@@ -659,7 +668,7 @@ async function runResetAndUnread(page, proof) {
   const before = await api(page, "/api/bootstrap");
   await page.goto(urlFor(page, "/settings/workspace"));
   await page.getByRole("button", { name: "清除所有数据", exact: true }).click();
-  const form = page.locator("#reset-data-form"), submit = form.getByRole("button", { name: "清除并重新开始", exact: true });
+  const form = page.locator("#reset-data-form"), submit = form.getByRole("button", { name: "清除工作目录", exact: true });
   assert.equal(await submit.isDisabled(), true);
   await form.locator('[name="password"]').fill("wrong-disposable-password");
   await form.locator('[name="confirmation"]').fill("清除所有数据");
@@ -668,16 +677,12 @@ async function runResetAndUnread(page, proof) {
   assert.equal((await api(page, "/api/bootstrap")).installationId, before.installationId);
   await form.locator('[name="password"]').fill(password);
   await submit.click();
-  await page.locator("#setup-form").waitFor();
-  assert.equal(await page.evaluate(async () => (await fetch("/api/bootstrap")).status), 401);
-  await assert.rejects(access(proof.runWorkspace), /ENOENT/);
-  assert.equal(await readFile(externalFile, "utf8"), "disposable external sibling must survive factory reset");
-  await page.screenshot({ path: join(evidenceRoot, "packaged-reset-first-setup.png"), animations: "disabled" });
-  await page.locator("#username").fill("packaged-reset");
-  await page.locator("#password").fill(password);
-  await page.locator("#confirmation").fill(password);
-  await page.getByRole("button", { name: "创建管理员并进入工作区", exact: true }).click();
   await page.locator("#account-name").waitFor();
+  await waitFor('business reset completed',async()=>(await api(page,'/api/bootstrap')).installationId!==before.installationId);
+  assert.equal(await page.evaluate(async () => (await fetch("/api/bootstrap")).status), 200);
+  await assert.rejects(access(proof.runWorkspace), /ENOENT/);
+  await assert.rejects(access(externalFile), /ENOENT/);
+  await page.screenshot({ path: join(evidenceRoot, "packaged-reset-retains-login.png"), animations: "disabled" });
   const after = await api(page, "/api/bootstrap");
   assert.notEqual(after.installationId, before.installationId);
   assert.equal(after.runs.length, 0);
@@ -689,7 +694,7 @@ async function runResetAndUnread(page, proof) {
   assert.equal(after.agents.some(item => item.id === proof.worker.id), false);
   assert.deepEqual((await api(page, "/api/communications")).conversations, []);
   assert.deepEqual(await api(page, "/api/notifications"), { taskAttentionCount: 0, communicationUnreadCount: 0 });
-  console.log("PASS packaged unread acknowledgement, rejected reset password, factory reset, external-file preservation and fresh administrator setup");
+  console.log("PASS packaged unread acknowledgement, rejected reset password, work-root reset and retained administrator/session/configuration");
 }
 
 const launchOptions = {
@@ -940,25 +945,25 @@ try {
     await closing.locator('[data-dialog-choice="2"]').click();
     await closingClosed;
     assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true, 'cancel must keep the window visible');
-    await assert.rejects(access(join(storage.dataRoot, "desktop-preferences.json")), /ENOENT/);
+    await assert.rejects(access(join(controlRoot, "desktop-preferences.json")), /ENOENT/);
     await page.locator('input[name="closeMode"][value="tray"]').check();
-    const blockedPreference = join(storage.dataRoot, "desktop-preferences.json.tmp");
+    const blockedPreference = join(controlRoot, "desktop-preferences.json.tmp");
     await mkdir(blockedPreference);
     try {
       await page.locator('[data-close-form] button[type="submit"]').click();
       await page.getByText("保存失败，原设置未更改。请重试；详细原因见运行日志。", { exact: true }).waitFor();
       assert.equal(await page.locator('input[name="closeMode"][value="tray"]').isChecked(), true);
-      await assert.rejects(access(join(storage.dataRoot, "desktop-preferences.json")), /ENOENT/);
+      await assert.rejects(access(join(controlRoot, "desktop-preferences.json")), /ENOENT/);
       assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true);
     } finally { await rmdir(blockedPreference); }
     await page.locator('[data-close-form] button[type="submit"]').click();
     await page.getByText("已保存；后续关闭窗口按此设置执行。", { exact: true }).waitFor();
-    await waitFor("saved tray preference", async () => JSON.parse(await readFile(join(storage.dataRoot, "desktop-preferences.json"), "utf8")).closeMode === "tray");
+    await waitFor("saved tray preference", async () => JSON.parse(await readFile(join(controlRoot, "desktop-preferences.json"), "utf8")).closeMode === "tray");
     await page.screenshot({ path: join(evidenceRoot, "packaged-general-settings.png"), animations: "disabled" });
     assert.equal(await page.evaluate(async () => {
       try { await window.agentforgeDesktop.setCloseMode("invalid"); return false; } catch { return true; }
     }), true, "invalid mode must be rejected without changing the saved preference");
-    assert.equal(JSON.parse(await readFile(join(storage.dataRoot, "desktop-preferences.json"), "utf8")).closeMode, "tray");
+    assert.equal(JSON.parse(await readFile(join(controlRoot, "desktop-preferences.json"), "utf8")).closeMode, "tray");
     await page.goto(urlFor(page, "/settings/appearance"));
     assert.equal(await page.evaluate(async () => {
       try { await window.agentforgeDesktop.getPreferences(); return false; } catch { return true; }
@@ -1030,7 +1035,7 @@ if (process.platform === "darwin") {
     await reopenedPage.waitForURL(url => url.hostname === '127.0.0.1' && url.port !== '4310', { timeout: 60000 });
     await reopenedPage.goto(urlFor(reopenedPage, "/settings/general"));
     if (new URL(reopenedPage.url()).pathname === "/login") {
-      await reopenedPage.locator('#username').fill("packaged-reset");
+      await reopenedPage.locator('#username').fill(username);
       await reopenedPage.locator('#password').fill(password);
       await reopenedPage.getByRole("button", { name: "登录", exact: true }).click();
       await reopenedPage.locator('#account-name').waitFor();
@@ -1040,7 +1045,7 @@ if (process.platform === "darwin") {
     await reopenedPage.locator('input[name="closeMode"][value="quit"]').check();
     await reopenedPage.locator('[data-close-form] button[type="submit"]').click();
     await reopenedPage.getByText("已保存；后续关闭窗口按此设置执行。", { exact: true }).waitFor();
-    await waitFor("saved quit preference", async () => JSON.parse(await readFile(join(storage.dataRoot, "desktop-preferences.json"), "utf8")).closeMode === "quit");
+    await waitFor("saved quit preference", async () => JSON.parse(await readFile(join(controlRoot, "desktop-preferences.json"), "utf8")).closeMode === "quit");
     const exited = new Promise(resolve => reopenedProcess.once("exit", resolve));
     await reopened.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close()).catch(error => { if (!/closed/i.test(error.message)) throw error; });
     await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error("close in quit mode did not exit")), 10000).unref())]);
@@ -1054,7 +1059,7 @@ if (process.platform === "darwin") {
   // This pre-navigation instance gets its own HOME so its data root is fresh.
   const slowHome = join(evidenceRoot, 'cancel-home');
   await mkdir(slowHome, { mode: 0o700 });
-  const slowDatabase = join(slowHome, '.agentforge', 'desktop', 'agentforge.sqlite');
+  const slowDatabase = join(slowHome, 'agentforge', '.agentforge', 'desktop', 'agentforge.sqlite');
   const shellPidFile = join(slowShell, 'shell.pid'), lateFile = join(slowShell, 'late-marker');
   await writeFile(join(slowShell, '.zshenv'), `print -r -- $$ > '${shellPidFile}'\n/bin/sleep 30\nprint late > '${lateFile}'\n`);
   // Playwright's app connection waits for the first navigated page. For this

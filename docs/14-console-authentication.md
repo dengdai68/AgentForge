@@ -10,7 +10,7 @@ HTTP 页面、API、静态脚本、SSE 与文件预览经过统一认证。公�
 
 ## 持久会话
 
-密码使用 scrypt 加盐摘要，随机会话 token 仅保存 SHA-256 摘要。新会话默认不因时间过期，API 的 `expiresAt=null`。浏览器使用 HttpOnly、SameSite=Strict 持久 Cookie，400 天并随认证请求续存。退出、重置账户或清除数据撤销会话。
+密码使用 scrypt 加盐摘要，随机会话 token 仅保存 SHA-256 摘要。新会话默认不因时间过期，API 的 `expiresAt=null`。浏览器使用 HttpOnly、SameSite=Strict 持久 Cookie，400 天并随认证请求续存。退出或重置账户撤销会话。清除当前工作目录保留账号和有效会话。
 
 CLI 默认使用客户端宿主发布的正式委托授权；客户端未登录时可保存独立私有会话，不读取浏览器存储或 SQLite，不保存密码。共享授权随客户端退出而撤销，具体机制见下文。
 
@@ -24,7 +24,7 @@ SSE 在事件和心跳时检查会话。退出登录不等于终止任务。
 
 Electron 自有子服务尚无管理员时，主进程以一次性私有 bootstrap token 换取短时 setup 会话；token 不写 URL、页面、日志或 Provider 环境。已有管理员不能重复使用该入口。
 
-数据清除要求当前密码和准确确认文字；仅清理当前实例，保留外部项目及本机 CLI 凭据。此操作与普通退出不同。
+数据清除要求当前密码和准确确认文字；删除整个当前工作目录（包括其中用户文件），保留配置目录、账号和登录、Runtime、插件/MCP、Git 凭据及日志。工作目录外的旧任务文件和外部项目不扩展删除；不返回管理员首次设置。详见 docs/30-storage-layout.md。
 
 主要接口：`GET /api/auth/session`、`POST /api/auth/login`、`POST /api/auth/logout`。配置路径见 [Electron](18-electron-client.md) 和 [CLI](21-configuration-cli.md)。
 

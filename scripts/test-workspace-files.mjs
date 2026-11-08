@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Explicit real-Provider acceptance; all configuration/data/files are isolated.
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,open,stat} from 'node:fs/promises';
@@ -20,6 +21,7 @@ const actual=process.env.AGENTFORGE_WORKSPACE_CLAUDE || execFileSync('/usr/bin/w
 const wrapper=join(root,'real-claude');await writeFile(wrapper,'#!/bin/sh\nHOME='+JSON.stringify(homedir())+' exec '+JSON.stringify(actual)+' "$@"\n',{mode:0o700});
 const clip=join(root,'fixture.mp4');if(!resumed)execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=blue:s=160x90:r=10','-t','1','-c:v','libx264','-pix_fmt','yuv420p',clip]);
 const appPath=process.env.AGENTFORGE_WORKSPACE_APP;
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({...(appPath?{executablePath:resolve(appPath,'Contents/MacOS/AgentForge'),args:['--user-data-dir='+join(root,'profile')]}:{args:['apps/electron/main.mjs','--user-data-dir='+join(root,'profile')]}),env:{...process.env,HOME:home,CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR || join(homedir(),'.claude'),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
 const evidence={root,packaged:Boolean(appPath),real:true,resumed,result:'RUNNING'};
 const wait=async(label,check,timeout=900000)=>{const start=Date.now();let last=0;while(Date.now()-start<timeout){const value=await check();if(value)return value;if(Date.now()-last>30000){console.log('WAIT',label);last=Date.now()}await new Promise(done=>setTimeout(done,500))}throw Error('timeout: '+label)};

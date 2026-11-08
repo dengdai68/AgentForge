@@ -42,7 +42,7 @@ MCP 编辑：marketplace.mjs 复用安装校验并保留未改动脱敏值；HTT
 
 原生 Skill：local-cli 保留 Claude --plugin-dir 但不禁用 Skill；所选 Codex Skill 走调用独占 codex-app-server.mjs，额外根注册、目录核对、线程级启用、精确续接，复用控制台投影。无 Skill 保留 exec，不作失败回退。prompts 不生成技能路径指引；history/mcp 的服务说明和 schema 拥有目录/分页。test-prompt-e2e 的 NATIVE_SKILLS_REAL 模式真实验证；CLI 字段不变、帮助同步。
 
-CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，无目标环境分支；客户端始终提供 CLI 分类。server/data-home.mjs 统一默认任务根 ~/agentforge，Electron 只复用纯路径函数；Store 随机 Task UUID 防止共享根碰撞，历史路径不变。真实 CLI 开发 E2E 启动独立 Electron 随机端口，不伪装 Web endpoint。
+CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，无目标环境分支；客户端始终提供 CLI 分类。server/data-home.mjs 与 storage-layout.mjs 统一默认数据根 ~/.agentforge/workspace，Electron 解析独立启动定位并经 storage-relocation.mjs 整理资料；Store 随机 Task UUID 防止共享根碰撞，历史路径不变。真实 CLI 开发 E2E 启动独立 Electron 随机端口，不伪装 Web endpoint。
 
 规则入口：[AGENTS.md](../AGENTS.md)。机器可读模块及联动文件见 `ai/module-registry.json`。
 
@@ -96,7 +96,7 @@ CLI 连接集中在 cli/client.mjs 的私有 endpoint 发现与实例校验，�
 - 角色：Store 拥有 roles 集合与员工有序 `roleIds` 多选绑定校验/删除拒绝；Task 创建把角色文本冻结为员工快照的 `roleSnapshots`，沟通投递快照在发送/重试时嵌入；`prompts.mjs` 把快照中的角色提示词并入应用系统指令（任务与沟通共用，Claude `--append-system-prompt-file` / Codex `developer_instructions` 通道不变），Runtime 无角色状态。界面 BUILD 组有独立角色目录；CLI 为 `roles` 组与 `agents` 的 `roleIds`。
 - 角色侧栏展示：`web/preferences.mjs` 的 NAVIGATION 包含 roles，隐藏选择可重载保留、默认恢复与空 BUILD 分组共用现有偏好逻辑；`web/index.html` 用 SVG 人物名牌替代字体符号，`apps/electron/compact.css` 补同形蒙版以修复实心方块。`test-roles-ui.mjs` 验证偏好及宽窄窗口、两种主题；只改展示，CLI 无变动。
 - 配置能力：HTTP/Store、界面与 CLI 一起核对；当前输入协议见员工配置和 CLI 文档。员工/插件/MCP 目录共用同行搜索工具栏与卡片；插件/MCP 删除经 Store 记录 extensionRemovals 并拒绝当前员工引用，文件保留供冻结任务使用。
-- 插件/MCP：`web/marketplace.mjs` → 认证目录/详情与来源整批 import → Runtime 不可变插件版本及拆分 MCP；员工只选 pluginIds/mcpIds，创建/编辑均可设置 active/inactive。`mcp-launcher.mjs` 通过现有 SDK 桥接 SSE/Streamable HTTP；`plugin-hooks.mjs` 为 Codex 执行完整性校验的选定命令 Hook，Subagent 配置投影到 Trace。Electron 数据仍由 runtime-paths 指向 ~/.agentforge。
+- 插件/MCP：`web/marketplace.mjs` → 认证目录/详情与来源整批 import → Runtime 不可变插件版本及拆分 MCP；员工只选 pluginIds/mcpIds，创建/编辑均可设置 active/inactive。`mcp-launcher.mjs` 通过现有 SDK 桥接 SSE/Streamable HTTP；`plugin-hooks.mjs` 为 Codex 执行完整性校验的选定命令 Hook，Subagent 配置投影到 Trace。Electron 认证/启动定位仍在 ~/.agentforge，业务资料指向配置根内 .agentforge/<实例>，见 docs/30。
 - 市场整批导入解析 Claude/Codex 本地及 HTTPS Git 条目，ref/sha 记录实际来源；配置根先归一祖先别名。清单/Hook/Skill 分 Runtime 投影，目录/CLI 展示静态兼容性与原因，员工绑定拒绝不兼容。Codex MCP cwd 在私有启动器生效，npm/archive/command 来源仍明确拒绝，详见 docs/15。
 - 展示：优先共享投影和现有样式，桌面差异放入 `compact.css`；工具命令/文件摘要解析在共享投影，可见行加载与 Read/Write 正文展示在 `web/app.js`。
 - 消息方向由 renderer 的真实 sender 判断：人类右、员工左，不改变协作投影/CLI。市场整行空/错误状态在 `marketplace.mjs` 的网格外；工作根设置在 HTTP 校验并创建目录后交 Store 保存，见 docs/02、06。
@@ -203,7 +203,7 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 
 任务草稿：`web/app.js newTaskModal` 将保存和开始分开；`client/console-projections.mjs` 的 backlog 标签为草稿；Store/HTTP 沿用 createTask 与 createRun，CLI 默认 create 与 --start 等价。隔离 UI/CLI 与真实启动验收见 `scripts/test-task-drafts.mjs`。
 
-扩展数据库目录：store.registerExtensions/queryExtensions/removeExtension → persistence.extension_catalog；HTTP 导入/编辑与 plugin-updates 原子登记，web/marketplace 和 CLI 服务端分页。契约 docs/15、docs/07；测试 extension-catalog 与 scripts/test-market-catalog。
+扩展配置目录：store.registerExtensions/queryExtensions/removeExtension → configuration-store 私有 JSON；persistence 用 SQLite revision 协调业务绑定。HTTP 导入/编辑与 plugin-updates 一致提交，App/CLI 搜索后分页使用元数据缓存。契约 docs/30、docs/15、docs/07；测试 configuration-store、extension-catalog 与 scripts/test-market-catalog。
 
 长任务与协作附件：store.getRunExecutionContext 与单条读取供 orchestrator/工作目录使用；Run Files 保存任务附件，HTTP 复用受认证二进制路由，web/app + communication 复用图片与文件组件，CLI message/reply 接受 attachmentPaths。契约 docs/03、13、14、21、22；test-task-attachments 含真实 Claude 验收模式。
 
@@ -246,3 +246,27 @@ MCP连接配置在marketplace.mjs以静态section直接展示；任务创建/自
 Runtime 扩展：portable-extensions.mjs 在既有市场完整性校验后物化原生 Skill/独立子代理/MCP 配置，九种 Runtime 共用绑定与历史桥。市场显式兼容性检查只更新 Store 目录缓存，列表不做磁盘全扫描；CLI/App 同步入口与实际验收见 docs/29。pi-agents.mjs 仅由原生 Pi 加载，子进程不拥有领域状态；独立会话/工具/取消夹具在 tests/pi-plugin-agents.test.mjs。
 
 模型与视频：model-catalog 从新六种 Runtime 的原生元数据投影 label/levels；portable-cli/portable-extensions 传递 Cursor 原生变体、Gemini thinkingLevel、Qwen reasoningEffort、Kimi 环境档位、Pi thinking 与 OpenCode #variant。当前文件 video 元数据与描述符由 Run Files 所有，index 认证流式 Range，app.js 原生播放器；无整文件缓冲或转码。
+
+统一存储：server/storage-layout.mjs 定义当前 locator 与冻结引用的物理地址解析；apps/electron/storage-relocation.mjs 负责独占停机拷贝、SHA256 校验、原子定位及健康后的旧资料清理。server/index.mjs 与 cli storage/get/update、web 设置共享同一忙碌门禁和重启回执。scripts/test-storage-layout.mjs 提供隔离/真实 Skill 续接验收；docs/30 为架构 source of truth。v0.1.7 视觉审查单独保存在 docs/development/design-review-2026-11-08.md，建议未实施。
+
+配置目录拥有桌面更新缓存；更新器在工作目录整理期间阻止并发下载，并按配置目录打开已验证安装包，见 docs/24-desktop-updates.md。
+
+存储搬运后的冻结 MCP 资源在 history/bridge 的前置检查前即解析，不能仅在 local-cli 执行边界解析；完整性和保留名称规则不变。
+
+当前存储归属以 [配置目录与工作目录](30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。
+
+`server/configuration-store.mjs` 管理私有配置 JSON 的缓存、阶段提交与崩溃恢复；`server/persistence.mjs` 原子提交业务变更和配置 revision，不存扩展清单正文。
+
+共享启动目录：store.buildTask 分配 tasks/TaskID，createRun 分配 RunID；communication-store.prepareCommunicationWorkspace 首次持久分配 communications/会话ID，communication 服务把 cwd 与内部成员/尝试记录分离，prompts 区分共享工作文件和附件资料位置。真实验收见 test-storage-layout，群成员 FIFO/会话隔离与共享文件见 communication tests。
+
+业务记录统一位于 `<工作目录>/records`：数据库、历史索引及 runs/communications 执行正文与校验记录共享此根；沟通 cwd/上传附件在 `<工作目录>/communications/<会话ID>`。不再创建 `.agentforge/desktop/agentforge-runs`；配置仍在 Home。路径与目录切换契约见 docs/30。App/CLI storage get/update 使用同一 HTTP 定位，不直接读取数据库。
+
+工作目录定位只持久化 workspaceRoot，records 路径固定由 workspaceRoot/records 推导；storage.json 不接受 businessRoot。App/CLI 返回的 businessRoot 为只读计算结果，开发实例通过独立工作根隔离，见 docs/30。
+
+待实施的共享协作与提示词设计见 `docs/development/prompt-assembly-and-shared-collaboration-design.md`：目标是当前 Run 全员可读公开角色消息，按成员原生会话增量补齐；阅读与业务待办分别确认，不因旁观记录唤醒全员。文件分开列出 Leader/成员、自动化及私聊/群聊的完整拟实施 systemPrompt、每轮 userPrompt 与响应协议；仅动态数据使用 mock，不代表 prompts/store/communication 已切换到新协议。现行固定文案的逐字函数导出及安装包源码校验见 `docs/development/current-prompt-wording-export.md`。
+
+提示词增量与资料入口：prompts.mjs 统一长正文资料计划、按实体状态增量和巡检消息去重；communication-store 的原生会话消息回执区分输入已接收与回复成功。run-files 保存内容寻址 input-materials 与稳定 workflow 入口，orchestrator/communication 在调用前写入并传实际目录。契约 docs/22，回归 prompts/communication/run-files-security，App/CLI 公共字段不变。
+
+共享协作输入：store.memberInputMessages 按成员回执补齐当前 Run 全部公开外部消息，prompts 明确本轮处理消息与背景，orchestrator 在附件异步校验前固定水位并保留正文加尾部 JSON 的自然正文。Store 合并经理队尾未尝试报告并保留多来源/幂等键，console-projections 同时服务 App/CLI 关联。契约 docs/22、03，覆盖 prompts/task-parallel/smoke。
+
+真实共享协作验收：scripts/test-shared-collaboration-real.mjs；随机标记仅配置给各自员工，通过公开报告传递，再经同伴咨询和原生续接回忆，最后客户端确认。不用Provider夹具代替。

@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated Electron/App/CLI draft acceptance. Optional real Claude round trip.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -12,10 +13,11 @@ const baseline=process.env.AGENTFORGE_DRAFT_BASELINE==='1',real=process.env.AGEN
 await mkdir('.data',{recursive:true});
 const root=await mkdtemp(resolve('.data/task-drafts-')),home=join(root,'home'),data=join(root,'client');await mkdir(home,{recursive:true});
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('draft-qa',password);auth.close();
-const store=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});
+const store=createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});
 store.updateWorkspaceSettings({workspaceRoot:join(root,'work')});
 const profile=store.listRuntimeProfiles().find(item=>item.provider==='claude-code');
 const manager=store.createAgent({name:'草稿验收经理',kind:'manager',systemPrompt:'本次仅验证草稿启动。按任务目标自然回答即可，无需操作文件、咨询或派工。回答后用 managerDecision nextNodeId:null,nextAgentId:null 提交人类验收，不要重复执行。',runtime:{profileId:profile.id}});store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,...(real?{CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude')} :{}),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:180000});
 const evidence={root,real,cases:[]};console.log('EVIDENCE '+root);
 try {

@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated UI/HTTP task-creation acceptance. Run launch is deliberately rejected;
 // this script does not claim Provider execution or human acceptance.
 import assert from 'node:assert/strict';
@@ -17,7 +18,7 @@ const data=bundle?join(home,'.agentforge/desktop'):join(root,'client');
 await mkdir(home,{recursive:true,mode:0o700});
 const password=randomBytes(24).toString('hex');
 const auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('task-form-qa',password);auth.close();
-const store=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});
+const store=createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});
 const manager=store.createAgent({name:'创建界面经理',kind:'manager'}),worker=store.createAgent({name:'创建界面成员'});
 const extra=store.createAgent({name:'其他团队成员'}),secondManager=store.createAgent({name:'第二位经理',kind:'manager'});
 const inactive=store.createAgent({name:'停用团队成员',status:'inactive'});
@@ -31,6 +32,7 @@ await writeFile(mcpServer,`import {createInterface} from 'node:readline';for awa
 const toolMarket=createMarketplace(join(data,'runtime-configs'));const toolEntry=await toolMarket.add({kind:'mcp',name:'工具列表验收',description:'真实stdio工具发现',content:JSON.stringify({mcpServers:{ui_tools:{command:process.execPath,args:[mcpServer]}}})});store.registerExtensions([toolEntry]);
 const memberTask=store.createTask({title:'成员身份验收',objective:'仅验收暂停任务的成员编辑',memberAgentIds:[worker.id,extra.id],managerAgentId:worker.id}),memberRun=store.createRun(memberTask.id);store.pauseRun(memberRun.id);
 store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')} :{}),args:[...(bundle?[]:['apps/electron/main.mjs']),'--user-data-dir='+join(root,'browser-profile')],env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
 const evidence={root,bundle:bundle||'source',cases:[],geometry:[]},errors=[];
 try{

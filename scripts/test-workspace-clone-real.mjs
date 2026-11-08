@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Opt-in: real native Hook + clone/commit task, isolated Electron and human sign-off.
 import assert from 'node:assert/strict';
 import {_electron as electron} from 'playwright-core';
@@ -14,10 +15,11 @@ await mkdir(resolve('.data'),{recursive:true});const root=await mkdtemp(resolve(
 const git=(cwd,args)=>execFileSync('git',['-c','core.hooksPath=/dev/null','-c','user.name=CloneQA','-c','user.email=qa@localhost','-c','commit.gpgsign=false','-C',cwd,...args],{encoding:'utf8'});
 git(source,['init']);await writeFile(join(source,'value.mjs'),'export const value = 1;\n');git(source,['add','.']);git(source,['commit','-m','initial']);const initial=git(source,['rev-parse','HEAD']).trim();
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('clone-qa',password);auth.close();
-const store=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});store.updateWorkspaceSettings({workspaceRoot:join(root,'work')});const profiles=Object.fromEntries(store.listRuntimeProfiles().map(p=>[p.provider,p.id]));store.close();
+const store=createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});store.updateWorkspaceSettings({workspaceRoot:join(root,'work')});const profiles=Object.fromEntries(store.listRuntimeProfiles().map(p=>[p.provider,p.id]));store.close();
 const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
 for(const provider of providers){const name=provider==='claude-code'?'claude':provider,actual=execFileSync('/usr/bin/which',[name],{encoding:'utf8'}).trim();await writeFile(join(root,name),'#!/bin/sh\nHOME='+quote(homedir())+' exec '+quote(actual)+' "$@"\n',{mode:0o700});}
 for(const name of ['.zprofile','.zshrc'])await writeFile(join(home,name),'export PATH='+quote(root)+':"$PATH"\n');
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,DSH_HOME:process.env.DSH_HOME||join(homedir(),'.dsh'),CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude'),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:180000});
 const evidence={root,initial,providers:[]};console.log('EVIDENCE '+root);
 try{
@@ -35,7 +37,7 @@ try{
   while(Date.now()-started<600000){
    final=await api('/api/runs/'+run.id+'/workspace');
    // Do not read CHANGE before completion: prove Hook/turn-end registration, not GET fallback.
-   try { const saved=JSON.parse(await readFile(join(data,'agentforge-runs','runs',run.id,'workspace-repositories.json'),'utf8')); if(saved.some(r=>r.baseRef===initial)&&final.traces.some(t=>t.agentId===worker.id&&t.status==='running'))registeredDuringExecution=true; } catch {}
+   try { const saved=JSON.parse(await readFile(join(root,'work','records','runs',run.id,'workspace-repositories.json'),'utf8')); if(saved.some(r=>r.baseRef===initial)&&final.traces.some(t=>t.agentId===worker.id&&t.status==='running'))registeredDuringExecution=true; } catch {}
    if(final.run.status==='failed')throw Error(JSON.stringify(final.run.failure));
    if(final.run.status==='awaiting_acceptance')break;
    if(Date.now()-started>30000&&Math.floor((Date.now()-started)/1000)%30===0)console.log('WAIT '+provider);

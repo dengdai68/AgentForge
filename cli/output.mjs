@@ -20,7 +20,7 @@ function paragraph(value, columns, indent = '') {
     return [...lines, current].join('\n');
   }).join('\n');
 }
-const groups = { automations: '自动化', tasks: '任务', agents: '数字员工', roles: '角色', teams: '团队', workflows: '工作流', runtimes: 'Runtime', plugins: '插件', mcps: 'MCP' };
+const groups = { storage:'数据存储', automations: '自动化', tasks: '任务', agents: '数字员工', roles: '角色', teams: '团队', workflows: '工作流', runtimes: 'Runtime', plugins: '插件', mcps: 'MCP' };
 const operations = { trigger: '立即执行自动化', triggers: '分页查询触发记录', list: '列出与搜索配置', get: '读取完整详情', create: '创建配置', update: '更新配置', delete: '删除允许删除的配置', test: '真实测试模型连接', import: '安装来源中的全部插件', models: '查询 Provider 可用模型与思考档位' };
 Object.assign(operations, {updates:'查询插件更新状态','check-updates':'立即检查Git插件更新','auto-update':'设置自动更新开关与周期'});
 const labels = { startMessageId: '本轮输入消息 ID', dispatchId: '投递 ID', sourceMessageId: '来源消息 ID', recipientAgentId: '接手成员 ID', workflowNodeId: '节点 ID', workflowNodeName: '节点', executionTraceId: '接手执行 Trace ID', attempts: '尝试次数', nextRetryAt: '下次重试', error: '失败原因', relatedDispatchIds: '关联投递 ID', eventType: '协作事件', senderType: '发起者类型', purpose: '投递用途', replacements: '覆盖版本', id: 'ID', name: '名称', description: '说明', kind: '类型', status: '状态', provider: 'Provider', enabled: '可用', model: '模型', executable: 'CLI 路径', profile: 'Codex profile', profileId: 'Runtime 配置 ID', runtime: '执行配置', systemPrompt: '执行与协作提示词', roleIds: '绑定角色 ID', prompt: '共用系统提示词', capabilities: '能力', memberAgentIds: '员工 ID', managerAgentId: '项目经理 ID', mission: '团队目标', nodes: '工作流节点', staffingGuidance: '人员需求', dependsOn: '前置节点', handoffFrom: '交接来源', deliverable: '交付要求', artifactPaths: '建议交付位置', inheritedExtensionSelection: '角色继承扩展', extensionSelection: '直接扩展选择', pluginIds: '整插件版本 ID', mcpIds: 'MCP 版本 ID', username: '管理员', expiresAt: '会话到期时间', sessionFile: '私有会话文件', system: '系统配置', createdAt: '创建时间', updatedAt: '更新时间', logPath: '本机日志', testId: '连接测试 ID', unsupported: '未加载组件', plugins: '插件', skills: '技能', entries: '组件', effort: '思考等级', levels: '可选档位', models: '模型', notes: '来源说明', source: '来源', current: '当前生效', resolvedTo: '解析到模型', supportedInApi: 'API 可用', default: '默认档位' };
@@ -31,6 +31,7 @@ Object.assign(labels, {enabled:'自动更新',intervalMinutes:'检查周期（�
 Object.assign(labels, { compatibility:'Runtime 兼容性', supported:'支持', reasons:'不兼容原因', 'claude-code':'Claude Code', codex:'Codex', dsh:'DeepSeek Harness', providers:'支持的 Runtime' });
 Object.assign(labels, { addressedRecipient:'原消息指向', routingNote:'实际路由说明', deliveries:'关联投递（当前状态）', history:'执行明细（实际发生时间）', scope:'处理范围', currentStatus:'当前投递状态', currentStatusCode:'当前投递状态码', sourceLink:'来源关联依据', sourceNotice:'来源说明', recipientName:'接手成员', previousError:'此前错误（原记录）', endedAt:'结束时间', statusLabel:'本次执行结果', relatedEvents:'关联状态记录', acceptanceRecordId:'对应验收记录 ID', confirmationNote:'确认说明', fileCount:'验收时已记录文件数', files:'文件引用（最多8项）', purposeCode:'投递用途代码' });
 Object.assign(labels, Object.fromEntries(['cursor','gemini','qwen','kimi','pi','opencode'].map(id=>[id,runtimeLabel(id)])));
+Object.assign(labels,{workspaceRoot:'工作目录',configurationRoot:'配置目录',configurationFile:'配置清单',businessRoot:'应用资料目录',databasePath:'数据库',runFilesRoot:'执行资料目录',runtimeConfigRoot:'扩展目录',authenticationRoot:'认证目录',logDirectory:'日志目录',restarting:'正在整理并重启'});
 const label = key => labels[key] ? `${labels[key]} (${key})` : text(key);
 Object.assign(labels, { automation: '自动化', cron: 'Cron 表达式', timeZone: '时区', nextTriggerAt: '下次执行', plannedAt: '计划时间', outcome: '触发结果', completion: '完成方式', automationId: '自动化 ID', latestTrigger: '最近触发', trigger: '触发记录', workflow: '工作流', manager: '项目经理', workspacePath: '工作目录', title: '任务名称', objective: '用户目标', workflowTemplateId: '工作流 ID', acceptanceCriteria: '验收要求', attempts: '尝试次数', lastErrorKind: '失败类别', lastError: '上次失败', nextRetryAt: '下次重试时间', taskTitle: '任务标题', taskId: '任务 ID', runId: '执行 ID', taskStatus: '任务状态', runStatus: '执行状态', currentFocus: '当前重心', pendingQuestions: '待答人类问题', pendingDispatches: '未结束投递', activeTraces: '正在执行', members: '员工引用', memberCount: '成员数', participants: '执行成员', artifactCount: '已接纳交付数', acceptanceRequest: '经理验收交接', deliveryReview: '历史交付复核', nextAction: '下一步', content: '内容', replyToMessageId: '所回复问题 ID', recipientAgentId: '接收成员 ID', items: '记录', total: '总数', summary: '交付摘要', failure: '失败原因', timestamp: '时间', from: '发送方', to: '接收方' });
 Object.assign(labels, {type:'类型',condition:'分支条件', edges:'连线',target:'连线终点',dependency:'前置依赖',handoff:'读取交接',position:'画布坐标',x:'横坐标',y:'纵坐标'});
@@ -55,6 +56,7 @@ function details(value, columns, indent = '', key = '') {
   }).join('\n');
 }
 export function commandUsage(group, operation) {
+  if(group==='storage')return `agentforge storage ${operation}${operation==='update'?' --file FILE.json':''}`;
   if (group === 'tasks') return `agentforge tasks ${operation}${['list', 'create'].includes(operation) ? '' : ' TASK_ID'}${['create', 'message', 'reply'].includes(operation) ? ' --file FILE.json' : ''}${operation === 'create' ? ' [--start]' : operation === 'members' ? ' [--file FILE.json] [--run RUN_ID]' : ''}${operation === 'list' ? ' [--search TEXT] [--status STATUS] [--workflow ID_OR_NAME] [--archived] [--page N | --all]' : ['collaboration', 'questions', 'artifacts'].includes(operation) ? ' [--run RUN_ID] [--page N | --all]' : ['progress', 'message', 'reply', 'terminate'].includes(operation) ? ' [--run RUN_ID]' : ''}${['terminate', 'delete'].includes(operation) ? ' --yes' : ''}`;
   if (group === 'auth') return `agentforge auth ${operation}${operation === 'login' ? ' --username NAME [--password-stdin]' : ''}`;
   const id = ['get', 'update', 'delete', 'test', 'trigger', 'triggers'].includes(operation) ? ' ID' : operation === 'models' ? ' PROVIDER' : '';
@@ -88,6 +90,7 @@ function applicableFlags(group, ops) {
     ...(ops.some(op => ['progress', 'collaboration', 'questions', 'artifacts', 'message', 'reply', 'terminate', 'members'].includes(op)) ? ['--run RUN_ID：可选，选择同一任务的指定执行；默认最新执行，输出回显所选 runId。'] : [])
   ];
   return guide.flags.filter(([flag]) => {
+    if(group==='storage')return ['--help','--json'].includes(flag)||flag.startsWith('--file')&&ops.includes('update')||flag.startsWith('--session-file')||flag.startsWith('--endpoint-file');
     if (flag.startsWith('--file')) return ops.some(op => ['create', 'update', 'import', 'auto-update'].includes(op));
     if (flag === '--yes') return ops.some(op => ['delete', 'test'].includes(op));
     if (flag.startsWith('--page') || flag.startsWith('--search')) return ops.includes('list') || (group === 'automations' && flag.startsWith('--page') && ops.includes('triggers'));
@@ -108,7 +111,7 @@ function help(data, columns, { schema = false } = {}) {
     section('命令目录', [
       '  tasks      任务 / 进度 / 协作 / 澄清', '  automations 自动化 / 定时执行 / 触发记录', '  agents     数字员工', '  roles      角色（共用系统提示词）', '  mcps       MCP 市场', '  plugins    插件市场',
       '  workflows  工作流', '  teams      团队', '  runtimes   Runtime 配置与连接查询',
-      '  auth       登录 / 会话状态 / 退出登录'
+      '  storage    数据目录 / 搬运与重启', '  auth       登录 / 会话状态 / 退出登录'
     ].join('\n')),
     '查看具体操作参数：在命令后加 --help，例如 agentforge agents get --help。'
   ].join('\n\n');
@@ -118,7 +121,7 @@ function help(data, columns, { schema = false } = {}) {
     section('子命令', (data.group === 'auth' ? [
       ['login', '登录已有管理员账号'], ['status', '验证本 CLI 会话状态'], ['logout', '退出本 CLI 会话']
     ] : data.operations.map(op => [op, data.group === 'tasks' ? ({ list: '搜索任务列表', get: '读取任务目标与要求', create: '创建待启动任务', start: '启动真实任务执行', terminate: '终止执行并保留记录', delete: '永久删除任务及本地记录', progress: '读取当前执行进度与下一步', collaboration: '查看完整协作记录（消息、派工与状态）', questions: '查询未答人类澄清', message: '向一位指定成员发送指令', reply: '按问题 ID 精确回复澄清', artifacts: '查询已接纳交付信息', members: '查询或修改当前执行成员' })[op] : operations[op]])).map(([op, description]) => `  ${op.padEnd(14)} ${description}`).join('\n')),
-    `查看具体操作参数：在命令后加 --help，例如 agentforge ${data.group} ${data.group === 'auth' ? 'login' : 'list'} --help。`
+    `查看具体操作参数：在命令后加 --help，例如 agentforge ${data.group} ${data.group === 'auth' ? 'login' : data.group==='storage'?'get':'list'} --help。`
   ].join('\n\n');
   if (data.group === 'auth') return [
     'AgentForge CLI — 管理员会话',
@@ -135,7 +138,7 @@ function help(data, columns, { schema = false } = {}) {
   const notes = schema ? data.notes : writing
     ? data.notes.filter(note => !/^(delete |test )/.test(note))
     : data.notes.filter(note => note.startsWith(`${data.operation} `));
-  const id = ['get', 'update', 'delete', 'test', 'start', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers', 'members'].includes(data.operation);
+  const id = data.group!=='storage' && ['get', 'update', 'delete', 'test', 'start', 'progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'trigger', 'triggers', 'members'].includes(data.operation);
   return [
     `AgentForge CLI — ${groups[data.group]}${data.operation ? ' / ' + data.operation : ''}`,
     paragraph(data.description, columns),
@@ -144,7 +147,7 @@ function help(data, columns, { schema = false } = {}) {
     section('参数与前置条件', bullets([guide.transport, ...(id ? ['ID：必填精确资源ID，从本组 list/get 返回值获取；不能使用名称或路径。'] : []), ...applicableFlags(data.group, ops), '认证会话与客户端独立。用法未列的专用参数不可混用。'], columns)),
     ...(writing ? [section('输入模式', paragraph(data.inputMode, columns, '  ')), section('完整字段说明', fields(data.schema, columns).join('\n')), section('JSON 输入模板（替换占位 ID 后保存到 FILE.json）', JSON.stringify(data.example, null, 2).split('\n').map(line => '  ' + line).join('\n'))] : []),
     ...((data.group === 'tasks' ? data.notes : notes).length ? [section('行为、限制与更新语义', bullets(data.group === 'tasks' ? data.notes : notes, columns))] : []),
-    section('回读与下一步', bullets([...(writing ? [data.readBeforeWrite] : []), `查看${groups[data.group]}：agentforge ${data.group} list；详情：agentforge ${data.group} get ID。`, `完整字段：agentforge schema ${data.group}；机器目录加 --json。配置保存不代表已执行，也不确认任何 Task 完成。`], columns)),
+    section('回读与下一步', bullets([...(writing ? [data.readBeforeWrite] : []), data.group==='storage'?'整理后回读：agentforge storage get；确认工作根及业务目录与请求一致。':`查看${groups[data.group]}：agentforge ${data.group} list；详情：agentforge ${data.group} get ID。`, `完整字段：agentforge schema ${data.group}；机器目录加 --json。配置保存不代表已执行，也不确认任何 Task 完成。`], columns)),
     section('输出', paragraph(guide.output, columns, '  ')),
     section('失败恢复', bullets(Object.entries(guide.exitCodes).map(([code, value]) => `${code}：${value}`), columns)),
     section('安全与非效果', bullets(data.safety, columns))

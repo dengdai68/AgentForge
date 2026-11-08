@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated Electron settings and CLI authorization acceptance. Opt-in real
 // Providers: AGENTFORGE_SETTINGS_REAL=1. Never modifies the installed instance.
 import assert from 'node:assert/strict';
@@ -19,7 +20,7 @@ const real = process.env.AGENTFORGE_SETTINGS_REAL === '1', password = randomByte
 await mkdir(home,{recursive:true,mode:0o700});
 await mkdir(join(home,'.agentforge'),{recursive:true,mode:0o700});
 const auth = createAuth({databasePath:join(data,'auth.sqlite')}); await auth.setAdministrator('settings-qa',password); auth.close();
-const store = createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});
+const store = createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});
 const profiles = Object.fromEntries(store.listRuntimeProfiles().map(item=>[item.provider,item]));
 const manager = store.createAgent({name:'配置验收经理',kind:'manager',systemPrompt:'仅执行一次最小验收：将 check 节点派给配置验收成员。成员文字交接后直接 request_acceptance；不需要文件，不需要向人类澄清。',runtime:{profileId:profiles['claude-code'].id}});
 const worker = store.createAgent({name:'配置验收成员',systemPrompt:'直接用一句中文回复：固定 Runtime 配置验证成功。无需工具和文件。',runtime:{profileId:profiles.codex.id}});
@@ -46,6 +47,7 @@ if (real) {
   await writeFile(join(home,'.zprofile'),'export PATH='+quote(bin)+':"$PATH"\n');
   await writeFile(join(home,'.zshrc'),'export PATH='+quote(bin)+':"$PATH"\n');
 }
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app = await electron.launch({...(bundle ? {executablePath:resolve(bundle,'Contents/MacOS/AgentForge')} : {}),args:bundle ? [] : ['apps/electron/main.mjs'],env:{...process.env,HOME:home,...(missing ? {PATH:'/usr/bin:/bin:/usr/sbin:/sbin',ZDOTDIR:home} : {}),...(real ? {CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude')} : {}),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
 const evidence = {root,bundle:bundle||'source',real,cases:[]}, errors = [];
 const poll = async (label,check,timeout=30000) => {const started=Date.now();for(;;){const value=await check();if(value)return value;if(Date.now()-started>timeout)throw Error('Timed out: '+label);await new Promise(resolve=>setTimeout(resolve,500));}};

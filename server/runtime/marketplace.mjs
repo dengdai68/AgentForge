@@ -4,6 +4,7 @@ import { mkdir, lstat, readFile, writeFile, readdir, realpath, rename, rm } from
 import { join, resolve, dirname, basename, relative } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import {runtimeStoragePath,runtimeStorageReferences} from '../storage-layout.mjs';
 import { fileFingerprint } from '../file-fingerprints.mjs';
 import { parseMcpJson, createRuntimeConfiguration } from './configuration.mjs';
 import { diagnosticRedactor,diagnostic } from '../diagnostics.mjs';
@@ -189,6 +190,7 @@ export function withExtensionValidation(work){return validationScope.getStore()?
 function validated(key,work){const cache=validationScope.getStore();if(!cache)return work();if(!cache.has(key))cache.set(key,Promise.resolve().then(work));return cache.get(key);}
 export function readExtensionFile(ref){return validated('file:'+JSON.stringify(ref),()=>verifyExtensionFile(ref));}
 async function verifyExtensionFile(ref) {
+  ref=runtimeStorageReferences({extensionManifest:[ref]}).extensionManifest[0];
   try {
     const info=await lstat(ref.path);
     if(!info.isFile() || info.isSymbolicLink() || info.size>128*1024 || await realpath(ref.path)!==ref.path) throw new Error(`扩展清单不是有效的普通文件：${ref.path}`);
@@ -211,6 +213,7 @@ async function verifyExtensionFile(ref) {
 }
 export function readPluginExecutionPlan(ref){return validated('plan:'+JSON.stringify(ref),()=>verifyPluginExecutionPlan(ref));}
 async function verifyPluginExecutionPlan(ref) {
+  ref=runtimeStorageReferences({extensionManifest:[ref]}).extensionManifest[0];
   await readExtensionFile(ref);
   if(![2,COMPATIBILITY_VERSION].includes(ref.adapterVersion)) throw new Error('插件执行计划版本不支持');
   const root=dirname(dirname(ref.path));
@@ -257,7 +260,7 @@ export function createMarketplace(root) {
   }
   async function read(id, kind, installedDirectory) {
     if(!uuid(id)) throw new Error('扩展版本 ID 无效'); await ensure();
-    const location=installedDirectory || (await locationIndex()).get(kind+':'+id) || join(kind==='plugin'?pluginDirectory:directory,id);
+    const location=runtimeStoragePath(installedDirectory) || (await locationIndex()).get(kind+':'+id) || join(kind==='plugin'?pluginDirectory:directory,id);
     const file=join(location,'entry.json');
     try {
       if(await realpath(file)!==file || (await lstat(file)).size>2*1024*1024) throw new Error();

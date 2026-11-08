@@ -195,3 +195,8 @@ test('automation stores an explicit selected business employee manager and freez
   assert.throws(()=>store.saveAutomation({...input,managerAgentId:null}),/请选择/);
  }finally{store.close();}
 });
+
+
+test('automation uses the same tasks/TaskID/RunID workspace allocation as manual tasks',()=>{
+ const {store,automation}=setup();try{const trigger=store.triggerAutomation(automation.id),task=store.getTask(trigger.taskId),run=store.getRun(trigger.runId);assert.equal(task.workspacePath,join('/tmp/automation-unit-work','tasks',task.id));assert.equal(run.workspacePath,join(task.workspacePath,run.id));}finally{store.close();}
+});

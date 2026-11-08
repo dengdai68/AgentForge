@@ -18,8 +18,8 @@ Artifact 按冻结信息验证。派发提示词快照及私有凭据不进入�
 
 索引同步读取主库提交水位与变化 ID，不在每次工具查询遍历历史。主库正文按需加载，read_trace 使用位置/高水位分页；首次建索引与后续增量成本分别记录。所有已知员工按当前平台历史可见规则查询，入口验证身份，不维护记录与全部员工的笛卡尔关联。索引水位提交失败可重试，不推进主库或抹掉冻结记录。
 
-withHistoryTools 对尚未映射 MCP 的 portable Runtime 仅调用 onPrompt 和原生执行，不伪造历史工具能力或创建不可达桥；既有三项历史 MCP 行为及身份边界不变。
-
-Portable Runtime 的提示词快照由适配器在原生配置与实际指令合成后保存一次；桥仅转发调用，不提前生成第二个快照。历史 MCP 仍不向这些 Runtime 宣告。
-
 九种 Runtime 共用同一个私有历史 MCP 桥；portable 适配器完成原生配置后发布一次提示词快照，历史桥不提前重复保存。
+
+桥先解析冻结 MCP 的受管物理地址，再读取配置检查保留名称；所有检查和 Provider 调用共用同一份解析后的调用副本，不修改存储的冻结输入，也不放宽保留名称校验。
+
+业务记录统一位于 `<工作目录>/records`：数据库、历史索引及 runs/communications 执行正文与校验记录共享此根；沟通 cwd/上传附件在 `<工作目录>/communications/<会话ID>`。不再创建 `.agentforge/desktop/agentforge-runs`；配置仍在 Home。路径与目录切换契约见 docs/30。App/CLI storage get/update 使用同一 HTTP 定位，不直接读取数据库。

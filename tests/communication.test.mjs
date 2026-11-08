@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, writeFile, chmod } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, chmod, lstat, mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createCatalogFixtureStore as createStore } from "./fixture-store.mjs";
+import { createRunFiles } from "../server/run-files.mjs";
 import { createCommunicationService } from "../server/communication.mjs";
 import { RuntimeSessionMissingError, runClaudeCodeCli } from "../server/runtime/local-cli.mjs";
 import { registerExecution } from "../server/runtime/registry.mjs";
@@ -30,7 +31,7 @@ test('shutdown while waiting for execution resources preserves a recoverable com
     const pool=executionBudget(store),chat=store.openCommunication({kind:'agent',targetId:'agent_analyst'});
     for(let i=0;i<pool.status().total;i++)releases.push(await pool.acquire({owner:`fixture-${i}`,provider:`held-${i}`}));
     send(store,chat.id,'wait for admission');
-    const service=createCommunicationService(store,{root,invoke:async()=>{throw new Error('must not invoke');}}),pending=service.kick(chat.id);
+    const service=createCommunicationService(store,{root:join(root,'communications'),invoke:async()=>{throw new Error('must not invoke');}}),pending=service.kick(chat.id);
     assert.equal(pool.status().waiting,1);closeExecutionBudget(store);await pending;
     assert.equal(store.getCommunication(chat.id).deliveries[0].status,'running');
     store.recoverCommunications();assert.ok(store.claimCommunication(chat.id));
@@ -333,6 +334,39 @@ test("mention selection ends query until a new @, including names with spaces", 
 
 const send = (store, key, content, mentionAgentIds = [], clientRequestId = randomUUID()) => store.sendCommunication(key, { content, mentionAgentIds, clientRequestId });
 
+test('A to B to A preserves reply links without copying A own native output back into its prompt', async t => {
+  const root=await mkdtemp(join(tmpdir(),'af-chat-input-receipts-')),store=createStore();t.after(async()=>{store.close();await rm(root,{recursive:true,force:true});});
+  const chat=store.openCommunication({kind:'group',name:'receipt',memberAgentIds:['agent_analyst','agent_designer']}),calls=[];
+  const service=createCommunicationService(store,{root:join(root,'communications'),invoke:async input=>{
+    calls.push(input.prompt);
+    if(calls.length===3){assert.doesNotMatch(input.prompt,/A_OWN_OUTPUT/);assert.match(input.prompt,/B_NEW_QUESTION|replyToMessageId/);}
+    return {finalText:JSON.stringify({reply:calls.length===1?'A_OWN_OUTPUT':calls.length===2?'B_NEW_QUESTION':'DONE',mentionAgentIds:calls.length===1?['agent_designer']:calls.length===2?['agent_analyst']:[]})};
+  }});
+  send(store,chat.id,'start',['agent_analyst']);await service.kick(chat.id);assert.equal(calls.length,3);
+});
+
+test('communication input receipt survives failed output; fresh sessions and failures before progress retain target', async t => {
+  const root=await mkdtemp(join(tmpdir(),'af-chat-retry-receipt-')),store=createStore();t.after(async()=>{store.close();await rm(root,{recursive:true,force:true});});
+  const chat=store.openCommunication({kind:'agent',targetId:'agent_analyst'});send(store,chat.id,'ORIGINAL_TARGET');
+  const confirmed=createCommunicationService(store,{root:join(root,'communications'),invoke:async input=>{
+    await input.onEvent({providerEventType:'system',data:{presentation:'system',sessionId:input.session.sessionId}});
+    await input.onEvent({providerEventType:'assistant',data:{presentation:'thinking'},content:{version:1,fields:{thinking:{text:'progress'}}}});
+    throw new Error('failure after progress');
+  }});
+  await confirmed.kick(chat.id);let failed=store.getCommunication(chat.id).deliveries.at(-1);assert.equal(failed.status,'failed');
+  store.retryCommunication(chat.id,failed.id);
+  const resumed=createCommunicationService(store,{root:join(root,'communications'),invoke:async input=>{
+    assert.equal(input.session.resume,true);assert.doesNotMatch(input.prompt,/ORIGINAL_TARGET/);assert.match(input.prompt,/继续本轮答复|目标消息引用/);
+    throw new RuntimeSessionMissingError('native missing');
+  }});
+  await resumed.kick(chat.id);store.retryCommunication(chat.id,failed.id);
+  const fresh=createCommunicationService(store,{root:join(root,'communications'),invoke:async input=>{
+    assert.equal(input.session.resume,false);assert.match(input.prompt,/ORIGINAL_TARGET/);throw new Error('startup failure');
+  }});
+  await fresh.kick(chat.id);store.retryCommunication(chat.id,failed.id);await fresh.kick(chat.id);
+  assert.equal(store.getCommunication(chat.id).messages.length,1);
+});
+
 test('employee persona and MCP edits preserve native memory; real Runtime connection changes reset it', async t => {
   const root = await mkdtemp(join(tmpdir(), 'af-chat-edits-')); t.after(() => rm(root, { recursive: true, force: true }));
   const store = createStore(), market = createMarketplace(join(root, 'extensions'));
@@ -384,8 +418,8 @@ test("group members execute in parallel but a member keeps FIFO", async () => {
   const root = await mkdtemp(join(tmpdir(), "af-parallel-chat-"));
   const store = createStore(), group = store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===("team_product_delivery")).memberAgentIds});
   const started = [], releases = [];
-  const service = createCommunicationService(store, { root, invoke: async (input) => {
-    started.push(input.workspacePath);
+  const service = createCommunicationService(store, { root:join(root,'communications'), invoke: async (input) => {
+    assert.ok(input.traceDirectory.startsWith(root+'/'));started.push(input.workspacePath);
     await new Promise((resolve) => releases.push(resolve));
     return { finalText: JSON.stringify({ reply: "done", mentionAgentIds: [] }) };
   } });
@@ -394,7 +428,7 @@ test("group members execute in parallel but a member keeps FIFO", async () => {
     send(store, group.id, "second", ["agent_analyst"]);
     const running = service.kick(group.id), duplicate = service.kick(group.id);
     for (let i = 0; i < 100 && started.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 5));
-    assert.equal(started.length, 2); assert.notEqual(started[0], started[1]);
+    assert.equal(started.length, 2); assert.equal(started[0], started[1]);
     assert.equal(store.getCommunication(group.id).deliveries.filter((item) => item.status === "running").length, 2);
     assert.equal(store.getCommunication(group.id).conversation.members.filter(member=>member.running).length,2);
     releases.splice(0).forEach((resolve) => resolve());
@@ -463,7 +497,7 @@ test("private and group communication schemas across all runtimes exclude handof
     for(const provider of ['claude-code','codex','dsh'])for(const kind of ['agent','group']){
       store.updateAgent('agent_analyst',{runtime:{provider}});const chat=store.openCommunication(kind==='agent'?{kind,targetId:'agent_analyst'}:{kind,name:'Schema group',memberAgentIds:['agent_analyst','agent_designer']});
       send(store,chat.id,'普通回复',kind==='group'?['agent_analyst']:[]);
-      const service=createCommunicationService(store,{root,invoke:async input=>{
+      const service=createCommunicationService(store,{root:join(root,'communications'),invoke:async input=>{
         assert.deepEqual(input.outputSchema.required,kind==='group'?['reply','mentionAgentIds']:['reply']);assert.equal(input.outputSchema.additionalProperties,false);
         assert.deepEqual(JSON.parse(await readFile(input.schemaPath,'utf8')),input.outputSchema);
         assert.doesNotMatch(input.systemPrompt,/handoffToAgentId|本轮可转交成员/);
@@ -477,9 +511,9 @@ test("retired routing outputs reject without waking anyone; retry finishes the o
   const root=await mkdtemp(join(tmpdir(),'af-no-relay-')),store=createStore(),chat=store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===('team_product_delivery')).memberAgentIds});
   try{
     for(const output of [{},{reply:''},{reply:42},{reply:'bad',handoffToAgentId:null},{reply:'bad',handoffToAgentId:'agent_designer'},{reply:'bad',recipient:'agent_designer'}]){
-      send(store,chat.id,'普通消息',['agent_analyst']);const service=createCommunicationService(store,{root,invoke:async()=>({finalText:JSON.stringify(output)})});await service.kick(chat.id);
+      send(store,chat.id,'普通消息',['agent_analyst']);const service=createCommunicationService(store,{root:join(root,'communications'),invoke:async()=>({finalText:JSON.stringify(output)})});await service.kick(chat.id);
       const saved=store.getCommunication(chat.id),item=saved.deliveries.at(-1);assert.equal(item.status,'failed');assert.ok(saved.deliveries.every(d=>d.agentId==='agent_analyst' && !d.parentDeliveryId));
-      store.retryCommunication(chat.id,item.id);await createCommunicationService(store,{root,invoke:async()=>({finalText:JSON.stringify({reply:'修正后的直接答复',mentionAgentIds:[]})})}).kick(chat.id);
+      store.retryCommunication(chat.id,item.id);await createCommunicationService(store,{root:join(root,'communications'),invoke:async()=>({finalText:JSON.stringify({reply:'修正后的直接答复',mentionAgentIds:[]})})}).kick(chat.id);
       assert.equal(store.getCommunication(chat.id).deliveries.at(-1).status,'done');
     }
   }finally{store.close();await rm(root,{recursive:true,force:true});}
@@ -589,7 +623,7 @@ test("communication execution queues replies, resumes exact sessions, separates 
       await input.onEvent({ providerEventType: "assistant", message: "已收到", data: {} });
       return { finalText: JSON.stringify({ reply: "真实协议测试回复", ...(input.outputSchema.properties.mentionAgentIds ? {mentionAgentIds:[]} : {}) }) };
     };
-    const service = createCommunicationService(store, { root, invoke });
+    const service = createCommunicationService(store, { root:join(root,'communications'), invoke });
     send(store, chat.id, "first"); send(store, chat.id, "second");
     await Promise.all([service.kick(chat.id), service.kick(chat.id)]);
     assert.equal(calls.length, 2);
@@ -610,7 +644,7 @@ test("communication execution queues replies, resumes exact sessions, separates 
     assert.ok(operationEvents.length >= 3);
     assert.doesNotMatch(JSON.stringify(operationEvents), /sessionId|"session_id"/);
     send(store, chat.id, "missing");
-    const failing = createCommunicationService(store, { root, invoke: async () => { throw new RuntimeSessionMissingError("missing"); } });
+    const failing = createCommunicationService(store, { root:join(root,'communications'), invoke: async () => { throw new RuntimeSessionMissingError("missing"); } });
     await failing.kick(chat.id);
     const failed = store.getCommunication(chat.id).deliveries.find((item) => item.status === "failed");
     assert.equal(failed.nextAttemptAt, null);
@@ -622,7 +656,7 @@ test("communication execution queues replies, resumes exact sessions, separates 
     assert.equal(store.getCommunication(chat.id).messages.length, 6);
     assert.equal(store.snapshot().runs.length, 0);
     send(store, chat.id, "invalid reply");
-    const invalid = createCommunicationService(store, { root, invoke: async () => ({ finalText: "invalid" }) });
+    const invalid = createCommunicationService(store, { root:join(root,'communications'), invoke: async () => ({ finalText: "invalid" }) });
     await invalid.kick(chat.id);
     assert.equal(store.getCommunication(chat.id).messages.length, 7);
     assert.equal(store.getCommunication(chat.id).deliveries.at(-1).status, "failed");
@@ -677,8 +711,8 @@ test('independent groups retain names and members across team edits/deletion, me
 test('public group peer replies wake an idle previous participant and concurrent pumps do not duplicate delivery',async()=>{
   const root=await mkdtemp(join(tmpdir(),'af-group-peers-')),store=createStore(),chat=store.openCommunication({kind:'group',name:'公开讨论',memberAgentIds:['agent_analyst','agent_designer']});
   try{
-    const calls=[];const service=createCommunicationService(store,{root,invoke:async input=>{
-      const analyst=input.workspacePath.endsWith('agent_analyst');calls.push(analyst?'A':'B');
+    const calls=[];const service=createCommunicationService(store,{root:join(root,'communications'),invoke:async input=>{
+      const analyst=input.executionKey.endsWith(':agent_analyst');calls.push(analyst?'A':'B');
       assert.match(input.systemPrompt,/公开群聊|当前群聊成员/);assert.doesNotMatch(input.systemPrompt,/最多被唤醒一次/);
       if(calls.length===3)assert.match(input.prompt,/请分析师确认/);
       return{finalText:JSON.stringify({reply:calls.length===1?'请设计师补充':calls.length===2?'请分析师确认':'确认收到，讨论结束',mentionAgentIds:calls.length===3?[]:[analyst?'agent_designer':'agent_analyst']})};
@@ -721,4 +755,33 @@ test('deletion cancels queued chats, hides private/member lists, retains replies
   assert.ok(!store.listCommunications().some(row=>row.id===privateChat.id));assert.ok(!store.getCommunicationConsole(chat.id).agents.some(row=>row.id==='agent_analyst'));
   assert.equal(store.claimCommunication(chat.id),null);assert.throws(()=>store.openCommunication({kind:'agent',targetId:'agent_analyst'}),/已删除/);
   assert.throws(()=>send(store,chat.id,'不能再@',['agent_analyst']),/成员/);store.close();
+});
+
+
+test('group peers share files and cwd but retain distinct native sessions and private attempt records',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'af-shared-chat-')),store=createStore({databasePath:join(root,'state.sqlite')});t.after(async()=>{store.close();await rm(root,{recursive:true,force:true});});
+ const audit=join(root,'records/communications'),work=join(root,'work/communications'),calls=[];
+ const files=createRunFiles({root:join(root,'records'),communicationsRoot:work,resolveCommunicationWorkspace:key=>store.getCommunicationWorkspace(key)});
+ const group=store.openCommunication({kind:'group',name:'共享文件',memberAgentIds:['agent_analyst','agent_designer']});
+ const invoke=async input=>{
+  calls.push(input);await input.onEvent({providerEventType:'system',message:'init',data:{sessionId:input.session.sessionId}});
+  assert.equal(input.workspacePath,join(work,group.id));assert.ok(input.traceDirectory.startsWith(join(audit,group.id)));assert.equal(input.traceDirectory.startsWith(input.workspacePath+'/'),false);
+  if(input.executionKey.endsWith(':agent_analyst')){await writeFile(join(input.workspacePath,'peer.txt'),'written by A');return {finalText:JSON.stringify({reply:'请读取 peer.txt',mentionAgentIds:calls.length===1?['agent_designer']:[]})};}
+  assert.equal(await readFile(join(input.workspacePath,'peer.txt'),'utf8'),'written by A');return {finalText:JSON.stringify({reply:'已读取共享文件',mentionAgentIds:[]})};
+ };
+ const service=createCommunicationService(store,{root:work,files,invoke});send(store,group.id,'共享文件验收',['agent_analyst']);await service.kick(group.id);
+ assert.equal(calls.length,2);assert.equal(calls[0].workspacePath,calls[1].workspacePath);assert.notEqual(calls[0].session.sessionId,calls[1].session.sessionId);
+ assert.ok((await lstat(calls[0].schemaPath)).isFile());assert.equal(store.getCommunication(group.id).conversation.workspacePath,join(work,group.id));
+ send(store,group.id,'继续原会话',['agent_analyst']);await createCommunicationService(store,{root:join(root,'changed/communications'),files,invoke}).kick(group.id);
+ assert.equal(calls[2].session.resume,true);assert.equal(calls[2].session.sessionId,calls[0].session.sessionId);
+ const chat=store.openCommunication({kind:'agent',targetId:'agent_analyst'});let privateInput;
+ send(store,chat.id,'私聊隔离');await createCommunicationService(store,{root:work,files,invoke:async input=>{privateInput=input;return {finalText:JSON.stringify({reply:'ok'})};}}).kick(chat.id);
+ assert.equal(privateInput.workspacePath,join(work,chat.id));assert.notEqual(privateInput.workspacePath,calls[0].workspacePath);assert.notEqual(privateInput.session.sessionId,calls[0].session.sessionId);
+});
+
+test('a linked shared conversation root fails before invoking a member',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'af-chat-link-')),store=createStore();t.after(async()=>{store.close();await rm(root,{recursive:true,force:true});});
+ const chat=store.openCommunication({kind:'agent',targetId:'agent_analyst'}),work=join(root,'work/communications'),outside=join(root,'outside');await mkdir(work,{recursive:true});await mkdir(outside);await symlink(outside,join(work,chat.id));let invoked=false;
+ send(store,chat.id,'test');await createCommunicationService(store,{root:work,invoke:async()=>{invoked=true;}}).kick(chat.id);
+ assert.equal(invoked,false);assert.match(store.getCommunication(chat.id).deliveries[0].error,/符号链接/);
 });

@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Isolated Electron/API/CLI presentation acceptance; all work is a terminal
 // Store fixture. This script does not invoke Providers or operator instances.
 import assert from 'node:assert/strict';
@@ -22,7 +23,7 @@ await mkdir(home, { recursive: true });
 const password = randomBytes(24).toString('hex');
 const auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
 await auth.setAdministrator('flow-qa', password); auth.close();
-const s = createFixtureStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') });
+const s = createFixtureStore({ databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data, workspaceRoot: join(root, 'work') });
 const run = s.createRun(s.listTasks()[0].id);
 s.updateRun(run.id, { status: 'running' }); s.setTaskStatus(run.taskId, 'running');
 const analyst = s.getRunAgent(run.id, 'agent_analyst'), tester = s.getRunAgent(run.id, 'agent_tester');
@@ -37,7 +38,7 @@ const work = s.enqueueDispatch(run.id, { recipientAgentId: analyst.id, workflowN
 s.claimDispatch(run.id); const t1 = trace(work, analyst);
 assert.ok(run.workspacePath.startsWith(root + '/'));
 await mkdir(run.workspacePath, { recursive: true });
-const files = createRunFiles({ root: join(data, 'agentforge-runs') });
+const files = createRunFiles({ root: join(root,'work','records') });
 s.attachTracePrompt(t0.id, await files.writePromptSnapshot(run.id,t0.id,promptSnapshot('FLOW_TURN_START: original manager input')));
 for(let i=0;i<120;i++)s.addEvent({type:'runtime.event',runId:run.id,actor:actor(run.manager),message:'FLOW_MANAGER_LOG_'+i,data:{traceId:t0.id,auditVersion:2,providerEventType:'assistant',presentation:'text'}});
 const before = await files.snapshotWorkspace(run.workspacePath);
@@ -98,6 +99,7 @@ for (const width of [1320, 760]) {
 }
 s.close();
 
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app = await electron.launch({ ...(appBundle ? { executablePath: resolve(appBundle, 'Contents/MacOS/AgentForge'), args: [] } : { args: ['apps/electron/main.mjs'] }), env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 180000 });
 try {
   const page = await app.firstWindow({ timeout: 180000 });

@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Opt-in real Provider acceptance for roles: the bound role prompt must reach
 // Claude Code and Codex as application system/developer instructions and take
 // effect in both communication and a real task, while unbound employees stay
@@ -25,7 +26,7 @@ const auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
 await auth.setAdministrator('roles-qa', password);
 auth.close();
 
-const store = createStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') });
+const store = createStore({ databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data, workspaceRoot: join(root, 'work') });
 store.updateWorkspaceSettings({ workspaceRoot: join(root, 'work') });
 const q = text => "'" + text.replaceAll("'", "'\\''") + "'";
 const profiles = {};
@@ -56,6 +57,7 @@ const flow = store.createWorkflowTemplate({ name: '角色验收流程', nodes: [
 const chats = Object.fromEntries([ccBound, cxBound, ccFree].map(agent => [agent.id, store.openCommunication({ kind: 'agent', targetId: agent.id })]));
 store.close();
 
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app = await electron.launch({ args: ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 180000 });
 const wait = async (label, check, timeout = 600000) => { const start = Date.now(); let logged = 0; for (;;) { const result = await check(); if (result) return result; if (Date.now() - start > timeout) throw new Error('Timed out: ' + label); if (Date.now() - logged > 30000) { console.log('WAIT ' + label); logged = Date.now(); } await new Promise(done => setTimeout(done, 2000)); } };
 const evidence = { root, probeV1, probeV2, providers: {}, task: null };

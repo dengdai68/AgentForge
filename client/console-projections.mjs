@@ -553,43 +553,47 @@ export function collaborationRecords(workspace = {}) {
     deliveryHistory.get(id).push(publicEvent(event)); absorbedEvents.add(event.id);
   }
   for (const delivery of dispatches.filter(item => item.id)) {
-    const source = sourceFor(delivery);
-    const recovery = !source && events.find(event => ["run.retry_requested", "run.orchestration_retry_requested"].includes(event.type) && event.data?.dispatchId === delivery.id);
-    let record = source ? recordById.get(source.id) : recovery ? eventRecords.get(recovery.id) : delivery.dedupeKey === "initial-manager" ? start : null;
-    if (!record) {
-      record = { id: delivery.id, timestamp: delivery.createdAt, category: "dispatch", title: "建立投递", from: "AgentForge", to: memberName(delivery.recipientAgentId), senderType: "system", content: "", status: "", statusCode: "recorded", tone: "violet", human: false, sourceNotice: "来源未关联；仅展示已建立的实际投递。", deliveries: [], relatedEvents: [] };
-      records.push(record); recordById.set(record.id, record);
-    }
-    const history = asArray(delivery.traceIds).map((id, index) => {
-      const trace = byTrace.get(id);
-      return trace ? { id: `attempt:${id}`, category: "attempt", timestamp: trace.startedAt, endedAt: trace.endedAt || null, title: `第 ${index + 1} 次执行`, status: trace.status, statusLabel: ({ running: "执行中", completed: "执行结束", failed: "失败", cancelled: "已停止" })[trace.status] || trace.status, traceId: id, error: trace.error || null } : null;
-    }).filter(Boolean).concat(deliveryHistory.get(delivery.id) || []).sort(chronological);
-    const scope = ["manager", "delivery_review"].includes(delivery.purpose) ? "全流程协调" : nodes.find(node => node.id === delivery.workflowNodeId)?.title || delivery.workflowNodeId;
-    const currentStatus = ({ queued: delivery.nextRetryAt ? "等待重试" : "排队中", claimed: "执行中", waiting: "等待答复", done: "执行已结束", cancelled: delivery.lastError ? "因失败停止" : "已取消" })[delivery.status] || delivery.status;
-    const details = {
-      dispatchId: delivery.id, sourceMessageId: source?.id || null, sourceLink: source?.via || (recovery ? "recoveryEvent" : delivery.dedupeKey === "initial-manager" && start ? "runStart" : null),
-      recipientAgentId: delivery.recipientAgentId, recipientName: memberName(delivery.recipientAgentId), workflowNodeId: delivery.workflowNodeId,
-      scope, purposeCode: delivery.purpose, purpose: purposes[delivery.purpose] || delivery.purpose, createdAt: delivery.createdAt, updatedAt: delivery.updatedAt,
-      currentStatusCode: delivery.status, currentStatus, attempts: delivery.attempts || 0,
-      nextRetryAt: delivery.nextRetryAt || null, error: delivery.status === "done" ? null : delivery.lastError || null,
-      previousError: delivery.status === "done" && delivery.lastError && !history.some(item => item.error === delivery.lastError) ? delivery.lastError : null,
-      executionTraceId: asArray(delivery.traceIds).at(-1) || null, history,
-    };
-    record.deliveries.push(details);
-    if (source && byMessage.get(source.id)?.kind === "manager_decision" && delivery.purpose === "node") record.title = "派工";
-    record.human ||= history.some(item => item.senderType === "human");
-    if (!record.dispatchId) {
-      // Keep scalar references for existing clients; all mutable state is scoped
-      // under deliveries, never stamped onto the message's historical time.
-      Object.assign(record, { dispatchId: details.dispatchId, sourceMessageId: details.sourceMessageId, recipientAgentId: details.recipientAgentId, workflowNodeId: details.workflowNodeId, executionTraceId: details.executionTraceId });
-      const originalRecipient = source && byMessage.get(source.id)?.recipient;
-      if (originalRecipient?.type === "team") record.to = details.recipientName;
-      else if (originalRecipient?.type === "agent" && originalRecipient.id !== delivery.recipientAgentId) {
-        record.addressedRecipient = { id: originalRecipient.id, name: originalRecipient.name };
-        record.routingNote = `原消息指向 ${originalRecipient.name || originalRecipient.id}；实际交由 ${details.recipientName} 处理。`;
-        record.to = details.recipientName;
+    const sources = asArray(delivery.coalescedSourceMessageIds).length
+      ? delivery.coalescedSourceMessageIds.filter(id => byMessage.has(id)).map(id => ({id,via:'coalescedSourceMessageIds'}))
+      : [sourceFor(delivery)];
+    for (const source of sources.length ? sources : [sourceFor(delivery)]) {
+      const recovery = !source && events.find(event => ["run.retry_requested", "run.orchestration_retry_requested"].includes(event.type) && event.data?.dispatchId === delivery.id);
+      let record = source ? recordById.get(source.id) : recovery ? eventRecords.get(recovery.id) : delivery.dedupeKey === "initial-manager" ? start : null;
+      if (!record) {
+        record = { id: delivery.id, timestamp: delivery.createdAt, category: "dispatch", title: "建立投递", from: "AgentForge", to: memberName(delivery.recipientAgentId), senderType: "system", content: "", status: "", statusCode: "recorded", tone: "violet", human: false, sourceNotice: "来源未关联；仅展示已建立的实际投递。", deliveries: [], relatedEvents: [] };
+        records.push(record); recordById.set(record.id, record);
       }
-      if (recovery) record.to = details.recipientName;
+      const history = asArray(delivery.traceIds).map((id, index) => {
+        const trace = byTrace.get(id);
+        return trace ? { id: `attempt:${id}`, category: "attempt", timestamp: trace.startedAt, endedAt: trace.endedAt || null, title: `第 ${index + 1} 次执行`, status: trace.status, statusLabel: ({ running: "执行中", completed: "执行结束", failed: "失败", cancelled: "已停止" })[trace.status] || trace.status, traceId: id, error: trace.error || null } : null;
+      }).filter(Boolean).concat(deliveryHistory.get(delivery.id) || []).sort(chronological);
+      const scope = ["manager", "delivery_review"].includes(delivery.purpose) ? "全流程协调" : nodes.find(node => node.id === delivery.workflowNodeId)?.title || delivery.workflowNodeId;
+      const currentStatus = ({ queued: delivery.nextRetryAt ? "等待重试" : "排队中", claimed: "执行中", waiting: "等待答复", done: "执行已结束", cancelled: delivery.lastError ? "因失败停止" : "已取消" })[delivery.status] || delivery.status;
+      const details = {
+        dispatchId: delivery.id, sourceMessageId: source?.id || null, sourceLink: source?.via || (recovery ? "recoveryEvent" : delivery.dedupeKey === "initial-manager" && start ? "runStart" : null),
+        recipientAgentId: delivery.recipientAgentId, recipientName: memberName(delivery.recipientAgentId), workflowNodeId: delivery.workflowNodeId,
+        scope, purposeCode: delivery.purpose, purpose: purposes[delivery.purpose] || delivery.purpose, createdAt: delivery.createdAt, updatedAt: delivery.updatedAt,
+        currentStatusCode: delivery.status, currentStatus, attempts: delivery.attempts || 0,
+        nextRetryAt: delivery.nextRetryAt || null, error: delivery.status === "done" ? null : delivery.lastError || null,
+        previousError: delivery.status === "done" && delivery.lastError && !history.some(item => item.error === delivery.lastError) ? delivery.lastError : null,
+        executionTraceId: asArray(delivery.traceIds).at(-1) || null, history,
+      };
+      record.deliveries.push(details);
+      if (source && byMessage.get(source.id)?.kind === "manager_decision" && delivery.purpose === "node") record.title = "派工";
+      record.human ||= history.some(item => item.senderType === "human");
+      if (!record.dispatchId) {
+        // Keep scalar references for existing clients; all mutable state is scoped
+        // under deliveries, never stamped onto the message's historical time.
+        Object.assign(record, { dispatchId: details.dispatchId, sourceMessageId: details.sourceMessageId, recipientAgentId: details.recipientAgentId, workflowNodeId: details.workflowNodeId, executionTraceId: details.executionTraceId });
+        const originalRecipient = source && byMessage.get(source.id)?.recipient;
+        if (originalRecipient?.type === "team") record.to = details.recipientName;
+        else if (originalRecipient?.type === "agent" && originalRecipient.id !== delivery.recipientAgentId) {
+          record.addressedRecipient = { id: originalRecipient.id, name: originalRecipient.name };
+          record.routingNote = `原消息指向 ${originalRecipient.name || originalRecipient.id}；实际交由 ${details.recipientName} 处理。`;
+          record.to = details.recipientName;
+        }
+        if (recovery) record.to = details.recipientName;
+      }
     }
   }
   const acceptances = [];

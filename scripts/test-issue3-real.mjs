@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Real Codex acceptance: member edits, employee-directory MCP and exact human clarification.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -15,7 +16,8 @@ const command=execFileSync('/usr/bin/which',[cliName],{encoding:'utf8'}).trim();
 await writeFile(join(root,cliName),`#!${process.execPath}\nimport {spawn} from 'node:child_process'; const p=spawn(${JSON.stringify(command)},process.argv.slice(2),{env:{...process.env,HOME:${JSON.stringify(homedir())}},stdio:'inherit'});p.on('error',()=>process.exitCode=1);p.on('exit',code=>process.exitCode=code??1);`,{mode:0o700});
 const quote=v=>"'"+v.replaceAll("'","'\\''")+"'";for(const name of ['.zprofile','.zshrc'])await writeFile(join(home,name),'export PATH='+quote(root)+':"$PATH"\n');
 const password=randomBytes(24).toString('hex'),auth=createAuth({databasePath:join(data,'auth.sqlite')});await auth.setAdministrator('issue3-real',password);auth.close();
-const seed=createStore({databasePath:join(data,'agentforge.sqlite'),workspaceRoot:join(root,'work')});seed.updateWorkspaceSettings({workspaceRoot:join(root,'work')});seed.saveRuntimeProfile({model:process.env.AGENTFORGE_ISSUE3_MODEL || (provider==='claude-code'?'sonnet':''),effort:'low'},'runtime_'+provider);seed.close();
+const seed=createStore({databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data,workspaceRoot:join(root,'work')});seed.updateWorkspaceSettings({workspaceRoot:join(root,'work')});seed.saveRuntimeProfile({model:process.env.AGENTFORGE_ISSUE3_MODEL || (provider==='claude-code'?'sonnet':''),effort:'low'},'runtime_'+provider);seed.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,CLAUDE_CONFIG_DIR:process.env.CLAUDE_CONFIG_DIR||join(homedir(),'.claude'),AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:180000});
 console.log('EVIDENCE '+root);const evidence={root,realModel:true,provider};
 try{

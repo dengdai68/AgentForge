@@ -7,7 +7,7 @@ import { diagnostic, diagnosticRedactor } from "./diagnostics.mjs";
 import { constants } from "node:fs";
 import { promisify } from "node:util";
 import { copyFile, lstat, mkdir, open, readFile, readdir, rm, stat, writeFile, appendFile, rename, mkdtemp, unlink } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep, dirname, basename } from "node:path";
 
 const DEFAULT_MAX_FILES = 5000;
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -359,11 +359,13 @@ async function runGit(args, { credential = null, helperDirectory = null } = {}) 
   }
 }
 
-export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileBytes = DEFAULT_MAX_FILE_BYTES, removeDirectory = rm, resolveGitCredential = null } = {}) {
+export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileBytes = DEFAULT_MAX_FILE_BYTES, removeDirectory = rm, resolveGitCredential = null, communicationsRoot = null, resolveCommunicationWorkspace = null } = {}) {
   if (!root || !isAbsolute(root)) throw new Error("RUN_FILES_ROOT 必须是绝对路径");
   if (typeof removeDirectory !== "function") throw new Error("Run 文件删除器必须是函数");
   if (resolveGitCredential !== null && typeof resolveGitCredential !== "function") throw new Error("Git 授权解析器必须是函数");
   const runRoot = resolve(root);
+  const chatRoot=communicationsRoot===null?join(runRoot,'communications'):communicationsRoot;
+  if(!isAbsolute(chatRoot) || (resolveCommunicationWorkspace!==null && typeof resolveCommunicationWorkspace!=='function'))throw new Error('沟通文件存储配置无效');
   const limits = { maxFiles, maxFileBytes };
   const directoryCache=new Map();let directoryCacheBytes=0;
   async function directoryEntries(folder) {
@@ -425,22 +427,55 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
   const pathForTrace = (runId, traceId) => assertInside(runRoot, join(pathForRun(runId), "traces", traceId));
   const communicationPath = (key) => {
     if (typeof key !== 'string' || !/^chat_[A-Za-z0-9_-]+$/.test(key)) throw new Error('沟通 ID 不合法');
-    return assertInside(runRoot, join(runRoot, 'communications', key));
+    const saved=resolveCommunicationWorkspace?.(key),path=saved || join(chatRoot,key);
+    if(typeof path!=='string'||!isAbsolute(path)||path.includes('\0')||resolve(path)!==path||basename(path)!==key)throw new Error('沟通文件目录归属无效');
+    return path;
   };
-  async function privateDirectory(parts) {
-    await mkdir(runRoot, { recursive: true, mode: 0o700 });
-    if ((await lstat(runRoot)).isSymbolicLink()) throw new Error('沟通目录不允许符号链接');
-    let current = runRoot;
+  async function privateDirectory(parts, base = runRoot) {
+    await mkdir(dirname(base),{recursive:true,mode:0o700});
+    if((await lstat(dirname(base))).isSymbolicLink())throw new Error('沟通上级目录不允许符号链接');
+    await mkdir(base, { recursive: true, mode: 0o700 });
+    if ((await lstat(base)).isSymbolicLink()) throw new Error('沟通目录不允许符号链接');
+    let current = base;
     for (const part of parts) {
       if (typeof part !== 'string' || !part || part === '.' || part === '..' || /[/\\\0]/.test(part)) throw new Error('沟通文件路径无效');
-      current = assertInside(runRoot, join(current, part));
+      current = assertInside(base, join(current, part));
       await mkdir(current, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
       const info = await lstat(current);
       if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('沟通目录不允许文件或符号链接');
     }
     return current;
   }
-  const communicationDirectory = (key, parts = []) => { communicationPath(key); return privateDirectory(['communications', key, ...parts]); };
+  const communicationRecordPath = key => { communicationPath(key); return join(runRoot,'communications',key); };
+  const communicationDirectory = (key, parts = []) => { communicationPath(key); return privateDirectory(['communications',key,...parts]); };
+  async function immutableInput(path, content) {
+    try { await writeFile(path, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' }); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | markerNoFollow);
+      try {
+        if (!(await file.stat()).isFile() || await file.readFile('utf8') !== content) throw new Error('输入资料文件完整性校验失败');
+      } finally { await file.close(); }
+    }
+  }
+  async function writeInputMaterials(directory, materials) {
+    for (const material of materials) {
+      const hash = createHash('sha256').update(material.content).digest('hex');
+      if (material.sha256 !== hash || material.name !== `input-${hash}.txt` || material.path !== join(directory, material.name)) throw new Error('输入资料文件引用无效');
+      await immutableInput(material.path, material.content);
+    }
+  }
+  function storageLocation(storagePath){
+    workspaceRelative(storagePath);
+    const parts=storagePath.split('/');
+    if(parts[0]==='communications'){
+      communicationPath(parts[1]);
+      if(parts[2]==='attachments')return {root:communicationPath(parts[1]),path:parts.slice(2).join('/')};
+    }
+    return {root:runRoot,path:storagePath};
+  }
+  const storedFile=storagePath=>{const location=storageLocation(storagePath);return artifactFile(location.root,location.path);};
+  const readStored=(storagePath,maxBytes)=>{const location=storageLocation(storagePath);return readArtifactFile(location.root,location.path,maxBytes);};
   async function writeAttachment(directory,id,name,input) {
     const file=await open(join(directory,name),'wx',0o600),hash=createHash('sha256');let bytes=0;
     try {
@@ -507,6 +542,19 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
   return {
     root: runRoot,
     communicationPath,
+    taskInputDirectory: runId => join(pathForRun(runId), 'input-materials'),
+    communicationInputDirectory: key => join(communicationRecordPath(key), 'input-materials'),
+    async writeTaskInputMaterials(runId, materials) {
+      if (materials.length) await writeInputMaterials(await privateDirectory(['runs', runIdSegment(runId), 'input-materials']), materials);
+    },
+    async writeCommunicationInputMaterials(key, materials) {
+      if (materials.length) await writeInputMaterials(await communicationDirectory(key, ['input-materials']), materials);
+    },
+    async prepareCommunicationAttempt(key,agentId,deliveryId,attempt){
+      if(!/^chat_delivery_[A-Za-z0-9_-]+$/.test(deliveryId)||!Number.isSafeInteger(attempt)||attempt<1)throw new Error('沟通调用归属无效');
+      await privateDirectory([],communicationPath(key));
+      return communicationDirectory(key,[agentId,deliveryId,String(attempt)]);
+    },
     runAttachmentPath(runId, record) {
       attachmentName(record.name);
       if (!/^attachment_[a-f0-9-]{36}$/.test(record.id) || record.path !== `attachments/${record.id}/${record.name}`) throw new Error('附件路径无效');
@@ -531,20 +579,20 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     async writeCommunicationAttachment(key, name, content) {
       attachmentName(name);
       if (!Buffer.isBuffer(content) && !content?.[Symbol.asyncIterator]) throw new Error('附件内容无效');
-      const id = `attachment_${randomUUID()}`, directory = await communicationDirectory(key, ['attachments', id]);
+      const id = `attachment_${randomUUID()}`, directory = await privateDirectory(['attachments',id],communicationPath(key));
       return writeAttachment(directory,id,name,content);
     },
     async validateAttachment(scope,key,record) {
-      const file=await artifactFile(runRoot,attachmentStoragePath(scope,key,record));
+      const file=await storedFile(attachmentStoragePath(scope,key,record));
       if(!file.info.isFile()||file.info.size!==record.bytes||file.info.size>DEFAULT_MAX_FILE_BYTES||await fileFingerprint(file.path)!==record.sha256)throw new Error('附件完整性校验失败');
     },
     async openAttachment(scope,key,record) {
-      const file=await artifactFile(runRoot,attachmentStoragePath(scope,key,record));
+      const file=await storedFile(attachmentStoragePath(scope,key,record));
       if(!file.info.isFile()||file.info.size!==record.bytes||file.info.size>DEFAULT_MAX_FILE_BYTES)throw new Error('附件完整性校验失败');
       const source=await open(file.path,constants.O_RDONLY|constants.O_NOFOLLOW);let temporary;
       try {
         const info=await source.stat();if(info.dev!==file.info.dev||info.ino!==file.info.ino)throw new Error('附件完整性校验失败');
-        const directory=await privateDirectory(['.transfers']),path=join(directory,randomUUID());
+        const directory=scope==='communications'?await communicationDirectory(key,['.agentforge','.transfers']):await privateDirectory(['.transfers']),path=join(directory,randomUUID());
         temporary=await open(path,'wx+',0o600);await unlink(path);
         const hash=createHash('sha256'),buffer=Buffer.allocUnsafe(64*1024);let bytes=0,head=Buffer.alloc(0);
         while(true){const {bytesRead}=await source.read(buffer,0,buffer.length,null);if(!bytesRead)break;bytes+=bytesRead;if(bytes>DEFAULT_MAX_FILE_BYTES)throw new Error('附件最大 20 MiB');const chunk=buffer.subarray(0,bytesRead);if(!head.length)head=Buffer.from(chunk.subarray(0,64));hash.update(chunk);await temporary.writeFile(chunk);}
@@ -559,7 +607,7 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     async readCommunicationAttachment(key, record) {
       communicationPath(key); attachmentName(record.name);
       if (!/^attachment_[a-f0-9-]{36}$/.test(record.id) || record.path !== `attachments/${record.id}/${record.name}`) throw new Error('附件路径无效');
-      const result = await readArtifactFile(runRoot, `communications/${key}/${record.path}`, DEFAULT_MAX_FILE_BYTES);
+      const result = await readStored(`communications/${key}/${record.path}`, DEFAULT_MAX_FILE_BYTES);
       if (result.bytes !== record.bytes || createHash('sha256').update(result.content).digest('hex') !== record.sha256) throw new Error('附件完整性校验失败');
       return result.content;
     },
@@ -570,13 +618,18 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       const directory = await communicationDirectory(key, ['.agentforge', deliveryId, String(attempt)]);
       const destination = join(directory, `content-${randomUUID()}.json`);
       await writeFile(destination, text, { mode: 0o600, flag: 'wx' });
-      return { storagePath: relative(runRoot, destination).replaceAll('\\', '/'), bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') };
+      return { storagePath: `communications/${key}/`+relative(communicationRecordPath(key),destination).replaceAll('\\','/'), bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') };
     },
     async prepareTaskWorkspace(task) {
-      if (task.workspaceManaged) { await mkdir(task.workspacePath, { recursive: true }); const info = await lstat(task.workspacePath); if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("任务目录不能是符号链接或文件"); }
+      if (task.workspaceManaged) {
+        const parent=dirname(task.workspacePath);await mkdir(parent,{recursive:true});
+        const parentInfo=await lstat(parent);if(parentInfo.isSymbolicLink()||!parentInfo.isDirectory())throw new Error('任务上级目录不能是符号链接或文件');
+        await mkdir(task.workspacePath, { recursive: true }); const info = await lstat(task.workspacePath); if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("任务目录不能是符号链接或文件");
+      }
     },
     async prepareRunWorkspace(task) {
       if (!task.workspaceManaged) return null;
+      await this.prepareTaskWorkspace({workspaceManaged:true,workspacePath:task.taskWorkspacePath || task.workspacePath});
       await mkdir(task.workspacePath, { recursive: true });
       for (const path of [task.taskWorkspacePath, task.workspacePath].filter(Boolean)) { const info = await lstat(path); if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("执行目录不能是符号链接或文件"); }
       const internal = join(task.workspacePath, ".agentforge");
@@ -792,7 +845,7 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       return { storagePath: relative(runRoot, destination).replaceAll("\\", "/"), bytes: Buffer.byteLength(text), sha256: createHash("sha256").update(text).digest("hex") };
     },
     async readConsoleContent(reference) {
-      const { content, bytes } = await readArtifactFile(runRoot, reference.storagePath, 300000);
+      const { content, bytes } = await readStored(reference.storagePath, 300000);
       if (bytes !== reference.bytes || createHash("sha256").update(content).digest("hex") !== reference.sha256) throw new Error("执行内容完整性校验失败");
       return JSON.parse(content.toString("utf8"));
     },
@@ -804,7 +857,11 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       const path = join(directory, 'workflow.md'), content = workflowDescription(workflow);
       if (Buffer.byteLength(content) > 1024 * 1024) throw new Error('工作流说明超过 1 MiB');
       await writeFile(path, content, {encoding:'utf8', mode:0o600, flag:'wx'});
-      return { path, bytes:Buffer.byteLength(content), sha256:createHash('sha256').update(content).digest('hex') };
+      const sha256 = createHash('sha256').update(content).digest('hex');
+      const stableDirectory = await privateDirectory(['runs', runIdSegment(runId), 'workflow', sha256]);
+      const stablePath = join(stableDirectory, 'workflow.md');
+      await immutableInput(stablePath, content);
+      return { path: stablePath, bytes:Buffer.byteLength(content), sha256 };
     },
     // One redacted dispatch-prompt snapshot per Trace, same on-disk boundary
     // as console content: 0600, fail-if-exists, SHA-256 integrity binding.
@@ -965,13 +1022,13 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
     },
     async readArtifact(storagePath, options = null) {
       const { maxBytes, expected } = artifactReadOptions(options, DEFAULT_PREVIEW_BYTES);
-      const file = await readArtifactFile(runRoot, storagePath, maxBytes);
+      const file = await readStored(storagePath, maxBytes);
       verifyArtifactSnapshot(file, expected);
       return { content: file.content.toString("utf8"), bytes: file.bytes };
     },
     async readArtifactBytes(storagePath, options = null) {
       const { maxBytes, expected } = artifactReadOptions(options, DEFAULT_MAX_FILE_BYTES);
-      const file = await readArtifactFile(runRoot, storagePath, maxBytes);
+      const file = await readStored(storagePath, maxBytes);
       verifyArtifactSnapshot(file, expected);
       return file.content;
     },

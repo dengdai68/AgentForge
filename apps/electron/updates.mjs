@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, open, readFile, rename, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import semver from 'semver';
 
 export const RELEASE_ROOT = 'https://github.com/dengdai68/AgentForge/releases';
@@ -76,7 +76,8 @@ export function createApplicationUpdates({ currentVersion, packaged, arch, nativ
   const events = new EventEmitter();
   let state = { phase: 'idle', currentVersion, version: null, releaseUrl: RELEASE_ROOT, percent: 0, lastCheckedAt: null,
     installMode: 'manual', message: packaged ? '启动后自动检查正式版，Beta 不参与更新。' : '开发模式：可检查正式版，安装版支持下载更新。' };
-  let candidate, nativeUpdater, installerPath, operation, timer, stopped = false, installing = false;
+  let candidate, nativeUpdater, installerPath, installerCache, operation, timer, stopped = false, installing = false;
+  const currentCacheRoot = () => typeof cacheRoot === 'function' ? cacheRoot() : cacheRoot;
   const downloadAbort = new AbortController();
   const snapshot = () => ({ ...state, canDownload: packaged && Boolean(candidate?.installer) && ['available', 'error'].includes(state.phase), canInstall: packaged && state.phase === 'downloaded' && !installing });
   const publish = patch => { if (stopped) return; state = { ...state, ...patch }; events.emit('change', snapshot()); };
@@ -120,7 +121,7 @@ export function createApplicationUpdates({ currentVersion, packaged, arch, nativ
             installing = false; releaseRestart(); failure(error, state.phase === 'downloaded' ? 'downloaded' : 'error');
           });
           await nativeUpdater.download(candidate.version);
-        } else installerPath = await downloadInstaller(candidate, cacheRoot, progress, { signal: downloadAbort.signal });
+        } else {installerCache=currentCacheRoot();installerPath = await downloadInstaller(candidate, installerCache, progress, { signal: downloadAbort.signal });}
         publish({ phase: 'downloaded', percent: 100, message: state.installMode === 'native' ? '下载完成，可在任务结束后重启安装。' : '下载完成。打开安装包后，将 AgentForge 拖入“应用程序”安装。' });
       } catch (error) { nativeUpdater = null; installerPath = null; failure(error); }
       finally { operation = null; }
@@ -134,7 +135,8 @@ export function createApplicationUpdates({ currentVersion, packaged, arch, nativ
     let restarting = false;
     try {
       if (state.installMode === 'manual') {
-        const error = await openInstaller(installerPath);
+        const targetCache=currentCacheRoot();
+        const error = await openInstaller(targetCache===installerCache?installerPath:join(targetCache,basename(installerPath)));
         if (error) throw new Error('无法打开安装包，请前往 Release 下载');
       } else {
         await prepareRestart();

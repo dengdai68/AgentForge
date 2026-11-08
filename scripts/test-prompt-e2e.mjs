@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Opt-in real Provider acceptance: native memory, system instruction updates,
 // clarification blocking, independently tested code and visible human sign-off.
 import assert from 'node:assert/strict';
@@ -23,7 +24,7 @@ const membership = process.env.AGENTFORGE_MEMBERSHIP_REAL === '1';
 const home = join(root, 'home'), data = packaged ? join(home, '.agentforge/desktop') : join(root, 'client'); await mkdir(home, { recursive: true, mode: 0o700 });
 const password = randomBytes(24).toString('hex');
 const auth = createAuth({ databasePath: join(data, 'auth.sqlite') }); await auth.setAdministrator('prompt-qa', password); auth.close();
-const store = createStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') }); store.updateWorkspaceSettings({ workspaceRoot: join(root, 'work') });
+const store = createStore({ databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data, workspaceRoot: join(root, 'work') }); store.updateWorkspaceSettings({ workspaceRoot: join(root, 'work') });
 const profiles = {};
 for (const [provider, command] of [['claude-code', 'claude'], ['codex', 'codex']]) {
   const actual = execFileSync('/usr/bin/which', [command], { encoding: 'utf8' }).trim(), wrapper = join(root, command);
@@ -52,6 +53,7 @@ const flow = store.listWorkflowTemplates().find(item => item.name === '实现与
 const existingTask = resume && store.listTasks().find(item => item.title.startsWith('PROMPT-E2E｜'));
 const existingRun = existingTask && store.listRuns().find(item => item.taskId === existingTask.id);
 const chats = [cc, codex].map(agent => ({ agent, chat: store.openCommunication({ kind: 'agent', targetId: agent.id }) })); store.close();
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 let app = await electron.launch({ ...(packaged ? { executablePath: resolve('release/mac-arm64/AgentForge.app/Contents/MacOS/AgentForge') } : {}), args: packaged ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 180000 });
 const previous = resume ? JSON.parse(await readFile(join(root, 'evidence.json'), 'utf8')) : null;
 const evidence = { root, surface: packaged ? 'packaged Electron / real models' : 'Electron', providers: previous?.providers || {}, task: null, result: 'RUNNING', priorFailures: previous ? [...(previous.priorFailures || []), previous.error].filter(Boolean) : [] }; let page;
@@ -75,7 +77,7 @@ try {
   }
   if(taskOnly) { evidence.communicationSkipped = true; consoleLog('TASK ONLY: communication validation is not performed in this run'); }
   for (const { agent, chat } of resume || taskOnly ? [] : chats) {
-    const memberDirectory = join(data, 'agentforge-runs/communications', chat.id, agent.id); await mkdir(memberDirectory, { recursive: true });
+    const memberDirectory = join(root,'work/communications',chat.id); await mkdir(memberDirectory, { recursive: true });
     if (agent.runtime.provider === 'claude-code') await writeFile(join(memberDirectory, '.mcp.json'), JSON.stringify({ mcpServers: { unselected: { command: process.execPath, args: [resolve('scripts/marketplace-probe-mcp.mjs'), join(root, 'claude-code-unselected.log'), 'must-not-start'] } } }));
     const marker = randomBytes(12).toString('hex');
     await api('/api/communications/' + chat.id + '/messages', { content: '记住本会话校验码：' + marker + '。回复已记住及该码，不使用工具。', clientRequestId: randomBytes(12).toString('hex') });

@@ -22,7 +22,7 @@ Runtime 外部故障立即保留脱敏原始错误并标记任务失败，禁止
 
 沟通工作台复用任务控制台 renderer 和按需内容读取器，但以 Conversation/Delivery/attempt 为归属。HTTP 接受同源认证二进制附件，Run Files 保存会话原文件和私有执行内容，Store 只保存元数据、消息关联与调用事实。控制台只在展开时按成员/50 条事件分页轮询，历史按 Map 分组，不重复扫描全事件。现有 CLI 未覆盖长期沟通，本轮不扩展 CLI 权限或命令；配置与任务协议不变。
 
-CLI 仅供客户端使用，私有 endpoint 发现与实例校验统一在 cli/client.mjs；不接受 Web/Desktop 目标，不默认连接 4310。应用数据根仍隔离；默认任务根统一为 ~/agentforge，由 server/data-home.mjs 的纯路径函数供客户端自有服务使用。保存的工作根和历史路径不改写。新 Task ID 使用随机 UUID，避免独立实例共享工作根时因毫秒/进程序号相同而碰撞，不增加平台子目录。
+CLI 仅供客户端使用，私有 endpoint 发现与实例校验统一在 cli/client.mjs；不接受 Web/Desktop 目标，不默认连接 4310。应用数据根仍隔离；默认任务根统一为 ~/.agentforge/workspace，由 server/data-home.mjs 的纯路径函数供客户端自有服务使用。保存的工作根和历史路径不改写。新 Task ID 使用随机 UUID，避免独立实例共享工作根时因毫秒/进程序号相同而碰撞，不增加平台子目录。
 
 ```text
 Electron renderer / CLI
@@ -53,7 +53,7 @@ Electron 自有子服务只绑定 127.0.0.1 随机端口，鉴权仅接受实际
 
 源码和安装版的默认数据根见 [桌面文档](18-electron-client.md)。HTTP API、静态应用、SSE 与文件资源经过同一认证入口。
 
-工作目录设置由认证 HTTP 先校验非根绝对路径，递归创建缺失目录并核实实际目录及读写/进入权限，再交 Store 持久化配置和审计。创建或校验失败不改变已保存设置，诊断保留原始 cause；不删除已有文件。新目录仅用于后续 Task，不迁移旧 Task/Run，也不改变应用数据根。该常规设置没有 CLI 配置命令；CLI 创建任务仍使用服务当前的工作根。
+统一存储根由认证 HTTP 接受路径、预留空闲锁，再由拥有子服务的 Electron 宿主停机整理；Store 不参与文件搬运，Runtime 不选择数据盘。数据库、执行资料与扩展同盘，认证/启动定位与运行日志保留私有本机位置。storage.json 先于数据库解析；不可用数据盘明确失败，不新建替代实例。任务创建从当前启动根分配路径，已存在 Task/Run 路径不改。App/CLI storage get/update 共用相同忙碌拒绝与已接受重启回执。地址解析不改冻结内容，决策与验证见 [docs/30](30-storage-layout.md)。
 
 扩展目录约定：Runtime 根中的 `installed-plugins/<批次ID>/plugins/<版本ID>/plugin/` 保存完整插件，批次 `mcps/` 保存拆分 MCP，`marketplace/<版本ID>/` 保存手动 MCP。SQLite 只冻结不可变引用/摘要。完整插件不拆成可单选 Skill；一个来源整批原子发布，不自动启用。详见 docs/15。
 
@@ -123,3 +123,15 @@ Orchestrator 每轮按 removedParticipantIds 过滤当前派工名单；已有�
 新增多 CLI Runtime 的架构边界见 [docs/29](29-runtime-providers.md)：共享目录和单一执行分派，复用现有执行生命周期；不新增任务引擎，不把 Runtime 事件当作业务验收。
 
 六种新增 Runtime 的扩展适配决策见 docs/29：市场拥有源解析/不可变安装/兼容计划，Store 拥有当前目录摘要与冻结绑定，portable-extensions 仅生成原生调用配置。复用既有 MCP 私有启动器和历史桥，不引入第二套工具协议、模型客户端或全局安装服务；兼容性检查通过受认证命令更新目录派生数据，列表仍为数据库分页。
+
+当前存储归属以 [配置目录与工作目录](30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。
+
+员工启动目录：新普通任务与自动化采用 `<工作目录>/tasks/<TaskID>/<RunID>`；沟通采用 Store 首次分配并持久保存的 `<工作目录>/communications/<会话ID>`，群聊成员共享文件目录但原生会话独立。既有任务路径不重写，已分配的沟通目录不随工作根切换；目录变更重建模型上下文并保留聊天历史。内部附件、提示词和执行内容仍由 Run Files 管理，详见 docs/30-storage-layout.md 与 docs/17-communication.md。
+
+## 提示词输入精简
+
+提示词大正文由 prompts 纯函数返回资料计划，Orchestrator/communication 在 Provider 调用前交 Run Files 物化。records/runs/<RunID>/input-materials 与 records/communications/<会话ID>/input-materials 使用 SHA256 文件名；Run Files 拥有路径归属、排他创建、权限及完整性校验，SQLite 不复制文件正文。工作流同时保留逐 Trace 冻结证据与 Run 级 workflow/<SHA256>/workflow.md 稳定读取入口。写入失败停止本轮，不回退内联或截断；Runtime 只接收既有指令通道与实际资料目录。
+
+## 共享协作输入与报告通知
+
+Store 选择 Run 全部未读公开消息并管理当前处理消息引用，Orchestrator 同步捕获消息水位后才异步读取附件；不让新消息越过回执。队尾未领取报告通知由 Store 合并，原生会话仍串行、其他成员仍并行。客户端共享投影将合并的每条明确来源关联到同一个投递；不从正文、角色名称或时间猜测关联。

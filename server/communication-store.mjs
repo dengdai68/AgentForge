@@ -1,6 +1,7 @@
 import {nativeSessionId} from "../client/runtime-providers.mjs";
 import { copyState } from "./state-journal.mjs";
 import { randomUUID, createHash } from "node:crypto";
+import {isAbsolute,resolve,basename} from "node:path";
 import { communicationVisibility } from "./history/index.mjs";
 
 const copy = copyState;
@@ -64,7 +65,7 @@ export function communicationCommands(state, save, employeeSnapshot, journal, pe
     const target = thread.kind === "agent" ? journal.get("agents", thread.targetId) : null;
     const last = journal.select("communicationMessages", "conversationId", thread.id,{last:1})[0];
     const unreadCount=unread(thread),pendingRows=['queued','claimed','running','failed'].flatMap(status=>journal.select('communicationDeliveries','status',status)).filter(row=>row.conversationId===thread.id);
-    return { id: thread.id, kind: thread.kind === "agent" ? "agent" : "group", ...(thread.kind === "agent" ? { targetId: thread.targetId } : {}), name: target?.name || thread.name, unreadCount, createdAt: thread.createdAt, updatedAt: thread.updatedAt, members: members(thread).map(({systemPrompt,roles,...member}) => ({ ...(details ? { ...member, systemPrompt, roles } : member), running: pendingRows.some(row => row.agentId === member.id && row.status === "running") })), preview: last?.content.slice(0, 100) || last?.attachments?.map(row => row.name).join('、').slice(0, 100) || "", pending: pendingRows.length };
+    return { id: thread.id, kind: thread.kind === "agent" ? "agent" : "group", ...(thread.kind === "agent" ? { targetId: thread.targetId } : {}), name: target?.name || thread.name, ...(details?{workspacePath:thread.workspacePath || null}:{}), unreadCount, createdAt: thread.createdAt, updatedAt: thread.updatedAt, members: members(thread).map(({systemPrompt,roles,...member}) => ({ ...(details ? { ...member, systemPrompt, roles } : member), running: pendingRows.some(row => row.agentId === member.id && row.status === "running") })), preview: last?.content.slice(0, 100) || last?.attachments?.map(row => row.name).join('、').slice(0, 100) || "", pending: pendingRows.length };
   };
   const page = (rows, before, limit) => {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error("分页大小必须为 1–200");
@@ -204,11 +205,22 @@ export function communicationCommands(state, save, employeeSnapshot, journal, pe
       const all = journal.select("communicationMessages", "conversationId", key, {idsOnly:true});
       const cutoff = all.indexOf(item.messageId), current=journal.get('communicationMessages',item.messageId);
       const through = thread.sessions[item.agentId]?.inputThroughMessageId;
+      const received = new Set(thread.sessions[item.agentId]?.inputMessageIds || []);
       const previous = through ? all.indexOf(through) : cutoff - 1;
       const selected=new Set([...all.slice(previous+1,cutoff+1),item.messageId,current.replyToMessageId].filter(Boolean));
       const messages = [...selected].map(id=>journal.get('communicationMessages',id)).filter(row=>row?.conversationId===key&&communicationVisibility(state,thread,row).includes(item.agentId)&&
-        (row.id===item.messageId||row.id===current.replyToMessageId||row.sender.id!==item.agentId)).sort((a,b)=>journal.entry('communicationMessages',a.id).position-journal.entry('communicationMessages',b.id).position);
-      return { conversation: summary(thread, true), messages: copy(messages), message: copy(current) };
+        !received.has(row.id) && row.sender.id!==item.agentId).sort((a,b)=>journal.entry('communicationMessages',a.id).position-journal.entry('communicationMessages',b.id).position);
+      return { conversation: summary(thread, true), messages: copy(messages), message: copy(current), targetReceived: received.has(current.id) };
+    },
+    getCommunicationWorkspace(key) { return conversation(key).workspacePath || null; },
+    prepareCommunicationWorkspace(key, workspaceRoot) {
+      const thread=conversation(key);
+      if(!thread.workspacePath){
+        if(typeof workspaceRoot!=='string'||!isAbsolute(workspaceRoot)||workspaceRoot.includes('\0')||resolve(workspaceRoot)==='/')throw new Error('沟通工作根目录无效');
+        thread.workspacePath=resolve(workspaceRoot,key);save();
+      }
+      if(!isAbsolute(thread.workspacePath)||basename(thread.workspacePath)!==key)throw new Error('沟通工作目录归属无效');
+      return thread.workspacePath;
     },
     prepareCommunicationSession(key, deliveryId, cwd) {
       const thread = conversation(key), item = delivery(key, deliveryId);
@@ -220,7 +232,7 @@ export function communicationCommands(state, save, employeeSnapshot, journal, pe
       const inputThroughMessageId = session?.inputThroughMessageId;
       // Persona and selected extensions are reapplied to each invocation. They
       // do not change native conversation identity or erase its memory.
-      if (session && (session.provider !== provider || session.cwd !== cwd || session.connectionKey !== connectionKey)) { event(item, "session_reset", "Runtime 连接变化，重建模型上下文，聊天记录保留"); session = null; }
+      if (session && (session.provider !== provider || session.cwd !== cwd || session.connectionKey !== connectionKey)) { event(item, "session_reset", session.cwd!==cwd ? "启动目录变化，重建模型上下文，聊天记录保留" : "Runtime 连接变化，重建模型上下文，聊天记录保留"); session = null; }
       const resume = Boolean(session?.confirmed);
       if (!session?.sessionId) session = { sessionId: randomUUID(), provider, cwd, confirmed: false, connectionKey, ...(inputThroughMessageId ? { inputThroughMessageId } : {}) };
       session.connectionKey = connectionKey;
@@ -237,6 +249,14 @@ export function communicationCommands(state, save, employeeSnapshot, journal, pe
       if (invocation) invocation.providerSessionId = sessionId;
       save();
     },
+    confirmCommunicationInput(key, deliveryId, messageIds) {
+      const thread = conversation(key), item = delivery(key, deliveryId), session = thread.sessions[item.agentId];
+      if (item.status !== 'running' || !session || !Array.isArray(messageIds) || messageIds.some(id => journal.get('communicationMessages',id)?.conversationId !== key)) throw new Error('沟通输入回执无效');
+      session.inputMessageIds = [...new Set([...(session.inputMessageIds || []), ...messageIds])];
+      const all = journal.select('communicationMessages','conversationId',key,{idsOnly:true});
+      if (all.indexOf(item.messageId) > all.indexOf(session.inputThroughMessageId)) session.inputThroughMessageId = item.messageId;
+      save();
+    },
     appendCommunicationEvent(key, deliveryId, input) {
       const item = delivery(key, deliveryId); event(item, input.providerEventType || "output", input.message || "", input.data || {}); save();
     },
@@ -250,8 +270,8 @@ export function communicationCommands(state, save, employeeSnapshot, journal, pe
         if (mentionAgentIds.length && thread.kind === "agent") throw new Error("私聊不能 @ 其他员工");
         if (mentionAgentIds.some(value => value === item.agentId || !roster.some(member => member.id === value && member.status === "active"))) throw new Error("@ 对象必须是群聊中其他可用员工");
         const message = { id: id("chat_message"), conversationId: key, sender: { type: "agent", id: item.agentId, name: item.agentSnapshot.name }, content, mentionAgentIds, visibleToAgentIds: [...new Set([...roster.map(member => member.id), item.agentId])], createdAt: now(), replyToMessageId: item.messageId, deliveryId, rootMessageId };
+        if (thread.sessions[item.agentId]) this.confirmCommunicationInput(key, deliveryId, [...this.communicationContext(key, deliveryId).messages.map(message => message.id), item.messageId]);
         state.communicationMessages.push(message); item.status = "done"; item.error = null; item.nextAttemptAt = null; item.updatedAt = now(); thread.updatedAt = now();
-        if (thread.sessions[item.agentId]) thread.sessions[item.agentId].inputThroughMessageId = item.messageId;
         const senderPresent = roster.some(member => member.id === item.agentId && member.status === "active");
         // Each new addressed message queues a reply, even for a busy or previously
         // participating member. Completion is idempotent; claim owns per-member FIFO.
@@ -267,7 +287,7 @@ export function communicationCommands(state, save, employeeSnapshot, journal, pe
       item.status = "failed"; item.error = String(reason).slice(0, 2000); item.updatedAt = now();
       item.nextAttemptAt = null;
       event(item, "failed", item.error);
-      if (resetSession) { const session = conversation(key).sessions[item.agentId]; if (session) { session.sessionId = null; session.confirmed = false; } event(item, "session_reset", "模型会话不存在，创建新会话但不重放已确认消息；历史仍可按需查询"); }
+      if (resetSession) { const session = conversation(key).sessions[item.agentId]; if (session) { session.sessionId = null; session.confirmed = false; delete session.inputMessageIds; } event(item, "session_reset", "模型会话不存在，创建新会话但不重放已确认消息；历史仍可按需查询"); }
       save();
     },
     retryCommunication(key, deliveryId) {

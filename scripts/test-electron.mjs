@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 import vm from "node:vm";
 import {editDiff, workingDirectoryIcon} from "../client/console-projections.mjs";
 // Real visible Electron smoke test; uses isolated data, never production credentials.
@@ -18,17 +19,17 @@ import { Readable } from "node:stream";
 await mkdir(".data", { recursive: true });
 await mkdir("screenshots", { recursive: true });
 const directory = await mkdtemp(resolve(".data/electron-e2e-"));
-const storage = desktopStoragePaths(directory, { home: directory });
+const storage = desktopStoragePaths(join(directory,'.agentforge','desktop'), { home: directory });
 const password = randomBytes(24).toString("hex");
 const auth = createAuth({ databasePath: storage.AGENTFORGE_AUTH_DB_PATH });
 await auth.setAdministrator("desktop-test", password);
 auth.close();
-const fixtureStore = createStore({ databasePath: storage.AGENTFORGE_DB_PATH, workspaceRoot: storage.AGENTFORGE_WORKSPACE_ROOT });
+const fixtureStore = createStore({ databasePath: storage.AGENTFORGE_DB_PATH, configurationDirectory:storage.AGENTFORGE_DESKTOP_CONTROL_ROOT,workspaceRoot: storage.AGENTFORGE_WORKSPACE_ROOT });
 assert.deepEqual(fixtureStore.listTasks(), []);
 const fixtureTask = fixtureStore.createTask({managerAgentId:'system_project_manager', title: "隔离任务空间验收", objective: "只用于界面回归", memberAgentIds: fixtureStore.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
-assert.ok(fixtureTask.workspacePath.startsWith(join(directory, "agentforge") + "/"));
+assert.ok(fixtureTask.workspacePath.startsWith(storage.AGENTFORGE_WORKSPACE_ROOT + "/"));
 const fixtureRun = fixtureStore.createRun(fixtureTask.id);
-assert.ok(fixtureRun.workspacePath.startsWith(join(directory, "agentforge") + "/"));
+assert.ok(fixtureRun.workspacePath.startsWith(storage.AGENTFORGE_WORKSPACE_ROOT + "/"));
 await mkdir(join(fixtureRun.workspacePath, "docs/notes"), { recursive: true });
 await initializeWorkspaceGit(fixtureRun.workspacePath, []);
 await writeFile(join(fixtureRun.workspacePath, "docs/notes/readme.md"), "# 隔离目录阅读测试\n只用于 UI 回归，不是模型交付。\n");
@@ -84,13 +85,14 @@ fixtureStore.addEvent({ type: "runtime.event", runId: fixtureRun.id, actor: { ty
 // prompt entry must still appear, bound to the Trace record itself.
 const silentTrace = fixtureStore.createTrace(fixtureRun.id, { agentId: fixtureRun.manager.id, workflowNodeId: "testing", type: "node" });
 fixtureStore.attachTracePrompt(silentTrace.id, await fixtureFiles.writePromptSnapshot(fixtureRun.id, silentTrace.id, promptSnapshot({ systemPrompt: "SYSTEM_PRIVATE_DO_NOT_DISPLAY", prompt: "静默调用快照原文。" })));
+await writeStorageLocation(storage.AGENTFORGE_DESKTOP_CONTROL_ROOT,{version:1,workspaceRoot:storage.AGENTFORGE_WORKSPACE_ROOT,previousRuntimeRoots:[]});
 const desktop = await electron.launch({ args: ["apps/electron/main.mjs", `--user-data-dir=${join(directory, "profile")}`], env: {
   ...process.env,
   // Isolate the whole data home: the child control plane drops inherited
   // AGENTFORGE_* values, so only HOME keeps its diagnostics out of the
   // operator's real ~/.agentforge.
   HOME: directory,
-  AGENTFORGE_DESKTOP_DATA_ROOT: directory
+  AGENTFORGE_DESKTOP_DATA_ROOT: storage.AGENTFORGE_DESKTOP_CONTROL_ROOT
 }, timeout: 60000 });
 const actualPaths=await desktop.evaluate(({app})=>Object.fromEntries(['userData','sessionData','logs','crashDumps'].map(key=>[key,app.getPath(key)])));
 for(const path of Object.values(actualPaths)) assert.ok(path.startsWith(directory+'/'),'all Electron paths use isolated instance root');

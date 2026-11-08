@@ -118,8 +118,8 @@ export function parseMcpJson(input) {
   return value;
 }
 
-export function createRuntimeConfiguration(root) {
-  const managedRoot = resolve(root), pluginRoot = resolve(root, "plugins"), catalogRoot = resolve(root, "catalogs"), gitCredentialsPath = resolve(root, "git-credentials.json");
+export function createRuntimeConfiguration(root,{credentialsRoot=process.env.AGENTFORGE_CREDENTIALS_ROOT || root}={}) {
+  const managedRoot = resolve(root), credentialRoot=resolve(credentialsRoot),pluginRoot = resolve(root, "plugins"), catalogRoot = resolve(root, "catalogs"), gitCredentialsPath = resolve(credentialRoot, "git-credentials.json");
   let gitCredentialWrite = Promise.resolve();
   const queueGitCredentialWrite = (work) => {
     const next = gitCredentialWrite.then(work, work);
@@ -134,7 +134,7 @@ export function createRuntimeConfiguration(root) {
   };
   const readGitCredentials = async () => {
     try {
-      const rootInfo = await lstat(managedRoot);
+      const rootInfo = await lstat(credentialRoot);
       if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) throw new Error("私有运行配置目录不可用");
     } catch (error) {
       if (error?.code === "ENOENT") return {};
@@ -161,7 +161,9 @@ export function createRuntimeConfiguration(root) {
   };
   const writeGitCredentials = async (credentials) => {
     await ensureManagedRoot();
-    const temporary = join(managedRoot, `.git-credentials-${randomUUID()}.tmp`);
+    await mkdir(credentialRoot,{recursive:true,mode:0o700});
+    const credentialInfo=await lstat(credentialRoot);if(!credentialInfo.isDirectory()||credentialInfo.isSymbolicLink())throw new Error('认证目录不可用');
+    const temporary = join(credentialRoot, `.git-credentials-${randomUUID()}.tmp`);
     try {
       await writeFile(temporary, JSON.stringify({ version: 1, providers: credentials }), { mode: 0o600, flag: "wx" });
       await rename(temporary, gitCredentialsPath);

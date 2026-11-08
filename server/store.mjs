@@ -248,9 +248,10 @@ function runtimeConnection(value = {}) {
   return result;
 }
 
-export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || ":memory:", workspaceRoot = null, onSaveDiagnostic, runtimeInstalled = () => true } = {}) {
+export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || ":memory:", workspaceRoot = null,workspaceRootAuthoritative=false, onSaveDiagnostic, configurationDirectory, configurationPublish, runtimeInstalled = () => true } = {}) {
   if (workspaceRoot !== null && (!isAbsolute(workspaceRoot) || resolve(workspaceRoot) === "/")) throw new Error("系统工作根目录必须是非根绝对目录");
-  const persistence = createSqlitePersistence(databasePath, { onSaveDiagnostic }), loaded = persistence.load({lazy:true}); const initialState = (loaded?.settings?.installationId ? loaded : migrate(loaded)) || { agents: clone(agents), teams: [], tasks: [], workflowTemplates: [workflow(exampleWorkflow, { templateId: exampleWorkflow.id, current: true })], runs: [], traces: [], artifacts: [], messages: [], decisions: [], roles: [], events: [{ id: "evt_welcome", type: "workspace.ready", runId: null, timestamp: now(), actor: { type: "system", name: "AgentForge" }, message: "工作区已就绪。", data: {} }] };
+  const persistence = createSqlitePersistence(databasePath, { onSaveDiagnostic, configurationDirectory, configurationPublish }), loaded = persistence.load({lazy:true}); const initialState = (loaded?.settings?.installationId ? loaded : migrate(loaded)) || { agents: clone(agents), teams: [], tasks: [], workflowTemplates: [workflow(exampleWorkflow, { templateId: exampleWorkflow.id, current: true })], runs: [], traces: [], artifacts: [], messages: [], decisions: [], roles: [], events: [{ id: "evt_welcome", type: "workspace.ready", runId: null, timestamp: now(), actor: { type: "system", name: "AgentForge" }, message: "工作区已就绪。", data: {} }] };
+  if(!loaded){const values=persistence.configurationValues();initialState.settings={...values.settings,...initialState.settings};for(const key of ['extensionCatalog','extensionRemovals'])if(values[key])initialState[key]=values[key];}
   const journal = createStateJournal(initialState), state = journal.state;
   state.roles ||= [];
   const employeeConfiguration = item => !item ? item : {...baseEmployeeConfiguration(item),inheritedExtensionSelection:Object.fromEntries(['pluginIds','mcpIds'].map(key=>[key,[...new Set((item.roleIds || []).flatMap(id=>state.roles.find(role=>role.id===id)?.extensionSelection?.[key] || []))]]))};
@@ -422,6 +423,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     ...communicationCommands(state, save, withRoleSnapshot, journal, persistence),
     ...automationCommands(state, journal, persistence),
     ...historyCommands(state, { databasePath, employeeConfiguration, journal, persistence }),
+    configurationBlocked(){return persistence.configurationBlocked();},
     close() { this.closeHistory(); listeners.clear(); persistence.close(); },
     prepareDataReset() {
       if (state.runs.some(run => ["planning", "running", "review"].includes(run.status)) || state.traces.some(trace => trace.status === "running") || state.dispatches.some(delivery => delivery.status === "claimed") || state.communicationDeliveries.some(delivery => ["claimed", "running"].includes(delivery.status))) throw new Error("请先停止正在执行的任务和沟通，再清除数据");
@@ -505,12 +507,12 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       journal.begin(); transactionDepth = 1;
       let result;
       try { result = command(); if (result?.then) throw new Error("Store 事务必须同步"); persistence.save(state, journal); journal.commit(); }
-      catch (error) { journal.rollback(); pendingEvents.length = 0; throw error; }
+      catch (error) { if(error.committed)journal.commit();else journal.rollback(); pendingEvents.length = 0; throw error; }
       finally { transactionDepth = 0; }
       const events = pendingEvents.splice(0); events.forEach((event) => listeners.forEach((listener) => { try { listener(clone(event)); } catch { /* A subscriber cannot roll back committed state. */ } }));
       return result;
     },
-    getWorkspaceSettings() { return { workspaceRoot: state.settings?.workspaceRoot || workspaceRoot, source: state.settings?.workspaceRoot ? "saved" : "startup" }; },
+    getWorkspaceSettings() { return workspaceRootAuthoritative?{workspaceRoot,source:'startup'}:{ workspaceRoot: state.settings?.workspaceRoot || workspaceRoot, source: state.settings?.workspaceRoot ? "saved" : "startup" }; },
     listRuntimeProfiles() { return clone(profiles().map(item => { const installed = runtimeInstalled(item.provider); return { id: item.id, provider: item.provider, installed, enabled: installed && item.enabled !== false, model: item.model || "", effort: item.effort || "", employeeCount: state.agents.filter(agent => agent.status !== "deleted" && agent.runtime.profileId === item.id).length }; })); },
     resolveAgentRuntime(value) { return clone(resolveAgentRuntime(value)); },
     assertRuntimeEnabled(value) { assertRuntimeEnabled(value); },
@@ -593,12 +595,10 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     memberInputMessages(dispatchId) {
       const delivery = this.getDispatch(dispatchId), current = getRun(delivery.runId);
       const messages = journal.select("messages", "runId", current.id);
-      const through = current.memberSessions?.[delivery.recipientAgentId]?.inputThroughMessageId;
       const received = new Set(current.memberSessions?.[delivery.recipientAgentId]?.inputMessageIds || []);
-      const previous = through ? messages.findIndex(item => item.id === through) : -1;
-      return clone(messages.filter((item, index) => !received.has(item.id) && item.sender.id !== delivery.recipientAgentId &&
-        (delivery.messageIds.includes(item.id) || index > previous &&
-          (delivery.recipientAgentId === current.manager.id || item.recipient.id === delivery.recipientAgentId || item.recipient.type === "team"))));
+      // An older global watermark is not proof that this member read a message
+      // addressed to somebody else. Per-message receipts are authoritative.
+      return clone(messages.filter(item => !received.has(item.id) && ['agent','human'].includes(item.sender.type) && item.sender.id !== delivery.recipientAgentId));
     },
     confirmMemberInput(traceId, messageId, inputContext, messageIds) {
       const trace = getTrace(traceId), current = getRun(trace?.runId), session = current?.memberSessions?.[trace?.agentId];
@@ -676,10 +676,26 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       assertNode(current, input.workflowNodeId);
       if (!["manager", "node", "consultation", "instruction", "delivery_review", "inquiry"].includes(input.purpose)) throw new Error("投递用途无效");
       if (input.sourceMessageId != null && journal.get("messages", input.sourceMessageId)?.runId !== runId) throw new Error("投递来源消息不属于 Run");
-      const existing = input.dedupeKey && journal.select("dispatches", "runId", runId).find(item => item.dedupeKey === input.dedupeKey);
+      const existing = input.dedupeKey && journal.select("dispatches", "runId", runId).find(item => item.dedupeKey === input.dedupeKey || item.coalescedDedupeKeys?.includes(input.dedupeKey));
       if (existing) return clone(existing);
       const messageIds = [...new Set(input.messageIds || [])];
       if (messageIds.some((value) => journal.get("messages", value)?.runId !== runId)) throw new Error("投递消息不属于 Run");
+      // Only untouched report notifications at the same manager FIFO tail may
+      // share a future invocation. Never amend an already claimed model input.
+      const isReport = item => {
+        const message = journal.get('messages', item.sourceMessageId);
+        return item.recipientAgentId === current.manager.id && item.purpose === 'manager' && !item.parentDispatchId && !item.interactionOnly && !item.patrol && !item.deferredRevisit &&
+          message?.runId === runId && message.kind === 'handoff' && message.sender.type === 'agent' && message.sender.id !== current.manager.id && getTrace(message.traceId)?.agentId === message.sender.id;
+      };
+      const tail = journal.select('dispatches','runId',runId).filter(item => item.recipientAgentId === input.recipientAgentId).at(-1);
+      if (messageIds.length === 1 && messageIds[0] === input.sourceMessageId && isReport(input) && tail?.status === 'queued' && tail.attempts === 0 && !tail.nextRetryAt && isReport(tail)) {
+        tail.messageIds = [...new Set([...tail.messageIds, ...messageIds])];
+        tail.coalescedSourceMessageIds = [...new Set([tail.sourceMessageId, ...(tail.coalescedSourceMessageIds || []), input.sourceMessageId])];
+        tail.coalescedDedupeKeys = [...new Set([...(tail.coalescedDedupeKeys || []), ...(input.dedupeKey ? [input.dedupeKey] : [])])];
+        tail.updatedAt = now();
+        addEvent({ type:'dispatch.reports_coalesced', runId, message:'员工报告已合并到经理待处理投递。', data:{dispatchId:tail.id,messageIds} });
+        save(); return clone(tail);
+      }
       const item = { id: id("dispatch"), runId, recipientAgentId: input.recipientAgentId, workflowNodeId: input.workflowNodeId, purpose: input.purpose, interactionOnly, messageIds, sourceMessageId: input.sourceMessageId || null, parentDispatchId: input.parentDispatchId || null, waitingMessageId: null, status: "queued", attempts: 0, nextRetryAt: null, traceIds: [], dedupeKey: input.dedupeKey || null, ...(input.patrol ? { patrol: true } : {}), ...(input.coordinationFollowup ? { coordinationFollowup: true } : {}), ...(input.deferredRevisit ? { deferredRevisit: true } : {}), createdAt: now(), updatedAt: now() };
       state.dispatches.push(item); save(); return clone(item);
     },
@@ -1026,10 +1042,9 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     getRunExecutionContext(runId) {
       if (!getRun(runId)) throw new Error("Run 不存在");
       return {
-        traces: journal.select("traces", "runId", runId,{last:18}).map(({workflowNodeId,agentId,type,status,error}) => ({workflowNodeId,agentId,type,status,error})),
+        traces: journal.select("traces", "runId", runId,{last:18}).map(({id,workflowNodeId,agentId,type,status,error}) => ({id,workflowNodeId,agentId,type,status,error})),
         dispatches: journal.select("dispatches", "runId", runId).filter(item => !['done','cancelled'].includes(item.status)).map(({id,recipientAgentId,workflowNodeId,purpose,status}) => ({id,recipientAgentId,workflowNodeId,purpose,status})),
         artifacts: journal.select("artifacts", "runId", runId).map(({name,deleted,sha256,bytes}) => ({name,deleted,sha256,bytes})),
-        messages: persistence.collaborationPage(runId,{limit:30}).selected.map(id=>clone(journal.get('messages',id))),
         pendingQuestions: this.pendingQuestions(runId),
         decisions: journal.select("decisions", "runId", runId).map(item => clone(item))
       };
@@ -1343,7 +1358,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       assertWorkflowBranches(template);
       const workspaceRoot = this.getWorkspaceSettings().workspaceRoot, taskId = "task_" + randomUUID();
       if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定");
-      const workspacePath = workspaceRoot ? resolve(workspaceRoot, taskId) : text(input.workspacePath, "任务工作目录");
+      const workspacePath = workspaceRoot ? resolve(workspaceRoot, "tasks", taskId) : text(input.workspacePath, "任务工作目录");
       if (!workspaceRoot && (!isAbsolute(workspacePath) || !statSync(resolve(workspacePath)).isDirectory())) throw new Error("任务工作目录必须是存在的绝对路径");
       const memberSnapshots = members.filter(member => member.id !== managerAgentId).map(member => withRoleSnapshot(employeeConfiguration(member)));
       const managerSnapshot = withRoleSnapshot(employeeConfiguration(getAgent(managerAgentId)));

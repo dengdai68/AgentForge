@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Real isolated Electron presentation QA, no Provider calls or operator data.
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright-core';
@@ -17,13 +18,14 @@ const password = randomBytes(24).toString('hex');
 const auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
 await auth.setAdministrator('brand-qa', password); auth.close();
 await writeFile(join(data, 'desktop-preferences.json'), JSON.stringify({closeMode:'tray'}), {mode:0o600});
-const store = createCatalogFixtureStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') });
+const store = createCatalogFixtureStore({ databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data, workspaceRoot: join(root, 'work') });
 store.updateAgent('agent_analyst', { status: 'inactive' }); store.close();
 const source = join(root, 'plugin');
 await mkdir(join(source, '.claude-plugin'), { recursive: true });
 await mkdir(join(source, 'skills/brand'), { recursive: true });
 await writeFile(join(source, 'skills/brand/SKILL.md'), '---\nname: brand\ndescription: Presentation fixture only\n---\nNo execution.');
 await writeFile(join(source, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'brand-presentation-fixture', description: '仅用于静态展示，不执行插件。', version: '1.0.0', settings: {} }));
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app = await electron.launch({ ...(bundle ? { executablePath: resolve(bundle, 'Contents/MacOS/AgentForge') } : {}), args: bundle ? [] : ['apps/electron/main.mjs'], env: { ...process.env, HOME: home, AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 90000 });
 const evidence = { root, bundle: bundle || 'source', cases: [] }, errors = [];
 const presentation = node => { const c = getComputedStyle(node); return Object.fromEntries(['backgroundColor','color','borderTopColor','borderTopWidth','borderTopStyle','borderRadius','padding','margin','fontSize','lineHeight'].map(k => [k, c[k]])); };

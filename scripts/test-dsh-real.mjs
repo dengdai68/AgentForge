@@ -1,3 +1,4 @@
+import {writeStorageLocation} from '../server/storage-layout.mjs';
 // Explicit opt-in: installed DeepSeek Harness, real model, native Skill/MCP/history and a
 // complete Task through visible human acceptance. All app data is isolated.
 import assert from 'node:assert/strict';
@@ -17,7 +18,7 @@ const root = await mkdtemp(resolve('.data/dsh-real-')), home = join(root, 'home'
 await mkdir(home, { recursive: true, mode: 0o700 });
 const password = randomBytes(24).toString('hex'), auth = createAuth({ databasePath: join(data, 'auth.sqlite') });
 await auth.setAdministrator('dsh-qa', password); auth.close();
-const seed = createStore({ databasePath: join(data, 'agentforge.sqlite'), workspaceRoot: join(root, 'work') });
+const seed = createStore({ databasePath:join(root,'work','records','agentforge.sqlite'),configurationDirectory:data, workspaceRoot: join(root, 'work') });
 seed.updateWorkspaceSettings({ workspaceRoot: join(root, 'work') }); seed.close();
 // A private launcher preserves the operator's installed Node/DeepSeek Harness executable;
 // DSH_HOME remains the invocation-owned directory supplied by the adapter.
@@ -39,6 +40,7 @@ await writeFile(join(plugin,'hooks/hooks.json'),JSON.stringify({hooks:{PreToolUs
 await writeFile(join(plugin, 'skills', 'dsh-evidence', 'SKILL.md'), `---\nname: dsh-evidence\ndescription: Use for the DeepSeek Harness integration verification task and dsh-verification.txt delivery.\n---\nThe first line of dsh-verification.txt must be exactly ${skillSecret}. Obtain the second line from the selected MCP read_probe tool, and the third line from platform communication history. Never invent either value. Write those three lines first. Then call Task or Agent with subagent_type dsh-evidence:reviewer and prompt asking to independently check dsh-verification.txt. Append its exact result as the fourth line. Do not replace the independent agent with a Skill or your own review.\n`);
 const mcpFile = join(root, 'mcp.mjs');
 await writeFile(mcpFile, `import {Server} from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/server/index.js'))};\nimport {StdioServerTransport} from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/server/stdio.js'))};\nimport {ListToolsRequestSchema,CallToolRequestSchema} from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/types.js'))};\nconst s=new Server({name:'DeepSeek Harness verification',version:'1.0.0'},{capabilities:{tools:{}}});s.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[{name:'read_probe',description:'Read the random MCP verification value',inputSchema:{type:'object',properties:{},additionalProperties:false}}]}));s.setRequestHandler(CallToolRequestSchema,async()=>({content:[{type:'text',text:${JSON.stringify(mcpSecret)}}]}));await s.connect(new StdioServerTransport());\n`);
+await writeStorageLocation(data,{version:1,workspaceRoot:join(root,'work'),previousRuntimeRoots:[]});
 const app = await electron.launch({ ...(bundle ? { executablePath: resolve(bundle, 'Contents/MacOS/AgentForge') } : { args: ['apps/electron/main.mjs'] }), env: { ...process.env, HOME: home, DSH_HOME: process.env.DSH_HOME || join(homedir(), '.dsh'), AGENTFORGE_DESKTOP_DATA_ROOT: data, AGENTFORGE_LOG_DIR: join(root, 'logs') }, timeout: 180000 });
 const evidence = { root, provider: 'dsh', realModel: true, cases: [] };
 console.log('EVIDENCE ' + root);
@@ -134,7 +136,7 @@ try {
   evidence.nativeToolCalls = calls;
   const file = await readFile(join(workspace.run.workspacePath || workspace.task.workspacePath, 'dsh-verification.txt'), 'utf8');
   assert.deepEqual(file.trim().split(/\r?\n/), [skillSecret, mcpSecret, historySecret, reviewerSecret]);
-  const instructions=JSON.parse(await readFile(join(data,'agentforge-runs','runs',run.id,'traces',workerTrace.id,'dsh-instructions.json'),'utf8'));
+  const instructions=JSON.parse(await readFile(join(root,'work','records','runs',run.id,'traces',workerTrace.id,'dsh-instructions.json'),'utf8'));
   assert.ok(instructions.systemPrompt.includes(roleSecret), 'frozen role is part of the actual application instructions');
   assert.ok(consolePage.events.some(event => event.data?.subtype === 'dsh_instructions_applied' && event.data.systemPromptApplied), 'DeepSeek Harness native system message contains those exact application instructions');
   // Delivery is a Runtime contract; arbitrary model obedience is an observed
