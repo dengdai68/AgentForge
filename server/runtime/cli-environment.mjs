@@ -1,3 +1,4 @@
+import {RUNTIME_PROVIDERS} from "../../client/runtime-providers.mjs";
 import { dirname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { accessSync, statSync, constants } from 'node:fs';
@@ -6,7 +7,7 @@ import { delimiter, resolve } from 'node:path';
 // Presence only: use the same executable search environment as actual calls.
 // Never start a CLI, load credentials or equate installation with login/health.
 export function runtimeInstalled(provider, options = {}) {
-  const command = { 'claude-code': 'claude', codex: 'codex', dsh: 'dsh' }[provider];
+  const command = RUNTIME_PROVIDERS[provider]?.command;
   if (!command) return false;
   const environment = cliEnvironment(command, {}, options);
   return (environment.PATH || '').split(delimiter).filter(Boolean).some(directory => {
@@ -30,7 +31,7 @@ export function cliEnvironment(command, extra = {}, { environment = process.env,
   if (platform === 'darwin') {
     const fallback = [
       ...(isAbsolute(command) ? [dirname(command)] : []),
-      join(homeDirectory, '.local', 'bin'), join(homeDirectory, '.npm-global', 'bin'), join(homeDirectory, '.volta', 'bin'),
+      ...(command==='opencode'?[join(homeDirectory,'.opencode','bin')]:[]), join(homeDirectory, '.local', 'bin'), join(homeDirectory, '.npm-global', 'bin'), join(homeDirectory, '.volta', 'bin'),
       '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'
     ];
     result.PATH = [...new Set([...(result.PATH ? result.PATH.split(':') : []), ...fallback])].join(':');

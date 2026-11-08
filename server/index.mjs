@@ -1,3 +1,4 @@
+import {RUNTIME_IDS} from "../client/runtime-providers.mjs";
 import { closeExecutionBudget } from './execution-budget.mjs';
 import { attachmentThumbnail } from './attachment-thumbnails.mjs';
 import { collaborationRecords } from "../client/console-projections.mjs";
@@ -130,11 +131,15 @@ async function employeeInput(request, agentId = null) {
   return input;
 }
 
-async function validateInheritedExtensions(employee,roles=store.listRoles()) {
+async function validateInheritedExtensions(employee,roles=null) {
+  const currentRoles=roles===null;roles ||= store.listRoles();
   if(!Array.isArray(employee.roleIds))throw new Error('roleIds 必须是角色 ID 数组');
   const selections=[employee.runtime.extensionSelection];
   for(const id of employee.roleIds){const role=roles.find(item=>item.id===id);if(!role)throw new Error('绑定的角色不存在');selections.push(role.extensionSelection);}
   await marketplace.resolve(Object.fromEntries(['pluginIds','mcpIds'].map(key=>[key,[...new Set(selections.flatMap(item=>item?.[key] || []))]])),employee.runtime.provider);
+  // A newly selected Runtime can derive its missing role plan from the same
+  // immutable IDs. Existing target plans and frozen Task/Run facts stay intact.
+  if(currentRoles){const provider=employee.runtime.provider;for(const id of employee.roleIds){const role=roles.find(item=>item.id===id);if((role.extensionSelection.pluginIds.length || role.extensionSelection.mcpIds.length) && !store.hasRoleRuntimeBinding(id,provider))store.ensureRoleRuntimeBinding(id,provider,role.extensionSelection,await marketplace.resolve(role.extensionSelection,provider));}}
 }
 
 function extensionPage(kind, searchParams) {
@@ -420,7 +425,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
 
   if (pathname === "/api/settings/runtime-profiles/models" && request.method === "GET") {
     const provider = searchParams.get("provider") || "";
-    if (!["claude-code", "codex", "dsh"].includes(provider)) throw new Error("provider 必须是 claude-code、codex 或 dsh");
+    if (!RUNTIME_IDS.includes(provider)) throw new Error("provider 必须是已支持的 Runtime ID");
     if (searchParams.has("executable")) throw new Error("固定 Runtime 不接受自定义 executable");
     if (!runtimeInstalled(provider)) throw new Error("Runtime 未安装或当前客户端找不到可执行文件；安装并配置 PATH 后重新打开客户端");
     if(searchParams.has('refresh') && searchParams.get('refresh')!=='true')throw new Error('refresh 必须为 true');
@@ -437,7 +442,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     const effort = typeof input?.effort === "string" ? input.effort.trim() : "";
     const model = typeof input?.model === "string" ? input.model.trim() : "";
     const provider = input?.provider || "claude-code";
-    if (!effort || !model || !["claude-code", "codex", "dsh"].includes(provider) || !runtimeInstalled(provider)) return;
+    if (!effort || !model || !RUNTIME_IDS.includes(provider) || !runtimeInstalled(provider)) return;
     const catalog = await runtimeModelCatalog({ provider }).catch(error => { diagnostic("settings.model_catalog_validation_skipped", { error }); return null; });
     assertModelEffort(catalog, model, effort);
   }
@@ -502,6 +507,22 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
 
     sendJson(response, request.method === "GET" ? 200 : 201, result);
     return true;
+  }
+  const compatibilityMatch=pathname.match(/^\/api\/runtime\/(marketplace|mcp-marketplace)\/([^/]+)\/compatibility$/);
+  if(compatibilityMatch && request.method==='POST'){
+    const kind=compatibilityMatch[1]==='marketplace'?'plugin':'mcp',id=compatibilityMatch[2];
+    if(!store.getExtension(kind,id)){sendJson(response,404,{error:'扩展未安装或已删除'});return true;}
+    const input=await readJson(request);if(!input || typeof input!=='object' || Array.isArray(input) || Object.keys(input).length)throw new Error('兼容性检查不接受配置字段');
+    const detail=await marketplace.detail(id,kind);
+    sendJson(response,200,store.refreshExtensionCompatibility(kind,id,detail));return true;
+  }
+  const mcpToolsMatch=pathname.match(/^\/api\/runtime\/mcp-marketplace\/([^/]+)\/tools$/);
+  if(mcpToolsMatch && request.method==='POST') {
+    response.setHeader('Cache-Control','no-store');
+    if(!store.getExtension('mcp',mcpToolsMatch[1])){sendJson(response,404,{error:'此 MCP 未安装或已删除'});return true;}
+    const input=await readJson(request);
+    if(!input || typeof input!=='object' || Array.isArray(input) || Object.keys(input).some(key=>key!=='refresh') || (input.refresh!==undefined && typeof input.refresh!=='boolean'))throw new Error('工具读取仅接受可选 refresh 布尔值');
+    sendJson(response,200,await marketplace.tools(mcpToolsMatch[1],input));return true;
   }
   const extensionDetail = pathname.match(/^\/api\/runtime\/(marketplace|mcp-marketplace)\/([^/]+)$/);
   if(extensionDetail?.[1]==='mcp-marketplace' && request.method==='PUT') {
@@ -712,10 +733,33 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     return true;
   }
   const workingDirectoryMatch = pathname.match(/^\/api\/runs\/([^/]+)\/working-directory(?:\/(content))?$/);
-  if (request.method === "GET" && workingDirectoryMatch) {
+  if ((request.method === "GET" || request.method === 'HEAD' && searchParams.get('media')==='1') && workingDirectoryMatch) {
     const task = store.getRunTask(workingDirectoryMatch[1]);
     if (!workingDirectoryMatch[2]) sendJson(response, 200, await runFiles.listWorkingDirectory(task,{path:searchParams.get('path') || '',offset:Number(searchParams.get('offset') || 0)}));
     else {
+      if(searchParams.get('media')==='1'){
+        if(searchParams.get('raw')==='1' || searchParams.get('download')==='1')throw new Error('视频播放不能与其他读取模式同时使用');
+        const file=await runFiles.openWorkingVideo(task,searchParams.get('path') || '');
+        let transferred=false;
+        try {
+          const headers={'Content-Type':file.mediaType,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Accept-Ranges':'bytes','Content-Security-Policy':"default-src 'none'; sandbox"};
+          let start=0,end=file.bytes-1,status=200;
+          if(request.headers.range){
+            const match=/^bytes=(\d*)-(\d*)$/.exec(request.headers.range);
+            const a=match?.[1]?Number(match[1]):null,b=match?.[2]?Number(match[2]):null;
+            if(match && a===null && Number.isSafeInteger(b) && b>0){start=Math.max(0,file.bytes-b);}
+            else if(match && Number.isSafeInteger(a) && a>=0 && (b===null || Number.isSafeInteger(b) && b>=a)){start=a;end=b===null?end:Math.min(end,b);}
+            else start=file.bytes;
+            if(start>=file.bytes || end<start){response.writeHead(416,{...headers,'Content-Range':`bytes */${file.bytes}`,'Content-Length':0});response.end();return true;}
+            status=206;headers['Content-Range']=`bytes ${start}-${end}/${file.bytes}`;
+          }
+          response.writeHead(status,{...headers,'Content-Length':end-start+1});
+          if(request.method==='HEAD'){response.end();return true;}
+          const stream=file.handle.createReadStream({start,end});transferred=true;
+          try{await pipeline(stream,response);}catch(error){if(!request.destroyed)diagnostic('http.working_video_stream_failed',{runId:workingDirectoryMatch[1],error});response.destroy();}
+        }finally{if(!transferred)await file.handle.close();}
+        return true;
+      }
       const raw = searchParams.get("raw") === "1";
       const download = searchParams.get("download") === "1";
       const file = await runFiles.readWorkingFile(task, searchParams.get("path") || "", { raw, download });

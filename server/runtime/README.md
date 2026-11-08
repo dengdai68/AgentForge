@@ -69,3 +69,21 @@ marketplace 负责安装文件准备、单项详情和实际绑定/执行校验�
 Marketplace.resolveRole 解析角色选择到兼容Provider引用；resolveRoleReplacements 在插件更新、重复导入及MCP编辑时准备角色的新引用。源码/MCP内容保持不可变文件，角色与员工关联留在Store/SQLite。
 
 性能：市场 ID→安装目录索引按批次目录指纹失效，单操作共享解析/校验结果；跨操作摘要缓存仍校验文件元数据和链接，不跳过变化内容哈希。模型目录 30 秒缓存/in-flight 去重，Provider、二进制、环境摘要、账号/配置变动失效，支持显式 refresh。任务/沟通资源池属于编排层，Runtime 仍只适配 Provider，不拥有任务业务状态。
+
+mcp-tools.mjs复用mcp-launcher读取真实工具定义（initialize/tools/list），支持stdio/SSE/HTTP；成功60秒缓存、同配置并发合并、最多4连接、64项/16MiB缓存和每清单2000项/2MiB，15秒总超时，失败不缓存、finally关闭。只脱敏真实值、保留schema中password等参数定义；市场列表不执行发现，详情和CLI按需读取。
+
+工具发现适配器仅首次显式读取工具时动态加载；普通Runtime启动器、元数据列表和安装配置读取不导入工具发现客户端，不额外启动服务。
+
+桌面安装版的工具发现使用宿主提供的 `AGENTFORGE_ELECTRON_NODE` 启动 Node 子进程，与历史桥保持一致；不使用后台 Electron Helper 作为启动器。源码运行回退到当前 Node 可执行文件。
+
+新增 portable-cli.mjs 适配 Cursor、Gemini、Qwen、Kimi、Pi、OpenCode 的原生非交互输出、精确会话续接和控制台内容；local-cli.runRuntime 统一分派并复用进程注册/取消/脱敏。市场插件/MCP 由 portable-extensions 投影，拒绝未映射的源行为及不能隔离的全局扩展配置；详见 docs/29。
+
+Gemini 非交互调用显式信任任务工作目录并指定 extensions none，保持现有账号配置与全局文件不变。系统设置路径在原生 CLI 中要求 root 所有权，适配器不写入该路径，也不以未经验证的设置覆盖宣称扩展已隔离。Cursor thinking delta 按原生事件保存公开思考。
+
+Gemini 使用稳定的成员私有 GEMINI_CLI_HOME 只投影连接配置，原生钥匙串/旧 OAuth 路径仍由 CLI 自行读取。Qwen 使用 safe-mode 禁用扩展而保留认证；不使用会跳过账号设置的 bare 模式。
+
+Cursor 在成员稳定的私有 HOME 中保存原生会话，仅引用已有钥匙串/文件认证并投影 model/permissions，关闭全局扩展隐式加载。原用户目录通过调用指令及 AGENTFORGE_HOST_HOME 提供；不限制本机文件操作。
+
+portable-extensions.mjs 复用 selectedExtensions/readPluginExecutionPlan 校验与 MCP 私有启动器，为六个新增 Runtime 生成命名空间 Skill 及原生 MCP 配置。Skill 相对资源保留，子代理映射各 Runtime 原生接口；pi-agents.mjs 只由原生 Pi 扩展加载器执行，独立进程/会话传递冻结正文、源工具选择、模型及取消，不拥有领域状态。Cursor 拒绝源工具约束，Pi 要求显式基础工具清单。Hook/未映射工具/专用字段整插件明确拒绝。不得用拼接 Skill 全文或 Shell 客户端替代原生加载。
+
+model-catalog 投影新增六种原生模型目录与思考档位，忽略提供方鉴权等非模型字段；错误不保留未脱敏 stdout/stderr。原生参数映射由 portable-cli/portable-extensions 完成，不写全局账号设置；OpenCode 模型元数据来自 api --standalone model.list。

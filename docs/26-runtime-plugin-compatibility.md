@@ -41,3 +41,9 @@ v3 将源 opus/sonnet/haiku 等 Claude 别名在其他 Runtime 中明确映射�
 原始 source 副本完整保存；可执行 plugin 树排除错误 Markdown，以各来源方言生成只引用有效组件的原生清单及 Hook 文件，防止 Provider 默认扫描再次加载坏组件。完成后计算目录/文件/计划摘要，执行阶段不再宽松解析或忽略完整性问题。没有任何可用组件且存在错误的插件不安装，但同批其他插件继续；全无可用组件时返回空安装清单和 warnings。
 
 HTTP/CLI 安装响应 `warnings` 为 `{plugin, component, path, message}[]`，相对路径可含声明内索引；不含源正文、Hook 命令或 YAML 原始缓冲区。客户端安装后弹出 ⚠️ 组件未安装清单，关闭后可在插件详情查看；CLI 文本明确警告，JSON 原样提供结构化 warnings。自动更新状态和详情同样保留警告。路径越界、链接逃逸、不可读取、非法插件清单、MCP 配置或完整性错误仍使批次失败，不发布半个安装目录。
+
+## 六种新增 Runtime
+
+Cursor、Gemini、Qwen、Kimi、Pi、OpenCode 使用 portable-extensions 的原生 Skill 和 MCP 投影，详见 docs/29。基础 Skill、无预处理的 Command 和已验证的独立子代理可映射。Gemini/Qwen/Kimi/OpenCode 使用原生 Agent，Pi 使用原生扩展启动独立进程并等待；Cursor 仅接受未声明工具约束的子代理，含 tools/disallowedTools 明确拒绝；Pi 要求显式基础工具清单。指定模型仅支持 inherit 或已映射的源别名；未映射工具拒绝。Hook 及 context/agent/model/hooks/allowed-tools/allowedTools/disable-model-invocation/user-invocable 等专用 Skill 行为目前整插件明确拒绝，不对外声明完整 Claude/Codex 插件方言兼容。源组件没有被偷偷删除或改为提示词拼接。新增计划只影响这些新目标；已有三种目标的冻结计划摘要不改变。
+
+原三种完整方言桥仍由 test-plugin-runtimes-real 验证；六种新增目标由 test-portable-extensions-real 验证，另跑 test-portable-runtimes 的扩展模式到客户端验收。市场兼容性摘要可由显式 App/CLI 检查命令更新；摘要刷新不迁移或重写扩展协议。

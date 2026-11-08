@@ -60,7 +60,7 @@ export async function withHistoryTools(store, agent, input, invoke, files) {
     const mcp = { command: electronNode || process.execPath, args: [adapter], env: { AGENTFORGE_HISTORY_SOCKET: socket, ...(electronNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}) } };
     await writeFile(configPath,JSON.stringify({mcpServers:{agentforge_history:{...mcp,alwaysLoad:true}}}),{mode:0o600});
     const prepared = { ...input, historyMcp: { configPath, ...mcp }, systemPrompt: [input.systemPrompt, historyInstructions].filter(Boolean).join("\n\n") };
-    await input.onPrompt?.(prepared);
+    if(!PORTABLE_RUNTIME_IDS.includes(input.runtime?.provider))await input.onPrompt?.(prepared);
     return await invoke(prepared);
   } finally {
     server.closeAllConnections();
@@ -68,3 +68,4 @@ export async function withHistoryTools(store, agent, input, invoke, files) {
     await rm(directory,{recursive:true,force:true});
   }
 }
+import {PORTABLE_RUNTIME_IDS} from '../../client/runtime-providers.mjs';

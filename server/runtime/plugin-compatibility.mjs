@@ -1,3 +1,4 @@
+import {PORTABLE_RUNTIME_IDS} from '../../client/runtime-providers.mjs';
 import { readFile } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -6,6 +7,14 @@ import yaml from 'js-yaml';
 export const COMPATIBILITY_VERSION = 3;
 export const compatibilityDigest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const DSH_TOOL_NAMES = {Read:'read',Write:'write',Edit:'edit',Bash:'bash',Glob:'glob',Grep:'grep',WebSearch:'web_search',WebFetch:'web_fetch',Task:'Task',Agent:'Agent',Skill:'skill',AskUserQuestion:'ask_user_question'};
+export const PORTABLE_AGENT_TOOLS={
+  cursor:{},
+  gemini:{Read:'read_file',Write:'write_file',Edit:'replace',Bash:'run_shell_command',Glob:'glob',Grep:'grep_search'},
+  qwen:{Read:'read_file',Write:'write_file',Edit:'edit',Bash:'run_shell_command',Glob:'glob',Grep:'grep_search'},
+  kimi:{Read:'Read',Write:'Write',Edit:'Edit',Bash:'Bash',Glob:'Glob',Grep:'Grep'},
+  pi:{Read:'read',Write:'write',Edit:'edit',Bash:'bash',Glob:'find',Grep:'grep'},
+  opencode:{Read:'read',Write:'edit',Edit:'edit',Bash:'shell',Glob:'glob',Grep:'grep'}
+};
 const bridgeEvents = {
   'claude-code': new Set(['SessionStart','UserPromptSubmit','PreToolUse','PostToolUse','Stop','SubagentStart','SubagentStop']),
   codex: new Set(['SessionStart','UserPromptSubmit','PreToolUse','PostToolUse','Stop'])
@@ -44,6 +53,16 @@ function markdownError(original,path) {
 export async function pluginExecutionPlan(info, root, target, version = COMPATIBILITY_VERSION) {
   if(![2,3].includes(version))throw new Error('插件执行计划版本不支持');
   const reasons = [...info.reasons], sourceDialect = info.sourceDialect || 'claude-code';
+  const portable=PORTABLE_RUNTIME_IDS.includes(target);
+  const nativeSkills=[];
+  if(portable){
+    for(const hook of info.components.hooks)if(hook.matchers.some(group=>group.hooks?.length))reasons.push(`Hook ${hook.event} 尚无 ${target} 经验证的等价映射`);
+    for(const component of info.components.skills){
+      const {attributes}=parsePluginMarkdown(await readFile(join(root,component.path),'utf8'),{path:component.path});
+      for(const key of ['context','agent','model','hooks','allowed-tools','allowedTools','disable-model-invocation','user-invocable'])if(attributes[key]!==undefined)reasons.push(`Skill ${component.name} 的 ${key} 尚无 ${target} 等价映射`);
+      nativeSkills.push({path:component.path,name:attributes.name || component.name,description:attributes.description || component.description || ''});
+    }
+  }
   const agents = [];
   for (const component of info.components.agents) {
     if (isAbsolute(component.path) || component.path.split('/').includes('..')) throw new Error('子代理路径越界');
@@ -61,6 +80,12 @@ export async function pluginExecutionPlan(info, root, target, version = COMPATIB
       if(target==='codex' && sourceDialect==='claude-code' && mappedModel && mappedModel!=='inherit') reasons.push(`子代理 ${name} 指定 Claude 模型 ${attributes.model}，Codex 尚无该源模型映射`);
       if(target==='codex' && tools?.some(tool=>['Read','Glob','Grep'].includes(tool)) && !tools.includes('Bash')) reasons.push(`子代理 ${name} 的读取/搜索工具需要 Codex shell 映射，但源未启用 Bash`);
       if(target==='dsh') for(const tool of [...(tools || []),...(deniedTools || [])]) if((!Object.hasOwn(DSH_TOOL_NAMES,tool) || version===2 && ['Skill','AskUserQuestion'].includes(tool)) && !tool.startsWith('mcp__')) reasons.push(`子代理 ${name} 的工具 ${tool} 尚无 DeepSeek Harness 等价映射`);
+    }
+    if(portable){
+      if(mappedModel && mappedModel!=='inherit')reasons.push(`子代理 ${name} 的指定模型尚无 ${target} 源模型映射`);
+      if(target==='cursor' && (tools!==undefined || deniedTools!==undefined))reasons.push(`子代理 ${name} 的 tools/disallowedTools 无 Cursor CLI 等价接口，不能用 readonly 或提示词代替`);
+      if(['pi','gemini'].includes(target) && tools===undefined && (target==='pi' || deniedTools?.length))reasons.push(`子代理 ${name} 在 ${target} 需要显式基础工具列表才能保持源工具选择`);
+      if(target!=='cursor')for(const tool of [...(tools||[]),...(deniedTools||[])])if(!Object.hasOwn(PORTABLE_AGENT_TOOLS[target],tool))reasons.push(`子代理 ${name} 的工具 ${tool} 尚无 ${target} 等价映射`);
     }
     if(target==='claude-code' && sourceDialect==='codex' && attributes.model && attributes.model!=='inherit') reasons.push(`子代理 ${name} 指定 Codex 模型 ${attributes.model}，Claude Code 尚无该源模型映射`);
     agents.push({...component,name,description:attributes.description || component.description || '',model:mappedModel || 'inherit',...(mappedModel!==attributes.model?{sourceModel:attributes.model}:{}),...(tools?{tools}:{}),...(deniedTools?{deniedTools}:{}),sha256:createHash('sha256').update(content).digest('hex')});
@@ -84,7 +109,7 @@ export async function pluginExecutionPlan(info, root, target, version = COMPATIB
       }
     }
   }
-  const plan = {version,target,sourceDialect,agents,hooks:info.components.hooks};
+  const plan = {version,target,sourceDialect,agents,hooks:info.components.hooks,...(portable?{nativeSkills}:{})};
   return {plan,supported:reasons.length === 0,reasons:[...new Set(reasons)],digest:compatibilityDigest(plan)};
 }
 

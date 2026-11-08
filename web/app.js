@@ -1,6 +1,9 @@
+import {runtimeLabel,RUNTIME_IDS} from "../client/runtime-providers.mjs";
+import { workflowConnections } from '/client/workflow-description.mjs';
+import { createWorkflowEditor } from './workflow-editor.mjs';
 import { ByteCache } from "/client/byte-cache.mjs";
 import { createAutomationUI } from "./automations.mjs";
-import { disposeManualGraphs, disposeWorkflowGraphs, fitManualGraph, mountManualGraph, mountWorkflowGraph, zoomManualGraph } from "./manual-graphs.mjs";
+import { disposeManualGraphs, disposeWorkflowGraphs, fitManualGraph, fitWorkflowGraph, formatWorkflowGraph, resetWorkflowGraph, zoomWorkflowGraph, mountManualGraph, mountWorkflowGraph, zoomManualGraph } from "./manual-graphs.mjs";
 import { imageAttachment, attachmentControls, draftAttachments, messageAttachments, attachmentImageError, openAttachmentImage, downloadAttachment, createCommunicationUI, formatCommunicationContent, memberMentionMarkup, employeeDetailMarkup } from "./communication.js";
 import { applyPreferences, normalizePreferences, PREFERENCES_KEY, readPreferences, savePreferences } from "./preferences.mjs";
 import { createSettingsUI } from "./settings.mjs";
@@ -354,6 +357,9 @@ async function refreshNavigation() {
 }
 
 function setView(view, { replace = false, taskArchiveView = state.taskArchiveView } = {}) {
+  if(view!=='workspace' && state.currentView==='workspace'){
+    $('#working-directory-panel video')?.pause();const reading=workspaceView();rememberDirectoryReading(reading);delete reading.pendingVideoPreview;
+  }
   if (view !== "automations") automationUI.unmount();
   if (view !== "communication") communicationUI.unmount();
   if (view !== "settings") settingsUI.unmount();
@@ -563,7 +569,7 @@ function renderWorkflows() {
     const deleteAction = !referenceCount ? `<button class="small-button danger" data-delete-workflow="${esc(template.id)}">删除</button>` : "";
     return `
     <article class="workflow-list-row">
-      <div class="workflow-list-brief"><div><button class="workflow-title-button" data-workflow-details="${esc(template.id)}">${esc(template.name)}</button></div><p>${esc(template.description || "尚未填写说明")}</p><small>${template.nodes.length} 个节点 · ${template.nodes.filter((node) => !node.dependsOn?.length).length} 个起始节点${referenceCount ? ` · 已被 ${referenceCount} 个任务引用` : ""}</small></div>
+      <div class="workflow-list-brief"><div><button class="workflow-title-button" data-workflow-details="${esc(template.id)}">${esc(template.name)}</button></div><p>${esc(template.description || "尚未填写说明")}</p><small>${template.nodes.length} 个节点 · ${workflowConnections(template).length} 条连线${referenceCount ? ` · 已被 ${referenceCount} 个任务引用` : ""}</small></div>
       <div class="workflow-actions"><button class="small-button" data-workflow-details="${esc(template.id)}">查看详情</button><button class="small-button" data-edit-workflow="${esc(template.id)}">编辑</button>${deleteAction}</div>
    </article>`;
   }).join("") || (query ? `<div class="directory-empty" role="status"><strong>没有匹配的工作流</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有工作流</strong>创建一个工作流，再把它用于新任务。</div>`);
@@ -581,14 +587,15 @@ function workflowDetails(template, { frozen = false } = {}) {
     const node = template.nodes.find((item) => item.id === id);
     if (!node) return;
     content.querySelectorAll("[data-detail-node]").forEach((button) => button.setAttribute("aria-current", String(button.dataset.detailNode === id)));
+    const outgoing=workflowConnections(template).filter(edge=>edge.source===node.id);
     const names = (ids) => (ids || []).map((value) => template.nodes.find((item) => item.id === value)?.title || value).join("、");
     $("#workflow-node-detail").innerHTML = `<h3>${esc(node.title)}</h3><dl>
-      <dt>人员需求</dt><dd>${esc(node.staffingGuidance || node.ownerRole || "根据交付定义选择")}</dd>
+      <dt>节点类型</dt><dd>${node.type==='condition'?'条件节点':'流程节点'}</dd><dt>节点说明</dt><dd>${esc(node.description || "未填写")}</dd><dt>人员需求</dt><dd>${esc(node.staffingGuidance || node.ownerRole || "根据交付定义选择")}</dd>
       <dt>职责与交付目标</dt><dd>${esc(node.deliverable || "尚未填写交付目标，请编辑补充。")}</dd>
       <dt>前置交接</dt><dd>${esc(names(node.dependsOn) || "起始职责，无前置依赖")}</dd>
       <dt>接收上下文</dt><dd>${esc(names(node.handoffFrom?.length ? node.handoffFrom : node.dependsOn) || "任务需求与团队共享上下文")}</dd>
       <dt>工作目录</dt><dd class="path-mono">${esc((node.artifactPaths || []).join("\n") || "按节点交付要求组织文件")}</dd>
-      <dt>后续协作</dt><dd>${esc(names(template.nodes.filter((item) => item.dependsOn?.includes(node.id)).map((item) => item.id)) || "由项目经理安排下一步")}</dd></dl>
+      <dt>${node.type==='condition'?'条件分支':'后续协作'}</dt><dd>${outgoing.length ? outgoing.map(edge=>`<div class="workflow-detail-handoff"><strong>${esc(names([edge.target]))}</strong>${edge.condition ? `<p>条件：${esc(edge.condition)}</p>` : ''}${edge.description ? `<p>${esc(edge.description)}</p>` : ''}</div>`).join('') : '由项目经理安排下一步'}</dd></dl>
       <p class="field-hint">接收方依据自己的目标检查交接是否充分；有疑问可咨询任意相关成员，必要时向人类澄清。箭头不是不可回退的状态锁。</p>`;
   };
   content.querySelectorAll("[data-detail-node]").forEach((button) => button.addEventListener("click", () => showNode(button.dataset.detailNode)));
@@ -609,11 +616,11 @@ function renderAgents() {
       <div class="agent-card-top">
         <div class="agent-card-avatar ${roleColor(agent)}">${esc(initialsOf(agent))}</div>
         <div class="agent-card-identity"><h3>${esc(agent.name)}</h3></div>
-        <div class="employee-card-badges">${agent.kind === "manager" ? '<span class="employee-kind">项目经理</span>' : ""}<span class="agent-status" data-status="${esc(agent.status)}">● ${agent.status === "active" ? "可用" : "已停用"}</span></div>
+        <div class="employee-card-badges"><span class="agent-status" data-status="${esc(agent.status)}">● ${agent.status === "active" ? "可用" : "已停用"}</span></div>
       </div>
       <p>${esc(agent.description || "（未填写简介）")}</p>
       <div class="capabilities">${(agent.capabilities || []).map((capability) => `<span class="capability">${esc(capability)}</span>`).join("")}</div>
-      <div class="agent-runtime employee-runtime-summary"><span>${providerLabel(agent)}${agent.runtime?.model ? " · " + esc(agent.runtime.model) : " · CLI 默认模型"}${agent.runtime?.effort ? " · 思考 " + esc(agent.runtime.effort) : ""}${agent.runtime?.profile ? " · profile: " + esc(agent.runtime.profile) : ""}</span><span>插件 ${new Set([...(agent.runtime?.extensionSelection?.pluginIds || []),...(agent.inheritedExtensionSelection?.pluginIds || [])]).size} · MCP ${new Set([...(agent.runtime?.extensionSelection?.mcpIds || []),...(agent.inheritedExtensionSelection?.mcpIds || [])]).size}</span></div>
+      <div class="agent-runtime employee-runtime-summary"><span>${providerLabel(agent)}${agent.runtime?.model ? " · " + esc(agent.runtime.model) : ""}${agent.runtime?.profile ? " · profile: " + esc(agent.runtime.profile) : ""}</span><span>插件 ${new Set([...(agent.runtime?.extensionSelection?.pluginIds || []),...(agent.inheritedExtensionSelection?.pluginIds || [])]).size} · MCP ${new Set([...(agent.runtime?.extensionSelection?.mcpIds || []),...(agent.inheritedExtensionSelection?.mcpIds || [])]).size}</span></div>
       ${agent.roleIds?.length ? `<div class="agent-runtime"><span>角色：${agent.roleIds.map(id=>esc(state.roles.find(role=>role.id===id)?.name || "（角色不存在）")).join("、")}</span></div>` : ""}
       <div class="directory-card-actions"><button class="small-button primary" data-chat-agent="${agent.id}">对话</button><button class="small-button" data-edit-agent="${agent.id}">编辑</button><button class="small-button danger" data-delete-agent="${agent.id}">删除</button></div>
     </div>`).join("") || (query || roleSelect.value ? `<div class="directory-empty" role="status"><strong>没有匹配的数字员工</strong>请调整搜索条件。</div>` : `<div class="directory-empty" role="status"><strong>还没有数字员工</strong>点击右上角「创建数字员工」添加。</div>`);
@@ -719,9 +726,9 @@ function diagramCanvas(key, title) {
 function workflowDiagramCanvas(scope, key, title, className = "workflow-diagram-viewport") {
   const id = `${scope}:${key}`;
   return `<section class="workflow-diagram" aria-label="${esc(title)}">
-    <div class="workflow-diagram-head"><div><span>WORKFLOW MAP</span><strong>${esc(title)}</strong></div>
+    <div class="workflow-diagram-head"><div><span>WORKFLOW MAP</span><strong>${esc(title)}</strong></div><div class="workflow-zoom-controls" role="group" aria-label="工作流缩放"><button type="button" class="small-button" disabled data-workflow-view="zoom-out" data-scope="${esc(scope)}" data-key="${esc(key)}" aria-label="缩小工作流">−</button><button type="button" class="small-button" disabled data-workflow-view="reset" data-scope="${esc(scope)}" data-key="${esc(key)}" data-workflow-scale="${esc(id)}" aria-label="工作流恢复 100%">100%</button><button type="button" class="small-button" disabled data-workflow-view="zoom-in" data-scope="${esc(scope)}" data-key="${esc(key)}" aria-label="放大工作流">＋</button><button type="button" class="small-button" disabled data-workflow-view="fit" data-scope="${esc(scope)}" data-key="${esc(key)}">适应画布</button><button type="button" class="small-button" disabled data-workflow-view="format" data-scope="${esc(scope)}" data-key="${esc(key)}">整理布局</button></div>
     </div>
-    <div class="diagram-viewport ${esc(className)}" aria-label="${esc(title)}；只读固定总览，箭头表示职责之间的交接参考。">
+    <div class="diagram-viewport ${esc(className)}" tabindex="0" aria-label="${esc(title)}；滚轮缩放，拖动平移；+/-缩放，0恢复100%。">
       <div class="diagram-graph" data-workflow-diagram-graph="${esc(id)}"></div>
     </div>
     <div class="workflow-diagram-foot"><p class="workflow-diagram-note">箭头表示职责之间的预期交接；项目经理可依据 Trace 与产物重新选择任意职责。</p></div>
@@ -736,7 +743,7 @@ async function mountWorkflowDiagram(scope, key, workflow, options = {}) {
   try {
     await Promise.all([loadVendor("x6"), loadVendor("elk")]);
     if (!container.isConnected) return;
-    mountWorkflowGraph(scope, key, container, null, workflow, options);
+    mountWorkflowGraph(scope,key,container,null,workflow,options,scale=>{const label=$(`[data-workflow-scale="${CSS.escape(id)}"]`);if(label)label.textContent=Math.round(scale*100)+'%';container.dataset.scale=String(scale);});
   } catch (error) { if (container.isConnected) container.textContent = error.message; }
 }
 
@@ -957,7 +964,7 @@ function workspaceDetailsMarkup(workspace, { agents, currentFocusNode, view, art
         <div><dt>交付快照</dt><dd>${artifactCount} 项</dd></div>
         ${run.task.kind === 'automation' ? `<div><dt>任务来源</dt><dd>自动化 · 配置 v${esc(run.task.automationVersion)}</dd></div>${run.confirmedBy ? `<div><dt>完成方式</dt><dd>${run.confirmedBy === 'automation' ? '自动确认' : '手动确认'} · ${exactTime(run.confirmedAt)}</dd></div>` : run.status === 'awaiting_acceptance' ? '<div><dt>验收安排</dt><dd>下一轮开始前自动确认，也可提前确认完成。</dd></div>' : ''}` : ''}
       </dl>
-      <section class="task-member-section"><header><h5>成员 · ${agents.length}</h5>${!run.task.archivedAt && !["completed","cancelled"].includes(run.status) ? '<button class="text-action member-console-icon" data-edit-task-members aria-label="编辑任务成员" title="添加或移除成员"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>' : ''}</header><div class="task-member-list">${agents.map(agent=>`<div class="task-member-row"><button class="text-action task-member-identity" data-task-member-detail="${esc(agent.id)}" title="${esc(agent.name)}"><span class="role-avatar ${roleColor(agent)}">${esc(initialsOf(agent))}</span><span>${esc(agent.name)}</span></button>${roleExecutionStatus(run,workspace.traces,agent.id).active?'<span class="member-running-dot" role="status" aria-label="正在运行" title="正在运行"></span>':''}<button class="text-action member-console-icon" data-task-member-console="${esc(agent.id)}" aria-label="查看 ${esc(agent.name)} 的控制台" aria-pressed="${view.tab==='console'&&state.selectedAgentId===agent.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></svg></button></div>`).join('')}</div></section>
+      <section class="task-member-section"><header><h5>成员 · ${agents.length}</h5>${!run.task.archivedAt && !["completed","cancelled"].includes(run.status) ? '<button class="text-action member-console-icon" data-edit-task-members aria-label="编辑任务成员" title="添加或移除成员"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>' : ''}</header><div class="task-member-list">${agents.map(agent=>`<div class="task-member-row"><button class="text-action task-member-identity" data-task-member-detail="${esc(agent.id)}" title="${esc(agent.name)}"><span class="role-avatar ${roleColor(agent)}">${esc(initialsOf(agent))}</span><span>${agent.id===run.manager.id ? '<span class="task-manager-star" aria-label="本次经理">★</span> ' : ''}${esc(agent.name)}</span></button>${roleExecutionStatus(run,workspace.traces,agent.id).active?'<span class="member-running-dot" role="status" aria-label="正在运行" title="正在运行"></span>':''}<button class="text-action member-console-icon" data-task-member-console="${esc(agent.id)}" aria-label="查看 ${esc(agent.name)} 的控制台" aria-pressed="${view.tab==='console'&&state.selectedAgentId===agent.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></svg></button></div>`).join('')}</div></section>
       <section class="workspace-context">${taskDescriptionMarkup(run.task, view)}</section>
       <section class="workspace-directory-details" id="workspace-directory-details">${workspaceDirectoryDetails(run.task)}</section>
     </aside>`;
@@ -1124,7 +1131,7 @@ function renderWorkspace() {
 function tracePromptMarkup(trace, runId, agent = null) {
   const label = `本次提示词 · ${trace.workflowNodeId || trace.type || "调用"}`;
   const provider = trace.agent?.runtime?.provider || agent?.runtime?.provider;
-  const sessionLabel = `${provider === "dsh" ? "DeepSeek Harness" : provider === "codex" ? "Codex" : provider === "claude-code" ? "Claude Code" : "Runtime"} 会话 ID`;
+  const sessionLabel = `${runtimeLabel(provider)} 会话 ID`;
   const session = `<div class="console-session-id"><span>${esc(sessionLabel)}</span><code>${esc(trace.providerSessionId || "未记录")}</code></div>`;
   const body = trace.promptRef
     ? `<div class="prompt-snapshot-body" data-prompt-snapshot="${esc(trace.id)}" data-content-run="${esc(runId)}"${trace.contentBase ? ` data-content-url="${esc(trace.contentBase)}/traces/${esc(trace.id)}/prompt"` : ""}><span class="muted">正在读取提示词快照…</span></div>${session}`
@@ -1284,8 +1291,8 @@ function consoleSessionMarkup(event, trace, agent) {
   if (!created && !resumed && !initialized) return '';
   if (trace && (trace.id !== event.data?.traceId || trace.agentId !== event.actor?.id)) return '';
   const provider = trace?.agent?.runtime?.provider || agent?.runtime?.provider;
-  if (!['claude-code','codex','dsh'].includes(provider)) return '';
-  const label = provider === 'dsh' ? 'DeepSeek Harness' : provider === 'codex' ? 'Codex' : 'Claude Code';
+  if (!RUNTIME_IDS.includes(provider)) return '';
+  const label = runtimeLabel(provider);
   let id = trace?.providerSessionId || (provider === 'claude-code' || resumed ? event.data?.sessionId : null);
   // Codex allocates its native thread ID only on thread.started. Its initial
   // platform placeholder must never be presented as a resumable provider ID.
@@ -1577,6 +1584,12 @@ async function hydratePromptSnapshots(nodes = []) {
 function rememberDirectoryReading(view) {
   const host = $("#working-directory-panel");
   if (!host || host.hidden) return;
+  const media=host.querySelector('.working-video-preview'),video=media?.querySelector('video');
+  if(video){
+    if(video.readyState>=1)view.videoReading={path:media.dataset.videoPath,version:media.dataset.videoVersion,time:video.currentTime,volume:video.volume,muted:video.muted,rate:video.playbackRate,playing:!video.paused && view.tab==='directory'};
+    view.pendingVideoPreview=view.tab==='directory'?media:null;
+    if(view.tab!=='directory')video.pause();
+  }
   host.querySelectorAll("details[data-directory-path]").forEach((item) => { view.directoryOpen[item.dataset.directoryPath] = item.open; });
   view.directoryScroll.tree = host.querySelector(".artifact-files")?.scrollTop || 0;
   const reader = host.querySelector(".markdown-preview, .artifact-preview");
@@ -1639,15 +1652,26 @@ function renderWorkingDirectory(runId) {
   if (preview) {
     if (preview.error || preview.loading) content = preview.error ? `<div class="artifact-placeholder" role="alert">${esc(preview.error)}</div>` : '<div class="artifact-placeholder"><span class="directory-loading" role="status" aria-label="正在读取文件"></span></div>';
     else if (preview.image) content = `<img class="artifact-image-preview" src="/api/runs/${encodeURIComponent(runId)}/working-directory/content?raw=1&path=${encodeURIComponent(view.selectedPath)}" alt="${esc(view.selectedPath)}" />`;
+    else if (preview.video) content = `<div class="working-video-preview" data-video-path="${esc(view.selectedPath)}" data-video-version="${esc(preview.modifiedAt)}"><video controls playsinline preload="metadata" aria-label="${esc(view.selectedPath)}" src="/api/runs/${encodeURIComponent(runId)}/working-directory/content?media=1&path=${encodeURIComponent(view.selectedPath)}"></video><p class="field-hint" data-video-error role="alert" hidden>此视频无法播放，可能是文件已变化或编码不受支持。请下载后使用本地播放器查看。</p></div>`;
     else if (preview.content == null) content = '<div class="artifact-placeholder">二进制文件不支持文本预览</div>';
     else if (/\.md$/i.test(view.selectedPath) && window.marked && window.DOMPurify) content = `<article class="markdown-preview">${window.DOMPurify.sanitize(window.marked.parse(preview.content))}</article>`;
     else content = `<pre class="artifact-preview code-preview hljs"><code>${preview.highlightedHtml || esc(preview.content)}</code></pre>`;
   }
+  const existingVideo=view.pendingVideoPreview || (view.previewPath===view.selectedPath?host.querySelector('.working-video-preview'):null);
   host.innerHTML = `${view.directoryError ? `<p role="alert">${esc(view.directoryError)}</p>` : ""}${Object.entries(view.directoryPages || {}).filter(([,page])=>page.error).map(([path,page])=>`<p role="alert">${esc(path)}：${esc(page.error)}</p>`).join("")}
     <div class="artifact-layout"><div class="artifact-files"><section class="artifact-root">${directoryPageMarkup('',view,theme)}</section></div><div class="artifact-viewer document"><div class="artifact-viewer-head"><div class="working-file-identity"><strong>${esc(view.selectedPath || "文件预览")}</strong><small>当前工作文件 ${preview?.modifiedAt ? "· " + esc(preview.modifiedAt) : ""}</small></div><div class="directory-actions"><button class="ghost-button" data-download-working-file ${!view.selectedPath || view.downloadingPath ? "disabled" : ""} ${view.downloadingPath ? 'aria-busy="true"' : ""}>${view.downloadingPath ? "下载中…" : "下载"}</button></div></div>${content}</div></div>`;
   host.querySelector(".artifact-files").scrollTop = view.directoryScroll.tree || 0;
   const reader = host.querySelector(".markdown-preview, .artifact-preview");
+  const video=host.querySelector('.working-video-preview');
+  if(video && existingVideo && existingVideo.dataset.videoVersion===video.dataset.videoVersion && existingVideo.querySelector('video').getAttribute('src')===video.querySelector('video').getAttribute('src')){video.replaceWith(existingVideo);}
+  else if(video)video.querySelector('video').addEventListener('error',()=>{video.querySelector('[data-video-error]').hidden=false;});
   if (reader) reader.scrollTop = view.directoryScroll[view.selectedPath] || 0;
+  delete view.pendingVideoPreview;
+  const player=host.querySelector('.working-video-preview video'),saved=view.videoReading;
+  if(player && saved?.path===view.selectedPath && saved.version===preview?.modifiedAt){
+    const restore=()=>{player.volume=saved.volume;player.muted=saved.muted;player.playbackRate=saved.rate;if(Number.isFinite(player.duration))player.currentTime=Math.min(saved.time,player.duration);if(saved.playing)void player.play().catch(()=>{});};
+    if(player.readyState>=1)restore();else player.addEventListener('loadedmetadata',restore,{once:true});
+  }
   view.previewPath = view.selectedPath;
 }
 
@@ -2214,7 +2238,7 @@ const pathList = (value) => String(value || "").split("\n").map((item) => item.t
 
 async function newTaskModal({ automation = false, existing = null } = {}) {
   await loadCatalogReferences();
-  if (!state.agents.some(agent => agent.status === "active" && agent.kind === "manager")) { toast("请先创建或启用一位项目经理。", true); return; }
+  if (!state.agents.some(agent => agent.status === "active")) { toast("请先创建或启用数字员工。", true); return; }
   openModal(`
     <h2>${automation ? existing ? "编辑自动化" : "新建自动化" : "新建任务"}</h2>
     <form id="task-form" novalidate>
@@ -2244,7 +2268,7 @@ async function newTaskModal({ automation = false, existing = null } = {}) {
   const teams = state.teams.filter(team => team.status === "active").map(team => ({ ...team, description: `${team.memberAgentIds.length} 位员工 · 团队`, selectionKind: "team" }));
   let selectedMembers = existing?.memberAgentIds || [];
   const expandMembers = item => item.selectionKind === 'team' ? item.memberAgentIds.filter(value => candidates.some(agent => agent.id === value)) : [item.id];
-  const memberSelection = createEmployeeMultiSelect($('#task-members-picker'), { selectedIds: selectedMembers, id: 'task-members', label: '任务成员 *', placeholder: '添加团队或数字员工', esc, items: [...teams, ...candidates], detail: item => `<small>${esc(item.selectionKind === 'team' ? item.description : item.kind === 'manager' ? '项目经理' : item.description || '数字员工')}</small>`, expand: expandMembers, preserveGroups: true, hideUnavailable: true, available: item => candidates.filter(agent => agent.kind === 'manager' && new Set([...selectedMembers, ...expandMembers(item)]).has(agent.id)).length <= 1, reason: () => '任务只允许一位项目经理，请单独添加该团队的其他员工', onChange: values => { selectedMembers = values; } });
+  const memberSelection = createEmployeeMultiSelect($('#task-members-picker'), { selectedIds:selectedMembers, managerId:existing?.managerAgentId || null, onManagerChange:()=>clearInvalidField($('#task-members')), id: 'task-members', label:'任务成员 *', placeholder:'添加团队或数字员工', esc, items:[...teams,...candidates], detail:item=>`<small>${esc(item.description || '数字员工')}</small>`, expand:expandMembers, onChange:values=>{selectedMembers=values;clearInvalidField($('#task-members'));} });
   if (existing) { form.elements.title.value=existing.title; form.elements.objective.value=existing.objective; form.elements.acceptanceCriteria.value=existing.acceptanceCriteria.join("\n"); form.elements.workflowTemplateId.value=existing.workflowTemplateId || ""; }
   let previewTicket=0, previewTimer;
   if (automation) {
@@ -2269,13 +2293,15 @@ async function newTaskModal({ automation = false, existing = null } = {}) {
     if (criteriaError) { form.querySelector(".task-acceptance").open = true; setInvalid(form.elements.acceptanceCriteria, criteriaError); valid = false; }
 
     const memberAgentIds = memberSelection.value();
-    if (candidates.filter(agent => memberAgentIds.includes(agent.id) && agent.kind === "manager").length !== 1) { setInvalid($('#task-members'), "任务成员必须包含一位项目经理。"); valid = false; }
+    if (!memberAgentIds.length) { setInvalid($('#task-members'), "请至少选择一位员工。"); valid = false; }
+    else if (!memberSelection.managerId()) { setInvalid($('#task-members'), "点击已选员工，指定一位本次经理。"); valid = false; }
     if (!valid) return;
     form.dataset.saving="true"; form.querySelectorAll('[type="submit"]').forEach(button=>button.disabled=true);
     try {
       const data = new FormData(form);
       const input = Object.fromEntries(data);
       input.memberAgentIds = memberAgentIds;
+      input.managerAgentId = memberSelection.managerId();
       input.acceptanceCriteria = acceptanceCriteria;
       if (automation) {
         input.enabled=existing ? existing.enabled : event.submitter?.value !== 'disabled';
@@ -2301,75 +2327,28 @@ async function newTaskModal({ automation = false, existing = null } = {}) {
   });
 }
 
-function workflowNodeRow(node, index, allNodes) {
-  const candidates = allNodes.filter((candidate) => candidate.id !== node.id);
-  return `<details class="workflow-edit-node" data-workflow-node ${index === 0 ? "open" : ""}>
-    <summary class="workflow-edit-node-head"><strong>${String(index + 1).padStart(2, "0")} · ${esc(node.title || "新节点")}</strong><button type="button" class="icon-text-button" data-remove-workflow-node title="移除此节点">移除</button></summary>
-    <input type="hidden" name="nodeId" value="${esc(node.id)}" />
-    <div class="form-grid compact-grid"><div class="form-field"><label>节点标题 <b>*</b></label><input name="nodeTitle" value="${esc(node.title || "")}" placeholder="例如：功能实现" /></div>
-    <div class="form-field"><label>人员需求提示 <b>*</b></label><textarea name="nodeStaffingGuidance" placeholder="例如：熟悉测试方案设计、能复现问题并提供证据；由项目经理判断具体人选。">${esc(node.staffingGuidance || "")}</textarea></div></div>
-    <div class="form-field"><label>交付定义（选填）</label><textarea name="nodeDeliverable" placeholder="用自然语言说明此节点要交付什么、如何被下游使用。">${esc(node.deliverable || "")}</textarea><div class="field-hint">留空使用基于节点标题的默认交付定义。</div></div>
-    <div class="form-grid compact-grid"><div class="form-field"><label>建议交付位置（每行一条）</label><textarea name="nodeArtifactPaths" placeholder="artifacts/media/\nreports/">${esc((node.artifactPaths || []).join("\n"))}</textarea><div class="field-hint">工作目录内的相对路径，目录由工作流约定；可留空，不限定 docs，也不是文件操作或 Artifact 接纳白名单。</div></div>
-    <div class="form-field"><label>代码仓库</label><p class="field-hint">由员工根据任务与提示词准备，不绑定工作流。</p></div></div>
-    <div class="form-field"><label>依赖节点（可多选）</label><select name="nodeDependencies" multiple size="${Math.min(Math.max(candidates.length, 1), 3)}">${candidates.map((candidate) => `<option value="${esc(candidate.id)}" ${(node.dependsOn || []).includes(candidate.id) ? "selected" : ""}>${esc(candidate.id)} · ${esc(candidate.title || `节点 ${candidate.id}`)}</option>`).join("")}</select><div class="field-hint">供项目经理安排交接顺序时参考。</div></div>
-    <div class="form-field"><label>交接来源（可多选）</label><select name="nodeHandoffFrom" multiple size="${Math.min(Math.max(candidates.length, 1), 3)}">${candidates.map((candidate) => `<option value="${esc(candidate.id)}" ${(node.handoffFrom || []).includes(candidate.id) ? "selected" : ""}>${esc(candidate.id)} · ${esc(candidate.title || candidate.id)}</option>`).join("")}</select></div>
-  </details>`;
-}
-
-function workflowFormNodes(form) {
-  return [...form.querySelectorAll("[data-workflow-node]")].map((row, index) => ({
-    id: row.querySelector("[name=nodeId]").value,
-    title: row.querySelector("[name=nodeTitle]").value.trim(),
-    staffingGuidance: row.querySelector("[name=nodeStaffingGuidance]").value.trim(),
-    deliverable: row.querySelector("[name=nodeDeliverable]").value.trim(),
-    artifactPaths: pathList(row.querySelector("[name=nodeArtifactPaths]").value),
-    dependsOn: [...row.querySelector("[name=nodeDependencies]").selectedOptions].map((option) => option.value),
-    handoffFrom: [...row.querySelector("[name=nodeHandoffFrom]").selectedOptions].map((option) => option.value),
-    index
-  }));
-}
-
-function replaceWorkflowNodes(form, nodes) {
-  $("#workflow-edit-nodes").innerHTML = nodes.map((node, index) => workflowNodeRow(node, index, nodes)).join("");
-  form.querySelectorAll("[data-remove-workflow-node]").forEach((button) => button.addEventListener("click", () => {
-    const remaining = workflowFormNodes(form).filter((node, index) => index !== [...form.querySelectorAll("[data-remove-workflow-node]")].indexOf(button));
-    if (!remaining.length) { toast("工作流至少需要一个节点。", true); return; }
-    replaceWorkflowNodes(form, remaining);
-  }));
-}
-
 function workflowModal(template = null) {
-  const initialNodes = template?.nodes?.length ? template.nodes : [
-    { id: "requirements", title: "需求与验收标准", staffingGuidance: "熟悉需求澄清与验收标准编写，能将目标整理成可验证的交付要求。", deliverable: "交付需求、边界和验收标准。", artifactPaths: ["docs/requirements/"], dependsOn: [] },
-    { id: "development", title: "功能开发", staffingGuidance: "熟悉代码仓库与实现方案，能完成开发和必要的测试。", deliverable: "在指定 Git 仓库实现功能与测试。", artifactPaths: ["docs/development/"], dependsOn: ["requirements"] },
-    { id: "testing", title: "质量验证", staffingGuidance: "能制定测试方案、复现问题并提交可验证的测试证据；不限定成员的角色名称。", deliverable: "验证功能并输出测试报告。", artifactPaths: ["docs/testing/"], dependsOn: ["development"] }
-  ];
-  openModal(`<h2>${template ? "编辑工作流" : "新建工作流"}</h2>
-    <p class="modal-intro">工作流定义节点、依赖和人员需求。运行时由项目经理依据成员交接决定下一步。</p>
-    <form id="workflow-form" novalidate><div class="form-field full"><label>工作流名称 <b>*</b></label><input name="name" value="${esc(template?.name || "")}" placeholder="例如：前端交互功能交付" /><div class="field-error"></div></div>
-    <div class="form-field full"><label>说明</label><textarea name="description" placeholder="说明适合处理的任务类型与交付目标">${esc(template?.description || "")}</textarea></div>
-    <div class="workflow-edit-head"><strong>工作流节点</strong><button type="button" class="small-button" id="add-workflow-node">＋ 添加节点</button></div><div id="workflow-edit-nodes"></div>
-    <div class="form-actions"><button type="button" class="ghost-button" data-close-modal>取消</button><button type="submit" class="primary-button">${template ? "保存工作流" : "创建工作流"}</button></div></form>`);
-  const form = $("#workflow-form");
-  form.closest(".modal").classList.add("workflow-editor-modal");
-  replaceWorkflowNodes(form, initialNodes);
-  $("#add-workflow-node").addEventListener("click", () => {
-    const current = workflowFormNodes(form);
-    const next = current.length + 1;
-    replaceWorkflowNodes(form, [...current, { id: `node_${next}`, title: "", staffingGuidance: "", deliverable: "", artifactPaths: [], dependsOn: current.length ? [current[current.length - 1].id] : [] }]);
-    const added = form.querySelector("[data-workflow-node]:last-child"); added.open = true; added.scrollIntoView({ block: "nearest" });
-  });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault(); clearInvalid(form);
-    const nodes = workflowFormNodes(form);
-    if (!form.name.value.trim()) { setInvalid(form.name, "请填写工作流名称。"); return; }
-    if (nodes.some((node) => !node.title || !node.staffingGuidance)) { toast("请为每个工作流节点填写标题和人员需求提示。", true); return; }
-    const payload = { name: form.name.value.trim(), description: form.description.value.trim(), nodes: nodes.map(({ index, ...node }) => node) };
+  openModal(`<h2 class="workflow-editor-heading" aria-label="${template ? '编辑工作流' : '新建工作流'}"><input id="workflow-name" name="workflowName" form="workflow-form" aria-label="工作流名称" aria-required="true" value="${esc(template?.name || '')}" placeholder="新建工作流" /></h2>
+    <form id="workflow-form" novalidate><div id="workflow-canvas-editor"></div>
+    <div class="form-actions"><button type="button" class="ghost-button" data-close-modal>取消</button><button type="submit" class="primary-button">${template ? '保存工作流' : '创建工作流'}</button></div></form>`);
+  const form = $('#workflow-form');
+  form.closest('.modal').classList.add('workflow-editor-modal');
+  const editor = createWorkflowEditor($('#workflow-canvas-editor'), {workflow:template || {},loadVendor,esc,nameInput:$('#workflow-name')});
+  modalCancel = () => editor.dispose();
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button=form.querySelector('[type=submit]'), errorBox=form.querySelector('.workflow-editor-error');
+    if(button.disabled)return;
+    let payload;
+    try {payload=editor.value();if(!payload.name)throw new Error('请填写工作流名称。');if(!payload.nodes.length)throw new Error('请添加至少一个节点。');if(payload.nodes.some(node=>!node.title.trim()))throw new Error('请填写节点名称。');}
+    catch(error){errorBox.textContent=error.message;errorBox.hidden=false;return;}
+    button.disabled=true;
     try {
-      if (template) await api(`/api/workflow-templates/${template.id}`, { method: "PUT", body: JSON.stringify(payload) });
-      else await api("/api/workflow-templates", { method: "POST", body: JSON.stringify(payload) });
-      closeModal(); toast(template ? "工作流已更新。" : "工作流已创建，可用于新任务。"); await refresh();
-    } catch (error) { toast(error.message, true); }
+      await api(template ? `/api/workflow-templates/${template.id}` : '/api/workflow-templates', {method:template?'PUT':'POST',body:JSON.stringify(payload)});
+      if(form.isConnected)closeModal();
+      toast(template?'工作流已更新，新任务使用此版本。':'工作流已创建。');await refresh();
+    }catch(error){if(form.isConnected){errorBox.textContent=error.message;errorBox.hidden=false;}}
+    finally{if(form.isConnected)button.disabled=false;}
   });
 }
 
@@ -2385,7 +2364,7 @@ async function agentModal(existing = null) {
     <p class="modal-intro">数字员工可加入团队并承担工作流节点；修改仅影响后续新任务和沟通。</p>
     <form id="agent-form" novalidate>
       <div class="employee-identity-row"><div class="form-field"><label>名称 <b>*</b></label><input name="name" value="${esc(existing?.name || "")}" placeholder="例如：周航" /><div class="field-error"></div></div><fieldset class="employee-status-choice"><legend>状态</legend><label><input type="radio" name="status" value="active" ${!existing || existing.status==='active'?'checked':''}>可用</label><label><input type="radio" name="status" value="inactive" ${existing?.status==='inactive'?'checked':''}>停用</label></fieldset></div>
-      <div class="employee-properties-row"><div class="form-field"><label>员工类型</label><select name="kind"><option value="business">普通员工</option><option value="manager" ${existing?.kind === "manager" ? "selected" : ""}>项目经理</option></select></div><div class="form-field"><label for="employee-runtime-profile">Runtime 配置 <b>*</b></label><select id="employee-runtime-profile" name="runtimeProfileId">${profiles.map(item => `<option value="${esc(item.id)}" ${!item.enabled && item.id !== runtime.profileId ? 'disabled' : ''} ${item.id === runtime.profileId ? 'selected' : ''}>${item.provider === 'dsh' ? 'DeepSeek Harness' : item.provider === 'codex' ? 'Codex' : 'Claude Code'}${item.enabled ? '' : '（已停用）'}</option>`).join('')}</select></div></div>
+      <div class="employee-properties-row"><div class="form-field"><label for="employee-runtime-profile">Runtime 配置 <b>*</b></label><select id="employee-runtime-profile" name="runtimeProfileId">${profiles.map(item => `<option value="${esc(item.id)}" ${!item.enabled && item.id !== runtime.profileId ? 'disabled' : ''} ${item.id === runtime.profileId ? 'selected' : ''}>${runtimeLabel(item.provider)}${item.enabled ? '' : '（已停用）'}</option>`).join('')}</select></div></div>
       <p class="field-hint">Runtime 在设置中管理和测试；停用不改写冻结任务与沟通。插件和 MCP 按员工独立选择。</p>
       <div class="form-field full" id="employee-role-selection"></div>
       <div class="form-field full"><label>系统提示词（职责与协作边界）</label><textarea name="systemPrompt" rows="8">${esc(existing?.systemPrompt || "")}</textarea></div>
@@ -2434,7 +2413,7 @@ async function agentModal(existing = null) {
     try {
       await api(existing ? `/api/agents/${existing.id}` : "/api/agents", { method: existing ? "PUT" : "POST", body: JSON.stringify(input) });
       closeModal();
-      toast(`数字员工「${input.name}」${existing ? "已更新" : "已创建"}并绑定 ${provider === "dsh" ? "DeepSeek Harness" : provider === "codex" ? "Codex" : "Claude Code"} Runtime。`);
+      toast(`数字员工「${input.name}」${existing ? "已更新" : "已创建"}并绑定 ${runtimeLabel(provider)} Runtime。`);
       await refresh();
     } catch (error) { toast(error.message, true); }
   });
@@ -2507,7 +2486,7 @@ async function editTaskMembers() {
   const members=workspaceAgents(workspace,state.agents);
   const locked=new Set([run.manager.id,...workspace.traces.filter(t=>t.status==='running').map(t=>t.agentId),...(workspace.dispatches || []).filter(d=>!['done','cancelled'].includes(d.status)).map(d=>d.recipientAgentId)]);
   openModal('<h2>任务成员</h2><form id="task-members-form"><div id="run-member-picker"></div><p class="field-hint">保留当前经理；正在执行、等待处理或回复的成员暂不能移除。</p><p role="alert" data-member-error></p><div class="form-actions"><button class="ghost-button" type="button" data-close-modal>取消</button><button class="primary-button" type="submit">保存</button></div></form>');
-  const catalog=[...members,...state.agents.filter(a=>a.status==='active'&&a.kind!=='manager'&&!members.some(m=>m.id===a.id))];
+  const catalog=[...members,...state.agents.filter(a=>a.status==='active'&&a.id!==run.manager.sourceAgentId&&!members.some(m=>m.id===a.id))];
   const selection=createEmployeeMultiSelect($('#run-member-picker'),{id:'run-members',label:'数字员工',placeholder:'添加员工',esc,items:catalog,selectedIds:members.map(a=>a.id),lockedIds:[...locked],lockReason:id=>id===run.manager.id?'必须保留当前项目经理':'此员工有尚未结束的执行或交接',detail:agent=>`<small>${esc(agent.description || '')}</small>`});
   $('#task-members-form').onsubmit=async event=>{
     event.preventDefault();const button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;
@@ -2527,7 +2506,7 @@ async function teamModal(existing = null) {
       <div class="form-actions"><button type="button" class="ghost-button" data-close-modal>取消</button><button type="submit" class="primary-button">${existing ? "保存修改" : "创建团队"}</button></div>
     </form>`);
   const form = $("#team-form"); form.closest('.modal').classList.add('team-config-modal');
-  const selection = createEmployeeMultiSelect($('#team-members-picker'), { id:'team-members', label:'团队员工', placeholder:'搜索并添加员工', esc, items:state.agents, selectedIds:existing?.memberAgentIds || [], detail: agent => `<small>${esc(agent.kind === 'manager' ? '项目经理' : agent.description || '数字员工')}</small>` });
+  const selection = createEmployeeMultiSelect($('#team-members-picker'), { id:'team-members', label:'团队员工', placeholder:'搜索并添加员工', esc, items:state.agents, selectedIds:existing?.memberAgentIds || [], detail: agent => `<small>${esc(agent.description || '数字员工')}</small>` });
   form.addEventListener('submit', async event => {
     event.preventDefault(); clearInvalid(form);
     if (!form.name.value.trim()) { setInvalid(form.name, '请填写团队名称。'); return; }
@@ -2624,6 +2603,13 @@ document.addEventListener("click", (event) => {
     state.manualPage = state.manualPage === "data-model" ? "system-architecture" : state.manualPage === "system-architecture" ? "task-flow" : "data-model";
     return setView("manual");
   }
+  if((target=el('[data-workflow-view]'))) {
+    const {scope,key,workflowView:action}=target.dataset;
+    if(action==='format'){const button=target;button.disabled=true;void formatWorkflowGraph(scope,key).catch(error=>toast(error.message,true)).finally(()=>{if(button.isConnected)button.disabled=false;});return;}
+    if(action==='fit')return fitWorkflowGraph(scope,key);
+    if(action==='reset')return resetWorkflowGraph(scope,key);
+    return zoomWorkflowGraph(scope,key,action==='zoom-in'?.16:-.16);
+  }
   if ((target = el("[data-diagram-action]"))) {
     const key = target.dataset.diagramKey;
     const update = (scale) => { const label = $(`[data-diagram-scale="${key}"]`); if (label) label.textContent = `${Math.round(scale * 100)}%`; };
@@ -2696,7 +2682,7 @@ document.addEventListener("click", (event) => {
   if ((target = el("[data-toggle-task-description]"))) { workspaceView().descriptionExpanded = !workspaceView().descriptionExpanded; return renderWorkspace(); }
   if ((target = el("[data-edit-task-members]"))) return editTaskMembers();
   if ((target = el("[data-task-member-console]"))) { state.selectedAgentId=target.dataset.taskMemberConsole;workspaceView().tab='console';workspaceView().jumpLatest=true;return renderWorkspace(); }
-  if ((target = el("[data-task-member-detail]"))) { const member=workspaceAgents(state.workspace,state.agents).find(a=>a.id===target.dataset.taskMemberDetail);if(member)void showEmployeeDetail(member);return; }
+  if ((target = el("[data-task-member-detail]"))) { const member=workspaceAgents(state.workspace,state.agents).find(a=>a.id===target.dataset.taskMemberDetail);if(member)void showEmployeeDetail({...member,taskRole:member.id===state.workspace.run.manager.id ? "manager" : "member"});return; }
   if ((target = el("[data-task-workflow-details]"))) return workflowDetails(state.workspace.run.task.workflowSnapshot, { frozen: true });
   if ((target = el("[data-ws-tab]"))) { workspaceView().jumpLatest = true; workspaceView().tab = target.dataset.wsTab; renderWorkspace(); if(target.dataset.wsTab==='collaboration')return loadCollaboration().catch(error=>toast(error.message,true)); if (target.dataset.wsTab === "diff" && workspaceView().changes && !workspaceView().changesLoading) return loadWorkingChanges(state.selectedRunId); if (target.dataset.wsTab === "directory" && workspaceView().directory && !workspaceView().directoryLoading) return loadWorkingDirectory(state.selectedRunId); return; }
   if ((target = el("[data-reload-workspace]"))) return loadWorkspace();

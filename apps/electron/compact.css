@@ -560,3 +560,8 @@ html:root .runtime-availability input[role="switch"]:focus-visible { outline-off
   html:root[data-theme] :is(.primary-button,.ghost-button,.small-button,.danger-button,.diff-icon-button,.modal-close,.text-action,.settings-radio-option,.settings-toggle,.runtime-availability),
   html:root .view:not(#workspace-view) .directory-toolbar > button { min-width:44px; min-height:44px; }
 }
+.modal.workflow-editor-modal { width:min(1180px,calc(100vw - 40px)); max-width:calc(100vw - 40px); }
+.workflow-editor-modal #workflow-form,.workflow-editor-modal .modal-scroll { min-width:0; }
+.workflow-editor-modal .modal-scroll { padding-right:0; }
+.workflow-editor-modal .workflow-editor-toolbar button { min-height:30px; }
+@media (max-width:850px) { .modal.workflow-editor-modal { width:calc(100vw - 16px); max-width:calc(100vw - 16px); } }

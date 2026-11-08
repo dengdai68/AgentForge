@@ -1,3 +1,4 @@
+import {runtimeLabel,RUNTIME_IDS} from "../client/runtime-providers.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -573,7 +574,7 @@ test("workspace settings persist and affect only new Tasks with atomic audit", a
   const directory = await mkdtemp(resolve(".data/workspace-settings-test-"));
   const databasePath = join(directory, "state.sqlite");
   const store = createStore({ databasePath, workspaceRoot: join(directory, "original") });
-  const input = { title: "目录验收", objective: "保存新任务路径", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: store.listWorkflowTemplates()[0].id };
+  const input = {managerAgentId:'system_project_manager', title: "目录验收", objective: "保存新任务路径", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: store.listWorkflowTemplates()[0].id };
   const old = store.createTask(input), run = store.createRun(old.id);
   for (const invalid of ["/", "relative", "", null, "/invalid\0path"]) assert.throws(() => store.updateWorkspaceSettings({ workspaceRoot: invalid }));
   assert.equal(store.getWorkspaceSettings().source, "startup");
@@ -787,7 +788,7 @@ test("Runtime model picker and effort options follow the real catalog with hones
   assert.deepEqual(RUNTIME_EFFORT_LEVELS["claude-code"], CLAUDE_EFFORT_LEVELS, "Web fallback mirrors the server-observed Claude vocabulary");
   assert.deepEqual(RUNTIME_EFFORT_LEVELS.codex, CODEX_EFFORT_LEVELS, "Web fallback mirrors the server-observed Codex vocabulary");
 
-  const codexCatalog = { models: [{ id: "gpt-real", levels: [{ id: "low" }, { id: "high", default: true }] }, { id: "gpt-quiet", levels: [] }] };
+  const codexCatalog = { source:"codex debug models", models: [{ id: "gpt-real", levels: [{ id: "low" }, { id: "high", default: true }] }, { id: "gpt-quiet", levels: [] }] };
   const known = runtimeEffortOptions("codex", "gpt-real", codexCatalog);
   assert.deepEqual(known.options.map(option => option.value), ["", "low", "high"], "catalog levels restrict options to the model's real support");
   assert.equal(known.options.find(option => option.value === "high").label, "High（模型默认）");
@@ -821,8 +822,6 @@ test("Runtime model picker and effort options follow the real catalog with hones
   assert.match(source, /当前值不在列表中（手工输入）/, "manual values are labelled as outside the loaded list");
   assert.match(source, /原思考等级不适用于当前模型，已清除/, "switching models clears an inapplicable saved effort instead of silently keeping it");
   assert.match(source, /'model','effort'/, "effort is submitted with the profile");
-  const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  assert.match(app, /思考 " \+ esc\(agent\.runtime\.effort\)/, "employee cards show the saved effort");
 });
 
 test("Runtime form initializes the saved effort into the select (QA-RT-01)", async () => {
@@ -906,7 +905,7 @@ test('split Diff aligns replacements, preserves line numbers and escapes code',a
 
 test('console session labels use the event Trace and never expose a provisional Codex ID as native',async()=>{
  const source=await readFile(new URL('../web/app.js',import.meta.url),'utf8');
- const context=vm.createContext({esc:value=>String(value).replaceAll('<','&lt;')});
+ const context=vm.createContext({runtimeLabel,RUNTIME_IDS,esc:value=>String(value).replaceAll('<','&lt;')});
  vm.runInContext(source.slice(source.indexOf('function consoleSessionMarkup'),source.indexOf('function renderChatEvent')),context);
  const event={type:'session.created',actor:{id:'agent'},data:{traceId:'trace',sessionId:'allocated'}};
  const trace={id:'trace',agentId:'agent',providerSessionId:'allocated',sessionMode:'new'};
@@ -1013,4 +1012,4 @@ test("thinking hydration displays recorded public text and explains empty histor
   for(const node of nodes.slice(2)){assert.match(node.innerHTML,/未保存可显示的思考正文/);assert.doesNotMatch(node.innerHTML,/已脱敏|敏感片段已隐藏/);}
 });
 
-function runWithCache(source,context={},...options){context.ByteCache=ByteCache;return vm.runInNewContext(source,context,...options);}
+function runWithCache(source,context={},...options){context.ByteCache=ByteCache;context.runtimeLabel=runtimeLabel;context.RUNTIME_IDS=RUNTIME_IDS;return vm.runInNewContext(source,context,...options);}

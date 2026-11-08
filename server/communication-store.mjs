@@ -1,3 +1,4 @@
+import {nativeSessionId} from "../client/runtime-providers.mjs";
 import { copyState } from "./state-journal.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { communicationVisibility } from "./history/index.mjs";
@@ -229,7 +230,7 @@ export function communicationCommands(state, save, employeeSnapshot, journal, pe
     },
     confirmCommunicationSession(key, deliveryId, sessionId) {
       const thread = conversation(key), item = delivery(key, deliveryId), session = thread.sessions[item.agentId];
-      if (item.status !== "running" || !session || typeof sessionId !== "string" || !/^[a-zA-Z0-9-]{8,100}$/.test(sessionId)) throw new Error("沟通会话绑定无效");
+      if (item.status !== "running" || !session || typeof sessionId !== "string" || !nativeSessionId(sessionId)) throw new Error("沟通会话绑定无效");
       if ((session.provider === "claude-code" || session.confirmed) && session.sessionId !== sessionId) throw new Error("沟通会话绑定不一致");
       session.sessionId = sessionId; session.confirmed = true;
       const invocation = item.invocations?.find(row => row.attempt === item.attempts);

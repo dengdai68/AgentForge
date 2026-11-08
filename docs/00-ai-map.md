@@ -223,4 +223,26 @@ Store.updateRunMembers 管理当前成员并保留冻结历史；CLI tasks membe
 
 协作回复后的滚动：`web/app.js` 的 `renderCollaboration` 统一捕获/恢复阅读位置；`sendInstruction` 成功后退出历史页并请求最新页，“最新”按钮使用同一跟随规则。定向宽窄隔离验收使用 `AGENTFORGE_COLLABORATION_SCROLL_ONLY=1 node scripts/test-collaboration-flow.mjs`，包含真实澄清回复与发送失败保留阅读位置；无 Provider 调用或 CLI 协议变化。
 
+工作流画布：web/workflow-editor.mjs复用X6编辑节点/连线与正文，client/workflow-description.mjs共享确定性预览/Markdown；Store维护edges及派生节点关系、校验与冻结。Run Files为经理Trace写workflow.md，prompts仅引用路径，员工只收到当前节点正文。App/CLI字段与默认语义同轮对齐；验收见scripts/test-workflow-editor.mjs。
+
+工作流分支：nodes.type=process/condition，edges.condition为自然语言条件（最多2000字符），默认流程/空条件；App/CLI同协议并冻结。条件节点菱形、经理选择满足条件的一条分支；预览返回保留画布有效尺寸。test-workflow-editor覆盖反复切换、宽窄布局、类型切换与分支保存回读。
+
+工作流编辑呈现由web/workflow-editor.mjs和app.js维护：标题输入、全宽总体说明、画布删除、140px节点及稳定中心附近插入；右栏仅标题/提示词。键盘操作直接作用画布元素，原有节点补充资料与关系标识继续保留，HTTP/CLI与执行协议不变；scripts/test-workflow-editor.mjs同时支持源码与AGENTFORGE_WORKFLOW_EDITOR_APP指定的包。
+
+工作流名称输入框：web/app.js workflowModal与web/styles.css .workflow-editor-heading保留直接命名，宽度480px封顶，13px/600及32px高，完整2px焦点环；其他创建页面保持原布局。CLI tasks create --workflow ID_OR_NAME经当前catalog-references解析后调用相同Task/Run接口，冲突在写入前拒绝。
+
 咨询报告保留：`orchestrator.acceptDelivery` 在咨询提前返回前保存独立 summary；问题与报告共用 Trace/startMessageId，App/CLI 读取同一 Message。缺失/空/相同正文不另造报告，路由失败仍事务回滚；见 docs/03、22 与 tests/dispatch-routing。
+
+任务经理选择：store.buildTask/createRun与automations.mjs以managerAgentId从成员中指定并冻结经理，保留Agent.kind但不参与身份判断；orchestrator roster传taskRole，prompts使用本轮身份。App员工多选标签通过marketplace.createEmployeeMultiSelect单选★，团队展开员工；CLI tasks/automations schema同一必填字段。MCP工具发现server/runtime/mcp-tools.mjs复用mcp-launcher，只initialize/tools/list；marketplace封装、HTTP认证入口、CLI mcps tools与详情共用工具发现；详情默认展开上方脱敏连接配置，一次展示全部工具名称和说明，CLI保留既有查询及schema输出。
+
+MCP连接配置在marketplace.mjs以静态section直接展示；任务创建/自动化的成员选择在styles.css #task-members-picker单独启用标签/长姓名换行与自动增高，常规多选不变。验收test-task-creation覆盖大团队、经理键盘切换及移除后保存、宽窄两主题。纯展示变化，无HTTP/CLI输入输出变化。
+
+工作流呈现入口web/workflow-layout.mjs由workflow-editor和manual-graphs复用：ELK排版、优先直线/单直角、必要的正交回路、四边端口、视口5%–300%缩放与平移。Store在workflow新写入/Task冻结时限制process单出口，condition允许分支；CLI端口schema/help同轮对齐。只读格式化不落盘，历史快照不重写。
+
+工作流编辑端口显示仅由web/styles.css的悬停、键盘焦点与画布按下状态控制：默认透明，不卸载端口或改变边；scripts/test-workflow-editor.mjs核对两种节点及宽窄主题。属于视觉状态，无App/CLI协议变化。
+
+多 Runtime：client/runtime-providers.mjs 共享九项目录；local-cli.runRuntime 分派 portable-cli 原生流，orchestrator/communication/probe共用。Cursor/Gemini成员私有配置保留认证引用、关闭扩展并显式信任非交互目录，Cursor原生thinking delta进入公开思考内容。Store原生会话确认支持 ses_ 标识；UI/CLI同字段门禁与帮助。契约与验证见 docs/29、tests/portable-runtime.test.mjs、scripts/test-portable-runtimes.mjs。
+
+Runtime 扩展：portable-extensions.mjs 在既有市场完整性校验后物化原生 Skill/独立子代理/MCP 配置，九种 Runtime 共用绑定与历史桥。市场显式兼容性检查只更新 Store 目录缓存，列表不做磁盘全扫描；CLI/App 同步入口与实际验收见 docs/29。pi-agents.mjs 仅由原生 Pi 加载，子进程不拥有领域状态；独立会话/工具/取消夹具在 tests/pi-plugin-agents.test.mjs。
+
+模型与视频：model-catalog 从新六种 Runtime 的原生元数据投影 label/levels；portable-cli/portable-extensions 传递 Cursor 原生变体、Gemini thinkingLevel、Qwen reasoningEffort、Kimi 环境档位、Pi thinking 与 OpenCode #variant。当前文件 video 元数据与描述符由 Run Files 所有，index 认证流式 Range，app.js 原生播放器；无整文件缓冲或转码。

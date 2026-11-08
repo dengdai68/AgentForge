@@ -27,7 +27,7 @@ export function createAutomationUI({ api, esc, pill, exactTime, edit, navigate, 
           body.innerHTML = `<dl class="automation-config-layout">
             <div class="automation-config-section"><dt>执行成员：</dt><dd class="automation-config-members">${item.memberAgentIds.map(id => {
               const agent = catalog().agents.find(agent => agent.id === id);
-              return `<span class="automation-config-member"><span class="agent-card-avatar color-${esc(agent?.color || 'blue')}">${esc((agent?.name ? Array.from(agent.name).slice(0,2).join('').toUpperCase() : agent?.initials) || '?')}</span><span>${esc(agent?.name || id)}</span></span>`;
+              return `<span class="automation-config-member"${id===item.managerAgentId ? ' title="本次经理"' : ''}><span class="agent-card-avatar color-${esc(agent?.color || 'blue')}">${esc((agent?.name ? Array.from(agent.name).slice(0,2).join('').toUpperCase() : agent?.initials) || '?')}</span><span>${id===item.managerAgentId ? '<span class="task-manager-star" aria-label="本次经理">★</span> ' : ''}${esc(agent?.name || id)}</span></span>`;
             }).join('')}</dd></div>
             <div class="automation-config-section"><dt>流程模板：</dt><dd>${workflow ? `<button class="text-action" data-auto-workflow="${esc(workflow.id)}">${esc(workflow.name)}</button>${workflow.description ? `<div class="automation-config-text field-hint">${esc(workflow.description)}</div>` : ''}` : '默认协作'}</dd></div>
             <div class="automation-config-section"><dt>内容描述：</dt><dd class="automation-config-text automation-config-objective">${esc(item.objective)}</dd></div>

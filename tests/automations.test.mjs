@@ -9,7 +9,7 @@ import { createAutomationScheduler } from '../server/automation-scheduler.mjs';
 import { taskPrompt } from '../server/prompts.mjs';
 function setup() {
   const store=createStore({workspaceRoot:'/tmp/automation-unit-work'});
-  const input={title:'自动简报',objective:'完成简报',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'* * * * *'};
+  const input={managerAgentId:'system_project_manager',title:'自动简报',objective:'完成简报',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'* * * * *'};
   const at=new Date('2026-11-04T00:00:00Z');
   return {store,input,at,automation:store.saveAutomation(input,null,at)};
 }
@@ -22,7 +22,7 @@ test('five-field cron validates timezone, ranges and DST',()=>{
 });
 test('automatic runs isolate list, participants, prompts and human commands; ordinary tasks unchanged',()=>{
   const {store,input,automation}=setup();try{
-    const ordinary=store.createTask({title:'普通',objective:'保持人类',memberAgentIds:input.memberAgentIds,workflowTemplateId:input.workflowTemplateId});const manual=store.createRun(ordinary.id);
+    const ordinary=store.createTask({managerAgentId:'system_project_manager',title:'普通',objective:'保持人类',memberAgentIds:input.memberAgentIds,workflowTemplateId:input.workflowTemplateId});const manual=store.createRun(ordinary.id);
     assert.ok(manual.participants.some(member=>member.type==='human'));
     const record=store.triggerAutomation(automation.id);assert.ok(record.runId,record.reason);
     const run=store.getRun(record.runId),task=store.getRunTask(run.id);
@@ -86,7 +86,7 @@ test('scheduler launches asynchronously and does not await provider',async()=>{
 test('reopened Store preserves occurrence key, configuration and next-run confirmation',()=>{
   const dir=mkdtempSync(join(tmpdir(),'af-auto-')),options={databasePath:join(dir,'state.sqlite'),workspaceRoot:join(dir,'work')};let store=createStore(options);
   try{
-    const auto=store.saveAutomation({title:'持久调度',objective:'验证',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'* * * * *'});
+    const auto=store.saveAutomation({managerAgentId:'system_project_manager',title:'持久调度',objective:'验证',memberAgentIds:['system_project_manager','agent_analyst'],workflowTemplateId:'content_delivery',cron:'* * * * *'});
     const first=store.triggerAutomation(auto.id,{plannedAt:auto.nextTriggerAt,at:new Date(auto.nextTriggerAt)});store.requestHumanAcceptance(first.runId);store.close();store=createStore(options);
     assert.equal(store.triggerAutomation(auto.id,{plannedAt:auto.nextTriggerAt,at:new Date(auto.nextTriggerAt)}).id,first.id);
     const second=store.triggerAutomation(auto.id);assert.ok(second.runId);store.close();store=createStore(options);
@@ -170,7 +170,7 @@ test('created automation tasks keep detail references in every execution state',
 
 test('disabled automation deletion atomically removes every trigger/task/run and preserves unrelated tasks',()=>{
  const {store,input,automation}=setup();try{
-  const manual=store.createTask({title:'保留',objective:'普通任务',memberAgentIds:input.memberAgentIds});
+  const manual=store.createTask({managerAgentId:'system_project_manager',title:'保留',objective:'普通任务',memberAgentIds:input.memberAgentIds});
   const first=store.triggerAutomation(automation.id);store.requestHumanAcceptance(first.runId);
   const second=store.triggerAutomation(automation.id);store.saveAutomation({enabled:false},automation.id);
   assert.throws(()=>store.deleteAutomation(automation.id),/活跃/);
@@ -180,5 +180,18 @@ test('disabled automation deletion atomically removes every trigger/task/run and
   assert.throws(()=>store.getAutomation(automation.id),/不存在/);
   const state=store.snapshot();for(const key of ['runs','traces','messages','dispatches','decisions','artifacts'])assert.equal(state[key].filter(item=>removed.runIds.includes(item.runId || item.id)).length,0,key);
   assert.equal(state.automationTriggers.length,0);assert.ok(store.getTask(manual.id));
+ }finally{store.close();}
+});
+
+test('automation stores an explicit selected business employee manager and freezes it per trigger',()=>{
+ const store=createStore({workspaceRoot:'/tmp/automation-manager-unit'});
+ try{
+  const architect=store.createAgent({name:'架构师'}),tester=store.createAgent({name:'测试'});
+  const input={title:'任务经理自动化',objective:'按本轮身份协作',memberAgentIds:[architect.id,tester.id],managerAgentId:architect.id,cron:'0 9 * * *',enabled:false};
+  const automation=store.saveAutomation(input);assert.equal(automation.managerAgentId,architect.id);
+  const first=store.triggerAutomation(automation.id);assert.equal(first.outcome,'started');assert.equal(store.getRun(first.runId).manager.sourceAgentId,architect.id);
+  store.saveAutomation({managerAgentId:tester.id},automation.id);assert.equal(store.getAutomation(automation.id).managerAgentId,tester.id);assert.equal(store.getRun(first.runId).manager.sourceAgentId,architect.id);
+  assert.throws(()=>store.saveAutomation({memberAgentIds:[architect.id]},automation.id),/请选择/);
+  assert.throws(()=>store.saveAutomation({...input,managerAgentId:null}),/请选择/);
  }finally{store.close();}
 });

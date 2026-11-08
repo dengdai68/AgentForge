@@ -15,7 +15,7 @@ test('missing Runtime is effectively disabled and locked without rewriting prefe
   const worker = store.createAgent({ name: 'Worker', runtime: { profileId: profile.id } });
   const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id, store.createAgent({name:'Manager',kind:'manager',runtime:worker.runtime}).id] });
   const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
-  const task = store.createTask({ title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
+  const task = store.createTask({managerAgentId:team.memberAgentIds.at(-1), title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   const chat = store.openCommunication({ kind: 'agent', targetId: worker.id });
   const frozen = store.getTask(task.id).memberSnapshots;
   installed = false;
@@ -43,13 +43,13 @@ test('fixed Runtime slots retain IDs, gate new work and preserve frozen snapshot
   const options = { databasePath: join(root, 'state.sqlite'), workspaceRoot: root };
   let store = createStore(options);
   const defaults = store.listRuntimeProfiles();
-  assert.equal(defaults.length, 3);
+  assert.equal(defaults.length, 9);
   const profile = defaults.find(item => item.provider === 'claude-code');
   store.saveRuntimeProfile({ model: 'frozen' }, profile.id);
   const worker = store.createAgent({ name: 'Worker', runtime: { profileId: profile.id } });
   const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id, store.createAgent({name:'Manager',kind:'manager',runtime:worker.runtime}).id] });
   const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
-  const task = store.createTask({ title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
+  const task = store.createTask({managerAgentId:team.memberAgentIds.at(-1), title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   const chat = store.openCommunication({ kind: 'agent', targetId: worker.id });
   store.saveRuntimeProfile({ enabled: false, model: 'next' }, profile.id);
   assert.throws(() => store.createRun(task.id), /已停用/);
@@ -69,7 +69,7 @@ test('fixed Runtime slots retain IDs, gate new work and preserve frozen snapshot
   assert.doesNotThrow(() => store.assertRuntimeEnabled(worker.runtime));
   assert.ok(store.createRun(task.id));
   assert.ok(store.sendCommunication(chat.id, { content: 'Question', clientRequestId: randomUUID() }));
-  assert.equal(store.listRuntimeProfiles().length, 3);
+  assert.equal(store.listRuntimeProfiles().length, 9);
   store.close();
 });
 
@@ -82,7 +82,7 @@ test('central runtime edits update bound employees but preserve queued work and 
   const b = store.createAgent({ name: 'B', role: 'writer', runtime: { profileId: profile.id, skillPaths: [join(root, 'skill.md')] } });
   const team = store.createTeam({ name: 'Test', memberAgentIds: [a.id, b.id, store.createAgent({name:'Manager',kind:'manager',runtime:a.runtime}).id] });
   const flow = store.createWorkflowTemplate({ name: 'Write', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'writer', dependsOn: [] }] });
-  const task = store.createTask({ title: 'Frozen', objective: 'Write a document', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
+  const task = store.createTask({managerAgentId:team.memberAgentIds.at(-1), title: 'Frozen', objective: 'Write a document', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   store.saveRuntimeProfile({ model: 'next-model' }, profile.id);
   assert.equal(store.listAgents().find(item => item.id === a.id).runtime.model, 'next-model');
   assert.deepEqual(store.listAgents().find(item => item.id === b.id).runtime.skillPaths, [join(root, 'skill.md')]);
@@ -100,7 +100,7 @@ test('central runtime edits update bound employees but preserve queued work and 
 test('Store only exposes the three fixed provider slots when internal employees are bound', () => {
   const store = createStore();
   for (const provider of ['claude-code', 'codex', 'dsh']) store.createAgent({ name: provider, runtime: { provider } });
-  assert.equal(store.listRuntimeProfiles().length, 3);
+  assert.equal(store.listRuntimeProfiles().length, 9);
   assert.ok(store.listRuntimeProfiles().every(item => !Object.hasOwn(item, 'name') && !Object.hasOwn(item, 'executable')));
   store.close();
 });
@@ -175,7 +175,7 @@ test('runtime effort is validated per provider, reprojected to employees and fro
   assert.equal(store.listAgents().find(item => item.id === worker.id).runtime.effort, 'high');
   const team = store.createTeam({ name: 'T', memberAgentIds: [worker.id, store.createAgent({name:'Manager',kind:'manager',runtime:worker.runtime}).id] });
   const flow = store.createWorkflowTemplate({ name: 'F', nodes: [{ id: 'write', title: 'Write', staffingGuidance: 'Writer' }] });
-  const task = store.createTask({ title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
+  const task = store.createTask({managerAgentId:team.memberAgentIds.at(-1), title: 'Frozen', objective: 'Write', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   store.saveRuntimeProfile({ model: 'opus', effort: 'max' }, claude.id);
   assert.equal(store.listAgents().find(item => item.id === worker.id).runtime.effort, 'max', 'profile edit reprojects effort to bound employees');
   assert.equal(store.getTask(task.id).memberSnapshots[0].runtime.effort, 'high', 'frozen task snapshot keeps the previous effort');

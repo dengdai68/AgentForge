@@ -25,7 +25,7 @@ await auth.setAdministrator("desktop-test", password);
 auth.close();
 const fixtureStore = createStore({ databasePath: storage.AGENTFORGE_DB_PATH, workspaceRoot: storage.AGENTFORGE_WORKSPACE_ROOT });
 assert.deepEqual(fixtureStore.listTasks(), []);
-const fixtureTask = fixtureStore.createTask({ title: "隔离任务空间验收", objective: "只用于界面回归", memberAgentIds: fixtureStore.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
+const fixtureTask = fixtureStore.createTask({managerAgentId:'system_project_manager', title: "隔离任务空间验收", objective: "只用于界面回归", memberAgentIds: fixtureStore.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
 assert.ok(fixtureTask.workspacePath.startsWith(join(directory, "agentforge") + "/"));
 const fixtureRun = fixtureStore.createRun(fixtureTask.id);
 assert.ok(fixtureRun.workspacePath.startsWith(join(directory, "agentforge") + "/"));
@@ -894,7 +894,7 @@ try {
           const cleanup = await fetch(`/api/tasks/${task.id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{}" });
           if (!cleanup.ok) throw new Error("Disposable Task cleanup rejected");
           return { matches: task.workspacePath === `${root}/${task.id}`, oldPath: existing.run.task.taskWorkspacePath };
-        }, { input: { title: "目录分配验收夹具", objective: "不启动 Provider", memberAgentIds: fixtureTask.memberAgentIds, workflowTemplateId: fixtureTask.workflowTemplateId }, root: nextRoot, existingRunId: fixtureRun.id });
+        }, { input: {managerAgentId:'system_project_manager', title: "目录分配验收夹具", objective: "不启动 Provider", memberAgentIds: fixtureTask.memberAgentIds, workflowTemplateId: fixtureTask.workflowTemplateId }, root: nextRoot, existingRunId: fixtureRun.id });
         assert.equal(allocated.matches, true);
         assert.equal(allocated.oldPath, fixtureTask.workspacePath);
       }

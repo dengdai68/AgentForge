@@ -1,3 +1,4 @@
+import {RUNTIME_IDS} from '../client/runtime-providers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdir,mkdtemp,readFile,writeFile,stat,lstat,symlink,rm,chmod,realpath,unlink,readdir} from 'node:fs/promises';
@@ -109,7 +110,7 @@ test('edited MCP really calls the new service while a frozen reference still cal
 test('portable stdio MCP preserves its working directory for every Runtime',async t=>{
   const {root,market}=await fixture(t),log='cwd-proof.jsonl';
   const entry=await market.add({kind:'mcp',name:'cwd-proof',description:'',content:JSON.stringify({mcpServers:{proof:{command:process.execPath,args:[resolve('scripts/marketplace-probe-mcp.mjs'),log,'CWD-PROOF'],cwd:root,env_vars:['PATH']}}})});
-  assert.deepEqual(entry.providers,['claude-code','codex','dsh']);
+  assert.deepEqual(entry.providers,RUNTIME_IDS);
   assert.equal((await market.resolve({pluginIds:[],mcpIds:[entry.id]},'claude-code')).extensionManifest.length,1);
   const ref=(await market.resolve({pluginIds:[],mcpIds:[entry.id]},'codex')).extensionManifest[0];
   const client=new Client({name:'cwd-proof',version:'1'}),transport=new StdioClientTransport({command:process.execPath,args:[resolve('server/runtime/mcp-launcher.mjs'),ref.path,ref.sha256,'proof'],stderr:'pipe'});
@@ -353,7 +354,7 @@ test('default Hook file remains visible alongside custom Hook declarations',asyn
   await writeFile(join(source,'custom-hooks.json'),JSON.stringify({hooks:{Stop:[]}}));
   const {plugins:[entry]}=await market.import({path:source});
   assert.deepEqual((await market.detail(entry.id,'plugin')).components.hooks.map(item=>item.event),['SessionStart','Stop']);
-  assert.deepEqual(entry.providers,['claude-code','codex','dsh']);
+  assert.deepEqual(entry.providers,RUNTIME_IDS);
 });
 test('bundled MCP splits into independent selection; invalid paths and symlinks never partially install',async t=>{
   const {root,market}=await fixture(t),source=await plugin(root,'invalid',1,{mcpServers:{service:{command:'node'}}});
@@ -515,7 +516,7 @@ test('Store freezes selected market versions and rejects mixed legacy paths', as
   const employee = store.createAgent({name:'Selected',role:'需求分析师',runtime});
   const team = store.createTeam({name:'Market team',memberAgentIds:[employee.id,store.listAgents().find(item=>item.kind==='manager').id]});
   const flow = store.createWorkflowTemplate({name:'Market task',nodes:[{id:'work',title:'Work',staffingGuidance:'能使用所选技能完成本地文件交付的成员',dependsOn:[],artifactPaths:['docs/work/']}]});
-  const task = store.createTask({title:'Freeze',objective:'Check',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id,nodeAssignments:{work:employee.id}});
+  const task = store.createTask({managerAgentId:'system_project_manager',title:'Freeze',objective:'Check',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id,nodeAssignments:{work:employee.id}});
   store.updateAgent(employee.id,{runtime:{provider:'claude-code',...await market.resolve({pluginIds:[],mcpIds:[]},'claude-code')}});
   assert.deepEqual(task.memberSnapshots[0].runtime.extensionSelection.pluginIds,[entry.id]);
   store.removeExtension({kind:'plugin',id:entry.id,name:entry.name});

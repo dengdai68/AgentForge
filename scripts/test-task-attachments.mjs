@@ -26,7 +26,7 @@ if(real && process.env.AGENTFORGE_ROLE_EXTENSIONS_REAL==='1') {
 }
 const runs=[];
 for(const name of real?['真实附件']:['附件 minimal','附件 warm','CLI附件']){
- const task=store.createTask({title:name,objective:'先询问人类提供参考图片和文本文件，收到后读取它们并报告内容，然后提交验收。',memberAgentIds:['system_project_manager']});const run=store.createRun(task.id);
+ const task=store.createTask({managerAgentId:'system_project_manager',title:name,objective:'先询问人类提供参考图片和文本文件，收到后读取它们并报告内容，然后提交验收。',memberAgentIds:['system_project_manager']});const run=store.createRun(task.id);
  if(!real){store.initializeDispatches(run.id);const d=store.claimDispatch(run.id),trace=store.createTrace(run.id,{agentId:run.manager.id,workflowNodeId:d.workflowNodeId,type:d.purpose});store.attachDispatchTrace(d.id,trace.id);store.askQuestion(d.id,{audience:'human',question:'请提供参考图片和文件'},trace.id);store.completeTrace(trace.id);}
  runs.push({task,run});
 }

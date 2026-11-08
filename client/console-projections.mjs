@@ -1,3 +1,4 @@
+import {runtimeLabel} from "./runtime-providers.mjs";
 // Browser-safe view models shared by Web and desktop hosts. These functions only
 // project already-authoritative API payloads; they never own domain state.
 
@@ -262,7 +263,7 @@ const asArray = (value) => Array.isArray(value) ? value : [];
 const escapeRegExp = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function providerLabel(agent) {
-  return agent?.runtime?.provider === "dsh" ? "DeepSeek Harness" : agent?.runtime?.provider === "codex" ? "Codex" : "Claude Code";
+  return runtimeLabel(agent?.runtime?.provider || "claude-code");
 }
 
 export function formatRelativeTime(iso, now = Date.now()) {

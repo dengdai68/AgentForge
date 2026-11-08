@@ -612,7 +612,7 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
 
 export function employeeDetailMarkup(member, {renderAvatar = () => '', renderContent = escapeHtml, closeControl = ''} = {}) {
   const roles=member.roles || member.roleSnapshots || [];
-  return `<section class="employee-profile"><header class="employee-profile-identity">${renderAvatar(member)}<div class="employee-profile-name"><h3>${escapeHtml(member.name)}</h3>${member.kind==='manager'?'<span class="employee-profile-kind">项目经理</span>':''}</div>${closeControl}</header>
+  return `<section class="employee-profile"><header class="employee-profile-identity">${renderAvatar(member)}<div class="employee-profile-name"><h3>${escapeHtml(member.name)}</h3>${member.taskRole==='manager'?'<span class="employee-profile-kind">本次经理</span>':''}</div>${closeControl}</header>
     <section class="employee-profile-section"><h4>简介</h4><p class="employee-profile-description">${escapeHtml(member.description || '暂无简介')}</p></section>
     <section class="employee-profile-section"><h4>工作提示词</h4><div class="employee-profile-prompt communication-markdown">${renderContent(member.systemPrompt || '未填写')}${roles.map(role=>`<section class="employee-role-prompt"><h5>${escapeHtml(role.name)}</h5>${renderContent(role.prompt || '未填写')}</section>`).join('')}</div></section>
   </section>`;

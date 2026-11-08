@@ -119,7 +119,7 @@ try {
     consoleLog('PASS native memory and system instructions: ' + agent.runtime.provider);
   }
   if(nativeSkills)await api('/api/agents/'+developer.id,{systemPrompt:developer.systemPrompt+' 开发前执行原生能力验证，输出 docs/develop/native-proof.json。',runtime:{profileId:profiles['claude-code'],extensionSelection:{pluginIds:[nativePlugin.id],mcpIds:[]}}},'PUT');
-  const created = existingTask || await api('/api/tasks', { title: 'PROMPT-E2E｜真实代码与独立测试', objective: '执行完整的标题整理器开发与独立测试，不只写方案。先由经理向人类澄清范围，得到回答再派工。禁止修改外部项目、凭据或远程发布。实现者先执行预期失败探针并记录，再完成真实代码与测试；独立测试者实际测试后交接，经理提交人类验收。', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
+  const created = existingTask || await api('/api/tasks', {managerAgentId:'system_project_manager', title: 'PROMPT-E2E｜真实代码与独立测试', objective: '执行完整的标题整理器开发与独立测试，不只写方案。先由经理向人类澄清范围，得到回答再派工。禁止修改外部项目、凭据或远程发布。实现者先执行预期失败探针并记录，再完成真实代码与测试；独立测试者实际测试后交接，经理提交人类验收。', memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   const task = created.task || created; const started = existingRun ? { run: existingRun } : await api('/api/tasks/' + task.id + '/run', {}); const runId = started.run?.id || started.id;
   evidence.task = { taskId: task.id, runId };
   const state = () => api('/api/runs/' + runId + '/workspace?view=summary');
@@ -200,7 +200,7 @@ try {
   // Controlled failure of the fixed CLI command in this isolated PATH.
   const savedWrapper = await readFile(join(root,'claude'));
   await writeFile(join(root,'claude'), '#!/bin/sh\nexec ' + JSON.stringify(absentCli) + ' "$@"\n', {mode:0o700});
-  const failureTaskResult=await api('/api/tasks',{title:'CLI 缺失原始错误验证',objective:'仅验证缺失可执行文件，不执行任何业务。',memberAgentIds: failureTeam.memberAgentIds,workflowTemplateId:flow.id});
+  const failureTaskResult=await api('/api/tasks',{managerAgentId:'system_project_manager',title:'CLI 缺失原始错误验证',objective:'仅验证缺失可执行文件，不执行任何业务。',memberAgentIds: failureTeam.memberAgentIds,workflowTemplateId:flow.id});
   const failureTask=failureTaskResult.task || failureTaskResult;
   const failureStarted=await api('/api/tasks/'+failureTask.id+'/run',{});
   const failureRunId=failureStarted.run?.id || failureStarted.id;

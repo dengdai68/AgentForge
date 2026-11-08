@@ -164,7 +164,7 @@ try {
   console.log('PASS role edit applies to subsequent deliveries (resumed reply probe: ' + evidence.roleEdit.resumedReplyFollowed + ')');
 
   // A real task freezes the role text; the unbound manager stays unpolluted.
-  const { task } = await api('/api/tasks', { title: '角色任务验证', objective: `经理直接安排 probe_cc 给「角色绑定Claude」、probe_cx 给「角色绑定Codex」；成员在交接中写出自己角色要求的探针前缀。不要向人类提问，不要求文件。`, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
+  const { task } = await api('/api/tasks', {managerAgentId:'system_project_manager', title: '角色任务验证', objective: `经理直接安排 probe_cc 给「角色绑定Claude」、probe_cx 给「角色绑定Codex」；成员在交接中写出自己角色要求的探针前缀。不要向人类提问，不要求文件。`, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id });
   const frozen = (await api('/api/tasks', null, 'GET')).tasks.find(item => item.id === task.id);
   assert.equal(frozen.memberSnapshots.find(item => item.id === ccBound.id).roleSnapshots[0].prompt, rolePromptV2, 'task froze the current role text');
   // The live role changes after freezing; the frozen task must keep V2.

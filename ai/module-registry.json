@@ -187,7 +187,7 @@
       "path": "server/prompts.mjs",
       "kind": "pure-composition",
       "owner": "orchestration",
-      "purpose": "Compose separate application system instructions and current input for Task and communication calls. Full workflow belongs only to the manager; execution environment is system context. Native sessions own conversation history; Store supplies unacknowledged cross-member messages and content-hashed context deltas; actual model activity acknowledges input even if a turn later fails.",
+      "purpose": "Compose separate application system instructions and current input for Task and communication calls. Only the manager receives a frozen workflow.md reference, never inline graph JSON; execution environment is system context. Native sessions own conversation history; Store supplies unacknowledged cross-member messages and content-hashed context deltas; actual model activity acknowledges input even if a turn later fails.",
       "roleContract": "A bound role's shared prompt arrives as snapshot data (agent.roleSnapshots) and joins the persona system-instruction section for both Task and communication composition; it never enters the current input, and this module never resolves roles itself.",
       "sourceOfTruth": [
         "docs/22-prompt-assembly.md",
@@ -228,7 +228,8 @@
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
       "communicationPrompt": "Keep chat entry and discussion/file-change boundary; remove fixed language and enumerated Git/publish/credential, self/manager and attachment reminder sentences.",
       "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
-      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries."
+      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries.",
+      "workflowCanvas": "Minimal X6 canvas and authenticated CLI share process/condition node types, description/position and directed edges with condition/description; condition branches are interpreted by the manager, never evaluated by the platform. Store derives node relationships, freezes Task definitions and validates dependency-only cycles; ordinary handoffs may loop. Manager Trace context is deterministic private workflow.md; application instructions reference path/SHA only, workers get current-node text."
     },
     {
       "id": "cli.configuration",
@@ -286,7 +287,8 @@
       "fixedRuntimes": "list/get/update/test/models only; model/effort/enabled patch and fixed provider references. Default uses a host-published parent-session-linked credential after endpoint/instance verification; explicit session-file isolates separate login.",
       "employeeConfiguration": "agents help/schema accept business/manager and prompt-based repository guidance; developer/repository writes reject and retired repository metadata is omitted from current employee output. No new ordinary-chat CLI commands.",
       "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action.",
-      "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten."
+      "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
+      "workflowCanvas": "Minimal X6 canvas and authenticated CLI share process/condition node types, description/position and directed edges with condition/description; condition branches are interpreted by the manager, never evaluated by the platform. Store derives node relationships, freezes Task definitions and validates dependency-only cycles; ordinary handoffs may loop. Manager Trace context is deterministic private workflow.md; application instructions reference path/SHA only, workers get current-node text."
     },
     {
       "id": "server.data-reset",
@@ -756,7 +758,8 @@
       "membershipContract": "Tasks freeze independent memberAgentIds with exactly one active manager; no teamId input. Teams are employee collections and need no manager. Employee deletion marks status=deleted/deletedAt, hides current directories and detaches current memberships; frozen in-flight tasks/history remain. See docs/03-domain-model.md.",
       "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action.",
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
-      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries."
+      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries.",
+      "workflowCanvas": "Minimal X6 canvas and authenticated CLI share process/condition node types, description/position and directed edges with condition/description; condition branches are interpreted by the manager, never evaluated by the platform. Store derives node relationships, freezes Task definitions and validates dependency-only cycles; ordinary handoffs may loop. Manager Trace context is deterministic private workflow.md; application instructions reference path/SHA only, workers get current-node text."
     },
     {
       "id": "server.sqlite-persistence",
@@ -842,7 +845,8 @@
           "security"
         ]
       },
-      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
+      "workflowContext": "Per-manager-Trace workflow.md from frozen Task only: pure shared Markdown, private 0600 exclusive create, bounded 1MiB, path/bytes/SHA256 return; never a business Artifact or inline fallback."
     },
     {
       "id": "server.workspace-git",
@@ -1023,7 +1027,8 @@
       },
       "missingManagerDecision": "Missing or invalid coordination fields roll back routing and produce precise persisted feedback to the same member; one automatic protocol correction, then explicit human continuation. The model output file is not a dispatch receipt; business reports and files remain historical facts.",
       "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
-      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries."
+      "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries.",
+      "workflowCanvas": "Minimal X6 canvas and authenticated CLI share process/condition node types, description/position and directed edges with condition/description; condition branches are interpreted by the manager, never evaluated by the platform. Store derives node relationships, freezes Task definitions and validates dependency-only cycles; ordinary handoffs may loop. Manager Trace context is deterministic private workflow.md; application instructions reference path/SHA only, workers get current-node text."
     },
     {
       "id": "client.console-projections",
@@ -1163,7 +1168,7 @@
       "path": "web/manual-graphs.mjs",
       "kind": "presentation",
       "owner": "web",
-      "purpose": "Define read-only X6 node/edge graphs for the developer manual plus fixed template and Task workflow direction maps. ELK computes dynamic workflow layering and orthogonal bend points; manual diagrams retain minimap/navigation while workflow maps are non-interactive fixed overviews, with scoped lifecycle and no domain writes.",
+      "purpose": "Define read-only X6 graphs for the developer manual and workflow overviews. Workflow maps share four-side routing, zoom/pan and local ELK formatting with the editor, preserving saved positions until explicitly formatted; read-only navigation never writes templates or Task snapshots. Manual diagrams retain scoped minimap/navigation.",
       "sourceOfTruth": [
         "docs/01-product-requirements.md",
         "docs/02-system-architecture.md",
@@ -1171,12 +1176,15 @@
         "docs/12-local-diagram-rendering.md"
       ],
       "tests": [
-        "tests/smoke.test.mjs"
+        "tests/smoke.test.mjs",
+        "tests/workflow-editor.test.mjs",
+        "scripts/test-workflow-editor.mjs"
       ],
       "allowedDependencies": [
         "@antv/x6 via /vendor/x6.js",
         "elkjs via /vendor/elk.js",
-        "web/styles.css"
+        "web/styles.css",
+        "web/workflow-layout.mjs"
       ],
       "forbiddenDependencies": [
         "/api/* mutation",
@@ -1197,7 +1205,8 @@
           "accessibility",
           "visual token"
         ]
-      }
+      },
+      "workflowCanvas": "Minimal X6 canvas and authenticated CLI share process/condition node types, description/position and directed edges with condition/description; condition branches are interpreted by the manager, never evaluated by the platform. Store derives node relationships, freezes Task definitions and validates dependency-only cycles; ordinary handoffs may loop. Manager Trace context is deterministic private workflow.md; application instructions reference path/SHA only, workers get current-node text."
     },
     {
       "id": "tests",
@@ -1851,6 +1860,305 @@
           "cancellation"
         ]
       }
+    },
+    {
+      "id": "client.workflow-description",
+      "path": "client/workflow-description.mjs",
+      "kind": "pure-projection",
+      "owner": "client-platform",
+      "purpose": "Project frozen workflow nodes and connections into deterministic Markdown shared by canvas preview and Run Files; no execution or domain state.",
+      "sourceOfTruth": [
+        "docs/03-domain-model.md",
+        "docs/22-prompt-assembly.md"
+      ],
+      "tests": [
+        "tests/workflow-editor.test.mjs"
+      ],
+      "allowedDependencies": [],
+      "forbiddenDependencies": [
+        "filesystem",
+        "Store",
+        "Provider"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "client/README.md",
+          "docs/22-prompt-assembly.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "web.workflow-editor",
+      "path": "web/workflow-editor.mjs",
+      "kind": "renderer",
+      "owner": "client-platform",
+      "purpose": "Minimal X6 canvas with title/prompt-only sidebar, compact nodes, selection-anchored deletion, viewport-stable collision-free insertion and keyboard graph operations; ports appear on hover, visible keyboard focus or pointer press through scoped CSS. Preserves supplementary configuration and saves through shared authenticated commands.",
+      "sourceOfTruth": [
+        "docs/06-design-system.md",
+        "docs/21-configuration-cli.md"
+      ],
+      "tests": [
+        "tests/workflow-editor.test.mjs",
+        "scripts/test-workflow-editor.mjs"
+      ],
+      "allowedDependencies": [
+        "client/workflow-description.mjs",
+        "@antv/x6",
+        "web/workflow-layout.mjs"
+      ],
+      "forbiddenDependencies": [
+        "SQLite",
+        "Provider"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "web/README.md",
+          "docs/06-design-system.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "scripts.workflow-editor",
+      "path": "scripts/test-workflow-editor.mjs",
+      "kind": "acceptance",
+      "owner": "quality",
+      "purpose": "Isolated source/packaged Electron and authenticated CLI workflow round trips, two themes and narrow/wide layouts, compact node geometry, stable insertion, canvas deletion, keyboard connections, title/prompt editing, metadata preservation, Markdown preview and failed-save recovery.",
+      "sourceOfTruth": [
+        "docs/06-design-system.md",
+        "docs/21-configuration-cli.md"
+      ],
+      "tests": [],
+      "allowedDependencies": [
+        "playwright-core"
+      ],
+      "forbiddenDependencies": [
+        "operator-instance"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "scripts/README.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "server.runtime.mcp-tools",
+      "path": "server/runtime/mcp-tools.mjs",
+      "kind": "runtime-adapter",
+      "owner": "runtime-platform",
+      "purpose": "Authenticated on-demand MCP tool discovery through installed immutable configuration; bounded single-flight cache, protocol timeout, safe diagnostics and transport cleanup; never invokes tools.",
+      "sourceOfTruth": [
+        "docs/15-employee-runtime-configuration.md",
+        "docs/21-configuration-cli.md"
+      ],
+      "tests": [
+        "tests/mcp-tools.test.mjs"
+      ],
+      "allowedDependencies": [
+        "@modelcontextprotocol/sdk",
+        "server/runtime/marketplace.mjs",
+        "server/runtime/cli-environment.mjs",
+        "server/diagnostics.mjs"
+      ],
+      "forbiddenDependencies": [
+        "SQLite",
+        "Store"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "server/README.md",
+          "docs/15-employee-runtime-configuration.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "web.workflow-layout",
+      "path": "web/workflow-layout.mjs",
+      "kind": "presentation",
+      "owner": "client-platform",
+      "purpose": "Shared workflow node geometry, orthogonal route simplification, local ELK formatting and accessible viewport zoom; no execution or business validation.",
+      "sourceOfTruth": [
+        "docs/12-local-diagram-rendering.md",
+        "docs/06-design-system.md"
+      ],
+      "tests": [
+        "tests/workflow-editor.test.mjs",
+        "scripts/test-workflow-editor.mjs"
+      ],
+      "allowedDependencies": [
+        "elkjs",
+        "@antv/x6"
+      ],
+      "forbiddenDependencies": [
+        "Store",
+        "Provider",
+        "SQLite"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "web/README.md",
+          "docs/12-local-diagram-rendering.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "client.runtime-providers",
+      "path": "client/runtime-providers.mjs",
+      "kind": "contract",
+      "owner": "runtime-platform",
+      "purpose": "Shared fixed Runtime provider IDs, display labels, CLI executable discovery and supported effort vocabulary.",
+      "sourceOfTruth": [
+        "docs/29-runtime-providers.md",
+        "docs/15-employee-runtime-configuration.md",
+        "docs/21-configuration-cli.md"
+      ],
+      "tests": [
+        "tests/portable-runtime.test.mjs",
+        "scripts/test-portable-runtimes.mjs"
+      ],
+      "allowedDependencies": [
+        "client/runtime-providers.mjs",
+        "server/runtime/local-cli.mjs",
+        "node:*"
+      ],
+      "forbiddenDependencies": [
+        "Store",
+        "SQLite"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/29-runtime-providers.md",
+          "server/runtime/README.md",
+          "client/README.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "server.runtime.portable-cli",
+      "path": "server/runtime/portable-cli.mjs",
+      "kind": "runtime-adapter",
+      "owner": "runtime-platform",
+      "purpose": "Native headless Cursor, Gemini, Qwen, Kimi, Pi and OpenCode invocation, credential-reference-preserving isolated native configuration, trusted headless workspaces, explicit session resume and sanitized public-thinking/event normalization.",
+      "sourceOfTruth": [
+        "docs/29-runtime-providers.md",
+        "docs/15-employee-runtime-configuration.md",
+        "docs/21-configuration-cli.md"
+      ],
+      "tests": [
+        "tests/portable-runtime.test.mjs",
+        "scripts/test-portable-runtimes.mjs"
+      ],
+      "allowedDependencies": [
+        "client/runtime-providers.mjs",
+        "server/runtime/local-cli.mjs",
+        "node:*",
+        "server/runtime/portable-extensions.mjs"
+      ],
+      "forbiddenDependencies": [
+        "Store",
+        "SQLite"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/29-runtime-providers.md",
+          "server/runtime/README.md",
+          "client/README.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "server.runtime.portable-extensions",
+      "path": "server/runtime/portable-extensions.mjs",
+      "kind": "runtime-adapter",
+      "owner": "runtime-platform",
+      "purpose": "Validate selected immutable market bindings and project native Skill/MCP configuration for six portable CLI runtimes without loading ambient extensions.",
+      "sourceOfTruth": [
+        "docs/29-runtime-providers.md",
+        "docs/15-employee-runtime-configuration.md",
+        "docs/21-configuration-cli.md"
+      ],
+      "tests": [
+        "tests/portable-extensions.test.mjs",
+        "scripts/test-portable-extensions-real.mjs"
+      ],
+      "allowedDependencies": [
+        "client/runtime-providers.mjs",
+        "server/runtime/extensions.mjs",
+        "server/runtime/marketplace.mjs",
+        "server/runtime/plugin-compatibility.mjs",
+        "node:*",
+        "js-yaml",
+        "server/runtime/pi-agents.mjs"
+      ],
+      "forbiddenDependencies": [
+        "Store",
+        "SQLite"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/29-runtime-providers.md",
+          "server/runtime/README.md",
+          "client/README.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "server.runtime.pi-agents",
+      "path": "server/runtime/pi-agents.mjs",
+      "kind": "runtime-adapter",
+      "owner": "runtime-platform",
+      "purpose": "Selected Pi plugin extension invoking independent native Pi sessions with frozen source instructions, explicit basic tools, model inheritance and cancellation; no domain state or global installation.",
+      "sourceOfTruth": [
+        "docs/29-runtime-providers.md",
+        "docs/15-employee-runtime-configuration.md",
+        "docs/21-configuration-cli.md"
+      ],
+      "tests": [
+        "tests/pi-plugin-agents.test.mjs",
+        "tests/portable-extensions.test.mjs",
+        "scripts/test-portable-extensions-real.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "typebox (provided by native Pi extension loader)"
+      ],
+      "forbiddenDependencies": [
+        "Store",
+        "SQLite"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "docs/29-runtime-providers.md",
+          "server/runtime/README.md",
+          "client/README.md",
+          "CHANGELOG.md"
+        ]
+      }
     }
   ],
   "runMemberEditing": "Store.updateRunMembers preserves immutable history via removedParticipantIds; App/CLI tasks members share authenticated PUT and guards. tests/task-members.test.mjs and scripts/test-issue3-ui.mjs/test-issue3-real.mjs verify. History MCP adds list_employees/read_employee using shared configuration.",
@@ -1860,5 +2168,17 @@
   "taskCollaborationAttachments": "Run attachments are immutable Run Files bytes with Store-owned metadata and same-Run message references; authenticated upload/download/image preview, App and CLI message/reply inputs, exact clarification continuation and checked absolute paths in invocation input. tests/task-attachments.test.mjs and scripts/test-task-attachments.mjs cover bytes, ownership, UI and real Claude acceptance.",
   "longRunReadModel": "Store copies use structuredClone without a monolithic JSON intermediary. Orchestrator uses getRunExecutionContext/targeted message reads and hasRunTraces; file HTTP reads use getRunTask/getRunArtifact. Workspace Trace/Artifact employee references stay id/name, avoiding multiplicative prompt/configuration expansion; execution-log history remains separately paginated.",
   "roleExtensionBindings": "Role extensionSelection joins employee direct selection for new task/chat snapshots. Internal per-provider refs stay in Store; files stay on disk. App/CLI CRUD/schema and market replacements/deletion synchronized; extension-catalog/roles tests and roles-ui acceptance.",
-  "automationDeletion": "Disabled automation deletion terminates executions, stages Run files, atomically removes all linked tasks/runs/triggers; UI confirmation and CLI --yes. Shared multiselect fixed38px and task selectors scroll with body."
+  "automationDeletion": "Disabled automation deletion terminates executions, stages Run files, atomically removes all linked tasks/runs/triggers; UI confirmation and CLI --yes. Shared multiselect fixed38px and task selectors scroll with body.",
+  "taskManagerSelection": {
+    "sourceOfTruth": "docs/03-domain-model.md",
+    "field": "managerAgentId",
+    "scope": "Task and Automation select exactly one active member; employee kind remains stored but has no role semantics; frozen Runs retain their manager.",
+    "tests": [
+      "tests/configuration-catalog.test.mjs",
+      "tests/automations.test.mjs",
+      "tests/configuration-cli.test.mjs",
+      "scripts/test-task-creation.mjs"
+    ]
+  },
+  "nativeModelsAndVideo": "Native CLI catalogs and per-model reasoning capabilities are shared by App/CLI. Current-file video uses authenticated no-follow descriptor streaming with single byte ranges, no transcoding or whole-media buffering; not a new Task execution rule."
 }

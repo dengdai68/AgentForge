@@ -84,7 +84,7 @@ s.confirmRunCompletion(run.id);
 s.addEvent({ type: 'run.failed', runId: run.id, message: 'FLOW_FAILURE_NOTICE：执行失败', data: { error: 'FLOW_OLD_ERROR：一次临时故障' } });
 const scrollRuns = [];
 for (const width of [1320, 760]) {
-  const task = s.createTask({title:`协作回复滚动 ${width}`,objective:'隔离界面回归，不调用 Provider',memberAgentIds:['system_project_manager', analyst.id]});
+  const task = s.createTask({managerAgentId:'system_project_manager',title:`协作回复滚动 ${width}`,objective:'隔离界面回归，不调用 Provider',memberAgentIds:['system_project_manager', analyst.id]});
   const current = s.createRun(task.id);
   s.initializeDispatches(current.id);
   const dispatch = s.claimDispatch(current.id);

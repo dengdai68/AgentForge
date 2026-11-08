@@ -17,7 +17,7 @@ const attachments=[];
 for(const [name,bytes] of [['参考图片.png',imageBytes],['说明文件.txt',fileBytes],['损坏图片.png',Buffer.from('not an image')]])attachments.push(store.registerCommunicationAttachment(chat.id,await files.writeCommunicationAttachment(chat.id,name,bytes)));
 store.sendCommunication(chat.id,{content:'请参考图片和说明文件。',attachmentIds:attachments.map(a=>a.id),clientRequestId:'media-fixture'});
 store.completeCommunication(chat.id,store.claimCommunication(chat.id).id,'已收到参考材料。');
-const auto=store.saveAutomation({title:'素材整理',objective:'读取参考图片与说明文件。\n生成本轮整理结果，并说明需要继续处理的内容。',memberAgentIds:['system_project_manager','agent_analyst'],cron:'0 9 * * *',enabled:false});
+const auto=store.saveAutomation({managerAgentId:'system_project_manager',title:'素材整理',objective:'读取参考图片与说明文件。\n生成本轮整理结果，并说明需要继续处理的内容。',memberAgentIds:['system_project_manager','agent_analyst'],cron:'0 9 * * *',enabled:false});
 const trigger=store.triggerAutomation(auto.id);store.requestHumanAcceptance(trigger.runId);store.close();
 const app=await electron.launch({args:['apps/electron/main.mjs'],env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:180000});
 const evidence={root,cases:[]};console.log('EVIDENCE '+root);

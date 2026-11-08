@@ -3,6 +3,8 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from 'node:url';
 import { runDshSdk } from "./dsh.mjs";
+import {runPortableCli} from './portable-cli.mjs';
+import {PORTABLE_RUNTIME_IDS} from '../../client/runtime-providers.mjs';
 import { runCodexAppServer } from "./codex-app-server.mjs";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline";
@@ -20,7 +22,7 @@ export class RuntimeCancelledError extends Error {
   }
 }
 
-export class RuntimeSessionMissingError extends Error {}
+export class RuntimeSessionMissingError extends Error {constructor(message){super(message);this.name='RuntimeSessionMissingError';}}
 
 // Preserve diagnostic wording. Classification controls scheduling separately;
 // it must never replace the error shown to the operator.
@@ -263,7 +265,7 @@ async function verifyPaths(paths, label) {
   }
 }
 
-async function executeJsonl({ runId, executionKey = runId, command, args, cwd, env, onEvent, normalizeEvent, getFinal, getTerminalFailure = () => null, isBackgroundWaiting = () => false, provider, session, diagnosticPrompt = "", canStart = () => true, apiRetryTimeoutMs = 300000, idleTimeoutMs = 600000 }) {
+async function executeJsonl({ runId, executionKey = runId, command, args, cwd, env, stdin, lineReader, failEarlyAuthentication=false, onEvent, normalizeEvent, getFinal, getTerminalFailure = () => null, isBackgroundWaiting = () => false, provider, session, diagnosticPrompt = "", canStart = () => true, apiRetryTimeoutMs = 300000, idleTimeoutMs = 600000 }) {
   let cancelled = false;
   let cancellationReason = null;
   let stderr = "";
@@ -276,7 +278,8 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
   // Runtime does not know domain state; the caller supplies the lifecycle fence.
   if (!canStart()) throw new RuntimeCancelledError("执行在启动前已暂停或终止");
   if (hasActiveExecution(executionKey)) throw new Error("该执行会话已有本地 Agent 进程在执行");
-  const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(command, args, { cwd, env, stdio: [stdin===undefined?"ignore":"pipe", "pipe", "pipe"] });
+  if(child.stdin){child.stdin.on('error',()=>{});child.stdin.end(stdin);}
   let watchdogError = null;
   let apiRetryTimer = null;
   let idleTimer = null;
@@ -311,13 +314,13 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
   }, runId);
   try {
     child.on("error", (error) => { diagnostic("provider.spawn_error", { error }); spawnFailure = error; });
-    const stdout = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    const stdout = lineReader?lineReader(child.stdout):createInterface({ input: child.stdout, crlfDelay: Infinity });
     const stderrLines = createInterface({ input: child.stderr, crlfDelay: Infinity });
     const stderrTask = (async () => {
       for await (const line of stderrLines) {
         diagnostic("provider.stderr", { text: line });
         stderr = `${stderr}${line}\n`.slice(-8000);
-        if (provider === "Codex" && !sessionObserved && runtimeAuthenticationFailure(line)) stopForWatchdog(runtimeFailureDetail(line));
+        if ((provider === "Codex"||failEarlyAuthentication) && !sessionObserved && runtimeAuthenticationFailure(line)) stopForWatchdog(runtimeFailureDetail(line));
         if (/error|fail|retry|timeout|timed out|429|401|403|502|503|504|ECONN|ENOTFOUND/i.test(line)) {
           await onEvent({providerEventType:"stderr",message:"Provider 诊断详情",data:{auditVersion:2,presentation:"error"},content:executionContent({text:{provider,channel:"stderr",message:line}}, diagnosticPrompt)});
         } else if (!stderrReported) {
@@ -343,14 +346,16 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
         const preSessionError = provider === "Codex" && !sessionObserved && ["error", "turn.failed"].includes(providerEvent.type) ? providerEvent.error?.message || providerEvent.message : null;
         if (preSessionError && runtimeAuthenticationFailure(preSessionError)) stopForWatchdog(runtimeFailureDetail(preSessionError));
         const normalizedEvents = normalizeEvent(providerEvent);
+        if(failEarlyAuthentication&&!sessionObserved&&runtimeAuthenticationFailure(getTerminalFailure()))stopForWatchdog(runtimeFailureDetail(getTerminalFailure()));
         for (const normalized of (Array.isArray(normalizedEvents) ? normalizedEvents : [normalizedEvents]).filter(Boolean)) {
+          if(failEarlyAuthentication&&normalized.providerEventType==='thread.started'&&normalized.data?.sessionId)sessionObserved=true;
           if (providerEvent.type === "thread.started") {
             sessionObserved = true;
             if (session?.resume && providerEvent.thread_id !== session.sessionId) throw new Error("Provider 返回的会话 ID 与当前成员绑定不一致");
           }
           if (providerEvent.type === "system" && providerEvent.subtype === "init" && providerEvent.session_id) {
             sessionObserved = true;
-            if (session && providerEvent.session_id !== session.sessionId) stopForWatchdog("Provider 返回的会话 ID 与当前成员绑定不一致");
+            if (session && (!failEarlyAuthentication || session.resume) && providerEvent.session_id !== session.sessionId) stopForWatchdog("Provider 返回的会话 ID 与当前成员绑定不一致");
           }
           const isApiRetry = normalized.providerEventType === "system" && normalized.data?.subtype === "api_retry" || provider === "Codex" && providerEvent.type === "error";
           if (isApiRetry && !apiRetryTimer) {
@@ -385,7 +390,7 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
     if (cancelled) throw new RuntimeCancelledError(cancellationReason || "Agent 进程已被终止");
     if (spawnFailure) throw spawnFailure;
     if (watchdogError) throw watchdogError;
-    if (exit.code !== 0 && session?.resume && !sessionObserved && /(?:^|\n)(?:no conversation found|session (?:not found|does not exist)|could not find (?:a |the )?session)/i.test(stderr)) throw new RuntimeSessionMissingError(`${provider} 未找到指定会话`);
+    if (exit.code !== 0 && session?.resume && !sessionObserved && /(?:^|\n)(?:no conversation found|session (?:not found|does not exist)|could not find (?:a |the )?session)|session ["'][^"']+["'] not found/i.test(stderr)) throw new RuntimeSessionMissingError(`${provider} 未找到指定会话`);
     if (exit.code !== 0 && session && !session.resume && !sessionObserved && stderr.includes(`Session ID ${session.sessionId} is already in use`)) {
       const error = new Error("指定的新会话已存在，需要显式续接"); error.code = "SESSION_ALREADY_EXISTS"; throw error;
     }
@@ -400,6 +405,10 @@ async function executeJsonl({ runId, executionKey = runId, command, args, cwd, e
     return { finalText };
   } finally {
     stopWatchdogs();
+    if(!closed){
+      child.kill('SIGTERM');const force=setTimeout(()=>{if(!closed)child.kill('SIGKILL');},3000);force.unref();
+      try{await exitTask;}finally{clearTimeout(force);}
+    }
     unregister();
   }
 }
@@ -607,3 +616,11 @@ export function runClaudeCodeCli(input) { return loggedInvocation(input, invokeC
 export function runCodexCli(input) { return loggedInvocation(input, invokeCodexCli); }
 
 export function runDshCli(input) { return loggedInvocation(input, value => runDshSdk(value, { content: executionContent, cancelledError: message => new RuntimeCancelledError(message), missingSessionError: message => new RuntimeSessionMissingError(message) })); }
+
+export function runRuntime(input) {
+  if(input.runtime.provider==='claude-code')return runClaudeCodeCli(input);
+  if(input.runtime.provider==='codex')return runCodexCli(input);
+  if(input.runtime.provider==='dsh')return runDshCli(input);
+  if(PORTABLE_RUNTIME_IDS.includes(input.runtime.provider))return loggedInvocation(input,value=>runPortableCli(value,{execute:executeJsonl,content:executionContent,missingSessionError:message=>new RuntimeSessionMissingError(message)}));
+  throw new Error(`不支持的真实运行时：${input.runtime.provider}`);
+}

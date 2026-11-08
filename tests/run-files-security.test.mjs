@@ -8,6 +8,15 @@ import { createFixtureStore as createStore } from "./fixture-store.mjs";
 import { executeRun } from "../server/orchestrator.mjs";
 import { createRuntimeConfiguration } from "../server/runtime/configuration.mjs";
 
+test('working video metadata and descriptor streams do not read full media or weaken path checks',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'af-video-'));t.after(()=>rm(root,{recursive:true,force:true}));const task={workspacePath:root},files=createRunFiles({root:join(root,'audit')});
+ const bytes=Buffer.concat([Buffer.from([0,0,0,24]),Buffer.from('ftypisom'),Buffer.alloc(1024*1024)]);await writeFile(join(root,'sample.mp4'),bytes);
+ const meta=await files.readWorkingFile(task,'sample.mp4');assert.equal(meta.video,true);assert.equal(meta.content,null);assert.equal(meta.bytes,bytes.length);
+ const video=await files.openWorkingVideo(task,'sample.mp4');assert.equal(video.mediaType,'video/mp4');const chunks=[];for await(const chunk of video.handle.createReadStream({start:4,end:11}))chunks.push(chunk);assert.equal(Buffer.concat(chunks).toString(),'ftypisom');
+ await writeFile(join(root,'invalid.mp4'),'not a video');await symlink(join(root,'sample.mp4'),join(root,'linked.mp4'));
+ for(const path of ['invalid.mp4','linked.mp4','../sample.mp4','.env','audit','missing.mp4'])await assert.rejects(files.openWorkingVideo(task,path));
+});
+
 test("working downloads preserve complete bytes beyond preview size and retain file-read boundaries", async () => {
   const root = await mkdtemp(join(tmpdir(), "af-download-"));
   try {
@@ -219,7 +228,7 @@ const result = { kind: "node_result", summary: "fixture delivery", artifacts: []
 if (prompt.includes('"purpose":"delivery_review"')) result.deliveryReview = { verdict: "pass", restartFromNodeId: "verify", findings: ["fixture evidence reviewed"] };
 else if (prompt.includes("任务级项目经理")) result.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "verify", rationale: "fixture routes the remaining responsibility" };
 else { mkdirSync("docs/verify", { recursive: true }); mkdirSync("docs/testing", { recursive: true }); writeFileSync("docs/verify/marker.md", "x".repeat(524289)); writeFileSync("docs/testing/review.md", "# Fixture test report"); }
-if(result.managerDecision?.nextNodeId) result.managerDecision.nextAgentId=JSON.parse((prompt.split("可咨询角色：")[1]||"[]").split(String.fromCharCode(10))[0]).find(row=>row.type==="agent" && row.kind!=="manager")?.id;
+if(result.managerDecision?.nextNodeId) result.managerDecision.nextAgentId=JSON.parse((prompt.split("可咨询角色：")[1]||"[]").split(String.fromCharCode(10))[0]).find(row=>row.type==="agent" && row.taskRole!=="manager")?.id;
 console.log(JSON.stringify({ type: "result", result: JSON.stringify(result) }));
 `);
     await chmod(executable, 0o755);
@@ -228,7 +237,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(result) }));
     const verifier = store.createAgent({ name: "验证员工", role: "验证工程师", runtime: { provider: "claude-code", executable } });
     const team = store.createTeam({ name: "工作目录验证团队", memberAgentIds: [verifier.id,store.listAgents().find(item=>item.kind==='manager').id] });
     const workflow = store.createWorkflowTemplate({ name: "工作目录验证", nodes: [{ id: "verify", title: "验证", staffingGuidance: "验证工程师", artifactPaths: ["docs/verify/", "docs/testing/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "工作目录标记运行", objective: "验证受管工作目录启动", memberAgentIds: team.memberAgentIds, workflowTemplateId: workflow.id, nodeAssignments: { verify: verifier.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({managerAgentId:'system_project_manager', title: "工作目录标记运行", objective: "验证受管工作目录启动", memberAgentIds: team.memberAgentIds, workflowTemplateId: workflow.id, nodeAssignments: { verify: verifier.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
 
     await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });

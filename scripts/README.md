@@ -1,5 +1,7 @@
 # 工程脚本
 
+test-workflow-editor.mjs 同时核对两种节点在两主题、宽窄窗口的端口默认隐藏、悬停显示、键盘焦点和拖动期间显示、松开恢复；保留原有鼠标/键盘四边连线验收，不调用真实模型即可核对视觉变化。
+
 性能改造验收：`test-task-creation.mjs` 验证服务端分页后的 App/CLI 管理功能；`test-communication-workbench.mjs` 检查有界历史、附件和窄屏控制台（保留标题，隐藏消息正文）。`test-packaged-electron.mjs` 在隔离 HOME 中额外验证真实 ASAR 的 sharp 原生缩略图解码与诊断 Worker 写入；`AGENTFORGE_PACKAGED_APP` 可指向临时构建包，不安装到操作者实例。`AGENTFORGE_TASK_PARALLEL_REAL=1 node scripts/test-task-parallel-real.mjs` 验证真实并行、续接与人类验收。合成基准结果和逐项闭环见性能审查报告及 docs/28。
 
 仓库更名为 `dengdai68/AgentForge`：应用更新 API、严格附件来源、设置 GitHub 链接与打包发布配置使用新地址；应用身份、数据目录和 CLI 业务协议保持不变。README 仅介绍能力，安装/开发入口见 CONTRIBUTING。
@@ -175,3 +177,30 @@ test-roles-ui 验证角色扩展选择及多选控件固定高度；test-automat
 `AGENTFORGE_COLLABORATION_SCROLL_ONLY=1 node scripts/test-collaboration-flow.mjs` 定向验证协作发送的阅读状态：1320/760px、历史页回复成功切回最新并滚到底部、失败保留历史/草稿/位置，以及“最新”按钮定位。使用暂停 Run 的真实澄清 HTTP 回复，核对仍暂停且 Trace 为零，不调用 Provider；失败为明确的 HTTP 拒绝夹具。
 
 `AGENTFORGE_BRAND_ICONS_ONLY=1 node scripts/test-brand-presentation.mjs` 专项验证应用图标：极简/暖白主题、1320/760px 侧栏、透明圆角、无 CSS 边框与白色底板、原生 18/36px 模板及 Dock 留白。复用综合品牌脚本的图标断言，跳过员工/市场/目录/弹窗等非图标场景；`AGENTFORGE_BRAND_APP` 可指定构建包，数据、登录与截图仍全部隔离。
+
+
+`node scripts/test-workflow-editor.mjs`：隔离Electron/真实认证HTTP和CLI，实际拖线、节点拖动/正文、失败保存保留、双主题1320/760、模板编辑不改冻结任务、CLI创建/编辑/删除与App回读。`AGENTFORGE_WORKFLOW_EDITOR_REAL=1` 另运行真实Claude完整任务，经理读取仅文件包含的随机连线标记，员工交付并核对文件，最终由测试操作者在UI确认完成；使用既有Claude原生配置，不输出或改写凭据。所有证据在忽略的.data/workflow-editor-*。
+
+工作流分支：nodes.type=process/condition，edges.condition为自然语言条件（最多2000字符），默认流程/空条件；App/CLI同协议并冻结。条件节点菱形、经理选择满足条件的一条分支；预览返回保留画布有效尺寸。test-workflow-editor覆盖反复切换、宽窄布局、类型切换与分支保存回读。
+
+`AGENTFORGE_WORKFLOW_EDITOR_APP=/absolute/path/AgentForge.app node scripts/test-workflow-editor.mjs` 对构建包运行同一工作流验收；packaged数据放隔离HOME的.agentforge/desktop，并隔离旧Chromium目录。覆盖标题位置、两字段属性栏、2/3节点、连续添加不移动旧图/不重叠、画布删除、键盘连线、隐藏补充字段不丢失、文本预览和CLI回读。
+
+`test-workflow-editor.mjs`核对工作流标题输入480px上限、两主题与1320/760窗口画布交互；REAL模式通过CLI tasks create --workflow NAME --start执行真实条件分支，并在客户端验收。
+
+test-task-creation增加任务/自动化★单选经理、业务员工协调、删除后重选和编辑回读，并以真实stdio MCP验证详情工具查询、搜索、schema及刷新；两主题宽窄布局。test-workflow-editor的REAL验收从CLI显式指定kind=business员工为经理，真实执行条件分支后客户端验收。
+
+test-task-creation验证连接配置不可折叠且位于工具之前、23项全部显示且无搜索/分页/schema控件及刷新，员工卡片移除默认模型/思考摘要；test-workflow-editor核对两主题宽窄下32px标题输入与焦点环完整可见。纯呈现变化，无CLI/API契约变化。
+
+test-task-creation补充11名已选员工及长姓名的换行、完整可见、经理切换与移除后保存验证，自动化新建/编辑同样支持多行；MCP连接配置必须是静态section且无summary。
+
+test-workflow-editor覆盖普通节点鼠标/键盘第二出口拒绝及显式转条件、四边端口拖动与App/CLI回读、ELK整理保存、30节点只读缩放/本地整理不写回、宽窄双主题和错误草稿；REAL仍完成真实分支任务和人类验收。
+
+test-portable-runtimes.mjs 验证九项 App/CLI Runtime 配置和员工绑定；真实 Provider 模式独立记录安装/账号阻塞，不将协议夹具当真实模型。
+
+scripts/test-portable-extensions-real.mjs 需要 AGENTFORGE_PORTABLE_EXTENSIONS_REAL=1，可用 AGENTFORGE_PORTABLE_PROVIDERS 指定集合；实际调用模型，验证 Skill/相对资源/stdio、HTTP、SSE MCP 及原会话续接。test-portable-runtimes 支持 AGENTFORGE_PORTABLE_EXTENSIONS=1 进行角色继承与真实完整任务验收。
+
+上述两个 portable 验证脚本均支持 AGENTFORGE_PORTABLE_AGENT_PROOF=1，额外调用原生独立子代理并核对其实际产物；扩展脚本验证两轮不同随机挑战和原会话续接，完整任务脚本验证角色继承直到客户端人类确认。Cursor 使用无工具约束源，其他目标使用显式 Read/Bash，不能将 Cursor 此项通过宣称为源工具约束兼容。
+
+test-portable-runtimes 支持 AGENTFORGE_PORTABLE_EFFORT，真实模式先经 CLI 查询原生目录、在 App 选择模型和档位并保存回读，再执行完整任务/续接/确认。AGENTFORGE_VIDEO_PROOF=1 额外生成隔离 H264 视频，验证播放、seek、Range/416/认证及宽窄布局；可对签名包运行。
+
+正式包验收 test-packaged-electron 从共享 RUNTIME_IDS 核对九项配置，任务创建显式选择所选成员中的经理；协议夹具按 taskRole 派工，不依赖员工类型或已移除的全量 Trace 上下文。真实模型验收仍独立记录。

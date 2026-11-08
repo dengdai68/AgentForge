@@ -13,7 +13,7 @@ async function fixture(t) {
  const root=await mkdtemp(join(tmpdir(),'af-task-attachment-')),databasePath=join(root,'state.sqlite');
  const store=createCatalogFixtureStore({databasePath,workspaceRoot:join(root,'work')});
  t.after(async()=>{store.close();await rm(root,{recursive:true,force:true});});
- const task=store.createTask({title:'附件',objective:'读取上传内容',memberAgentIds:['system_project_manager','agent_analyst']});
+ const task=store.createTask({managerAgentId:'system_project_manager',title:'附件',objective:'读取上传内容',memberAgentIds:['system_project_manager','agent_analyst']});
  return {root,databasePath,store,task,run:store.createRun(task.id),files:createRunFiles({root:join(root,'files')})};
 }
 test('task attachment messages keep original bytes, ownership, frozen references and clarification routing',async t=>{
@@ -21,7 +21,7 @@ test('task attachment messages keep original bytes, ownership, frozen references
  const bytes=Buffer.from([0,255,128,13,10,1]);
  const record=store.registerRunAttachment(run.id,await files.writeRunAttachment(run.id,'资料.bin',bytes));
  assert.deepEqual(await files.readRunAttachment(run.id,record),bytes);
- const other=store.createRun(store.createTask({title:'其他',objective:'不读取前一任务',memberAgentIds:['system_project_manager']}).id);
+ const other=store.createRun(store.createTask({managerAgentId:'system_project_manager',title:'其他',objective:'不读取前一任务',memberAgentIds:['system_project_manager']}).id);
  assert.throws(()=>store.submitHumanMessage(other.id,{content:'',attachmentIds:[record.id]}),/不属于/);
  assert.equal(store.getRunWorkspace(other.id).messages.length,0);
  assert.throws(()=>store.submitHumanMessage(run.id,{content:'',attachmentIds:Array(11).fill(record.id)}),/10/);
@@ -49,7 +49,7 @@ test('task uploads reject oversized, path traversal and symlink storage',async t
 });
 test('long-run scheduling reads bounded facts without expanding employee prompts or audit history',async t=>{
  const {store}=await fixture(t);store.updateAgent('system_project_manager',{systemPrompt:'large employee prompt '.repeat(8000)});
- const task=store.createTask({title:'长任务',objective:'复现重复展开',memberAgentIds:['system_project_manager']});const run=store.createRun(task.id);
+ const task=store.createTask({managerAgentId:'system_project_manager',title:'长任务',objective:'复现重复展开',memberAgentIds:['system_project_manager']});const run=store.createRun(task.id);
  store.transaction(()=>{for(let i=0;i<100;i++){
   const trace=store.createTrace(run.id,{agentId:run.manager.id,workflowNodeId:task.workflowSnapshot.nodes[0].id,type:'manager'});store.completeTrace(trace.id);
   store.addEvent({type:'runtime.event',runId:run.id,message:'audit',data:{auditVersion:2,payload:'large log '.repeat(1000)}});

@@ -11,7 +11,7 @@ async function setup(t) {
   const root = await mkdtemp(join(tmpdir(), 'af-parallel-'));
   const store = createCatalogFixtureStore({ workspaceRoot: join(root, 'work') });
   t.after(async () => { store.close(); await rm(root, {recursive:true,force:true}); });
-  const task = store.createTask({ title:'并行任务', objective:'独立成员并行', memberAgentIds:store.listTeams()[0].memberAgentIds, workflowTemplateId:'software_delivery' });
+  const task = store.createTask({managerAgentId:'system_project_manager', title:'并行任务', objective:'独立成员并行', memberAgentIds:store.listTeams()[0].memberAgentIds, workflowTemplateId:'software_delivery' });
   return {store,root,task,run:store.createRun(task.id)};
 }
 const assignment = (id,node='requirements') => ({nextAgentId:id,nextNodeId:node,instruction:`请 ${id} 完成独立工作`});
@@ -86,7 +86,7 @@ test('controlled dispatch loop overlaps A/B and runs C from A result before B fi
  await writeFile(executable,`#!/usr/bin/env node
 import {existsSync,writeFileSync,readFileSync} from 'node:fs';
 const prompt=process.argv.at(-1), system=readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file')+1],'utf8');
-const roster=JSON.parse(system.match(/可咨询角色：(.*)/)[1]);const manager=roster.find(x=>x.kind==='manager').id;
+const roster=JSON.parse(system.match(/可咨询角色：(.*)/)[1]);const manager=roster.find(x=>x.taskRole==='manager').id;
 const role=system.match(/你是「([^」]+)」/)[1];let result;
 if(role.includes('项目经理')) {
  if(!existsSync('started')){writeFileSync('started','1');result={summary:'同时分工',managerDecision:{assignments:[{nextNodeId:'requirements',nextAgentId:'agent_analyst',instruction:'A 独立工作'},{nextNodeId:'development',nextAgentId:'agent_engineer',instruction:'B 独立工作'}]}};}
@@ -101,7 +101,7 @@ if(role.includes('项目经理')) {
 console.log(JSON.stringify({type:'result',is_error:false,result:JSON.stringify(result)}));
 `,{mode:0o700});
  for(const agent of store.listAgents())store.updateAgent(agent.id,{runtime:{provider:'claude-code',executable}});
- const next=store.createTask({title:'并行实调度',objective:'A B 独立，C 在 A 后',memberAgentIds:task.memberAgentIds,workflowTemplateId:task.workflowTemplateId});const run=store.createRun(next.id);
+ const next=store.createTask({managerAgentId:'system_project_manager',title:'并行实调度',objective:'A B 独立，C 在 A 后',memberAgentIds:task.memberAgentIds,workflowTemplateId:task.workflowTemplateId});const run=store.createRun(next.id);
  await executeRun(store,run.id,{runFilesRoot:join(root,'audit')});
  const w=store.getRunWorkspace(run.id);assert.equal(w.run.status,'awaiting_acceptance',JSON.stringify(w.traces.map(t=>({id:t.agentId,error:t.error}))));
  const b=w.traces.find(t=>t.agentId==='agent_engineer'),c=w.traces.find(t=>t.agentId==='agent_tester');assert.ok(b&&c,JSON.stringify(w.traces.map(t=>({agentId:t.agentId,status:t.status,error:t.error}))));assert.ok(Date.parse(c.startedAt)<Date.parse(b.endedAt));
@@ -214,7 +214,7 @@ else {writeFileSync('started','A');const start=Date.now();while(!existsSync('rel
 console.log(JSON.stringify({type:'result',is_error:false,result:'完成独立工作'}));
 `,{mode:0o700});
  for(const agent of store.listAgents())store.updateAgent(agent.id,{runtime:{provider:'claude-code',executable}});
- const next=store.createTask({title:'执行中接收消息',objective:'独立员工可以及时接收新输入',memberAgentIds:task.memberAgentIds,workflowTemplateId:task.workflowTemplateId}),run=store.createRun(next.id);
+ const next=store.createTask({managerAgentId:'system_project_manager',title:'执行中接收消息',objective:'独立员工可以及时接收新输入',memberAgentIds:task.memberAgentIds,workflowTemplateId:task.workflowTemplateId}),run=store.createRun(next.id);
  store.enqueueDispatch(run.id,{recipientAgentId:'agent_analyst',workflowNodeId:'requirements',purpose:'node'});
  const options={runFilesRoot:join(root,'audit')},pending=executeRun(store,run.id,options);t.after(()=>pending);
  const cwd=store.getRunTask(run.id).workspacePath,start=Date.now();

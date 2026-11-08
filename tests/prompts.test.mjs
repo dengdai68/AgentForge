@@ -11,7 +11,7 @@ import { scheduleManagerFollowup } from '../server/orchestrator.mjs';
 
 const taskInput = () => ({
   task: { title: '目标', objective: 'TASK_OBJECTIVE', workspacePath: '/work', repositorySources: [], repositoryBindings: {}, acceptanceCriteria: [], workflowSnapshot: { nodes: [{ id: 'first', title: 'CURRENT_WORK', deliverable: 'CURRENT_DELIVERY' }, { id: 'second', title: 'OTHER_NODE_SECRET' }] } },
-  run: { id: 'run-one', manager:{id:'coordinator'} }, node: { id: 'first', title: 'CURRENT_WORK', deliverable: 'CURRENT_DELIVERY', artifactPaths: ['docs/first'] },
+  run: { id: 'run-one', manager:{id:'coordinator'} }, node: { id: 'first', title: 'CURRENT_WORK', description:'CURRENT_NODE_DESCRIPTION', deliverable: 'CURRENT_DELIVERY', artifactPaths: ['docs/first'] },
   trace: { id: 'trace-one' }, agent: { id: 'worker', name: '员工', kind: 'business', systemPrompt: 'PERSONA_RULE' }, directory: '/trace', cwd: '/work',
   workspace: { traces: [], pendingQuestions: [], decisions: [], artifacts: [] }, messages: [], roster: [{ id: 'worker', name: '员工' }], mode: 'node', delivery: { messageIds: [], attempts: 1 }, session: { resume: false }
 });
@@ -28,7 +28,7 @@ test('routing feedback is explicit current input, not a stale error or a role me
   assert.doesNotMatch(resolved.prompt,/EXACT_REJECTION|协调纠错反馈/);
 });
 
-test('workflow is manager-only system context; environment and persona never enter current input', () => {
+test('workflow is manager-only file context; complete graph never enters system or current input', () => {
   const input = taskInput(), worker = taskPrompt(input);
   assert.match(worker.systemPrompt, /PERSONA_RULE|任务工作目录：\/work/);
   assert.doesNotMatch(worker.prompt, /PERSONA_RULE|\/work|工作流定义|OTHER_NODE_SECRET/);
@@ -36,12 +36,19 @@ test('workflow is manager-only system context; environment and persona never ent
   assert.match(worker.systemPrompt, /可咨询角色：/);
   assert.doesNotMatch(worker.prompt, /可咨询角色：/);
   assert.match(worker.prompt, /CURRENT_DELIVERY|TASK_OBJECTIVE/);
+  assert.match(worker.prompt, /CURRENT_NODE_DESCRIPTION/);
   const manager = taskPrompt({ ...input, agent: { ...input.agent, id:'coordinator', kind: 'manager' }, mode: 'manager' });
-  assert.match(manager.systemPrompt, /OTHER_NODE_SECRET/);
+  assert.doesNotMatch(manager.systemPrompt, /OTHER_NODE_SECRET|CURRENT_DELIVERY/);
+  assert.match(manager.systemPrompt, /\/trace\/workflow\.md|先用文件工具读取/);
   assert.doesNotMatch(manager.prompt, /OTHER_NODE_SECRET|CURRENT_DELIVERY|workflowNodeId/);
   const continued = taskPrompt({ ...input, session: { resume: true, inputContext: worker.inputContext } });
   assert.doesNotMatch(continued.prompt, /TASK_OBJECTIVE/);
   assert.doesNotMatch(continued.prompt, /CURRENT_DELIVERY/);
+});
+
+test('condition workers receive current judgment guidance without the other branch definitions',()=>{
+  const input=taskInput();input.node.type='condition';const result=taskPrompt(input);
+  assert.match(result.prompt,/节点类型：条件判断/);assert.match(result.prompt,/交回经理选择分支/);assert.doesNotMatch(result.prompt+result.systemPrompt,/OTHER_NODE_SECRET/);
 });
 
 test('resumed task delivers only changed context and new handoffs, while retries before receipt retain input', () => {
@@ -185,7 +192,7 @@ test('task input keeps actionable message provenance and omits routing/storage n
   assert.doesNotMatch(result.prompt, /MANAGER_STAFFING_ONLY|STORAGE_|ROUTING_AUDIT|AUDIT_MEMBER|UNRELATED_LOG|INTERNAL_HASH|lastErrorKind|messageIds/);
   assert.match(result.prompt, /ACTUAL_ANSWER \/work\/deliverable.txt/);
   assert.match(result.prompt, /question-one|consultation_reply|manager/);
-  // Staffing guidance is preserved in the manager's full workflow definition.
+  // Staffing guidance remains in the frozen file, not inline system instructions.
   input.task.workflowSnapshot.nodes[0].staffingGuidance = 'MANAGER_STAFFING_ONLY';
-  assert.match(taskPrompt({...input,agent:{...input.agent,id:'coordinator',kind:'manager'},mode:'manager'}).systemPrompt,/MANAGER_STAFFING_ONLY/);
+  assert.doesNotMatch(taskPrompt({...input,agent:{...input.agent,id:'coordinator',kind:'manager'},mode:'manager'}).systemPrompt,/MANAGER_STAFFING_ONLY/);
 });

@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createAuth } from '../server/auth.mjs';
 import { createStore } from '../server/store.mjs';
+import { createMarketplace } from '../server/runtime/marketplace.mjs';
 
 await mkdir('.data',{recursive:true});
 const root=await mkdtemp(resolve('.data/task-creation-')),home=join(root,'home');
@@ -21,9 +22,16 @@ const manager=store.createAgent({name:'创建界面经理',kind:'manager'}),work
 const extra=store.createAgent({name:'其他团队成员'}),secondManager=store.createAgent({name:'第二位经理',kind:'manager'});
 const inactive=store.createAgent({name:'停用团队成员',status:'inactive'});
 const teams=[store.createTeam({name:'创建界面团队 0',memberAgentIds:[manager.id,worker.id]}),store.createTeam({name:'创建界面团队 1',memberAgentIds:[worker.id,extra.id]}),store.createTeam({name:'多经理冲突团队',memberAgentIds:[secondManager.id,extra.id]})];
+const bulkAgents=Array.from({length:8},(_,index)=>store.createAgent({name:index===0?'长名称成员：'+('完整显示员工名称'.repeat(6)):'批量任务员工 '+index}));
+const bulkTeam=store.createTeam({name:'完整显示成员的团队',memberAgentIds:bulkAgents.map(a=>a.id)});
 const flows=[0,1].map(i=>store.createWorkflowTemplate({name:'创建界面流程 '+i,nodes:[{id:'work',title:'不应在创建表单展开的节点 '+i,staffingGuidance:'不应在创建表单展开的人员说明'}]}));
+const mcpServer=join(root,'tool-server.mjs');
+const toolDefinitions=[{name:'inspect_asset',description:'检查素材的真实信息',inputSchema:{type:'object',properties:{path:{type:'string'}},required:['path']}},{name:'render_asset',description:'生成素材',inputSchema:{type:'object',properties:{}}},...Array.from({length:21},(_,index)=>({name:'additional_tool_'+index,description:'其他真实工具 '+index,inputSchema:{type:'object',properties:{}}}))];
+await writeFile(mcpServer,`import {createInterface} from 'node:readline';for await(const line of createInterface({input:process.stdin})){const m=JSON.parse(line);let result;if(m.method==='initialize')result={protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'ui-tools',version:'1'}};else if(m.method==='tools/list')result={tools:${JSON.stringify(toolDefinitions)}};else if(m.method==='tools/call')throw Error('unexpected tool invocation');if(result)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');}`);
+const toolMarket=createMarketplace(join(data,'runtime-configs'));const toolEntry=await toolMarket.add({kind:'mcp',name:'工具列表验收',description:'真实stdio工具发现',content:JSON.stringify({mcpServers:{ui_tools:{command:process.execPath,args:[mcpServer]}}})});store.registerExtensions([toolEntry]);
+const memberTask=store.createTask({title:'成员身份验收',objective:'仅验收暂停任务的成员编辑',memberAgentIds:[worker.id,extra.id],managerAgentId:worker.id}),memberRun=store.createRun(memberTask.id);store.pauseRun(memberRun.id);
 store.close();
-const app=await electron.launch({...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')} :{}),args:bundle?[]:['apps/electron/main.mjs'],env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
+const app=await electron.launch({...(bundle?{executablePath:resolve(bundle,'Contents/MacOS/AgentForge')} :{}),args:[...(bundle?[]:['apps/electron/main.mjs']),'--user-data-dir='+join(root,'browser-profile')],env:{...process.env,HOME:home,AGENTFORGE_DESKTOP_DATA_ROOT:data,AGENTFORGE_LOG_DIR:join(root,'logs')},timeout:90000});
 const evidence={root,bundle:bundle||'source',cases:[],geometry:[]},errors=[];
 try{
  const page=await app.firstWindow({timeout:90000});page.setDefaultTimeout(30000);page.on('pageerror',e=>errors.push(e.message));
@@ -50,14 +58,22 @@ try{
   await form.getByRole('button',{name:'保存并开始',exact:true}).click();await form.getByText('请填写任务标题。',{exact:true}).waitFor();await form.getByText('请描述任务目标、范围或关键约束。',{exact:true}).waitFor();
   const title=`任务创建 ${theme} ${width}x${height}`,description=Array.from({length:6},(_,i)=>`第 ${i+1} 行：描述任务内容、背景和要求。`).join('\n');
   await form.locator('[name="title"]').fill(title);await form.locator('[name="objective"]').fill(description);
-  const add=async item=>{await form.locator('#task-members').fill(item.name);await form.locator(`[data-add-extension="${item.id}"]`).click();};
+  const add=async item=>{await form.locator('#task-members').click();await form.locator('#task-members').fill(item.name);await form.locator(`[data-add-extension="${item.id}"]`).click();};
   await add(teams[0]);await add(teams[1]);
-  await form.locator('#task-members').fill(teams[2].name);assert.equal(await form.locator(`[data-add-extension="${teams[2].id}"]`).count(),0,'a conflicting manager team is omitted from candidates');
+  await form.locator('#task-members').pressSequentially(teams[2].name);assert.equal(await form.locator(`[data-add-extension="${teams[2].id}"]`).isVisible(),true,'keyboard continuation keeps the team suggestion visible after the roster grows');
   const focusedStyle=await form.locator('#task-members').evaluate(input=>{const style=getComputedStyle(input);return[style.borderTopWidth,style.boxShadow,style.backgroundColor];});
   assert.deepEqual(focusedStyle,['0px','none','rgba(0, 0, 0, 0)'],'focused search stays inside the shared chip control without a nested frame');
   await form.locator('#task-members').press('Escape');
-  assert.equal(await form.locator('.extension-picked .extension-chip').count(),2,'selected teams remain grouped chips');
-  assert.deepEqual((await form.locator('.extension-chip-name').allTextContents()).sort(),[teams[0].name+' · 2 人',teams[1].name+' · 2 人'].sort());await form.locator('[name="workflowTemplateId"]').selectOption(flows[1].id);
+  assert.equal(await form.locator('.extension-picked .extension-chip').count(),3,'teams expand into individual employee chips');
+  assert.deepEqual((await form.locator('.extension-chip-name').allTextContents()).sort(),[manager.name,worker.name,extra.name].sort());
+  await form.locator(`[data-select-manager="${extra.id}"]`).click();assert.equal(await form.locator('[data-manager=true]').count(),1);
+  await form.locator(`[data-select-manager="${worker.id}"]`).press('Enter');assert.equal(await form.locator('[data-manager=true]').count(),1);assert.equal(await form.locator(`[data-select-manager="${worker.id}"]`).getAttribute('aria-pressed'),'true');
+  await add(bulkTeam);
+  const roster=await form.locator('#task-members-picker .extension-picker-control').evaluate(control=>{const box=control.getBoundingClientRect(),chips=[...control.querySelectorAll('.extension-chip')].map(chip=>chip.getBoundingClientRect());return {height:box.height,width:box.width,scroll:control.scrollWidth,client:control.clientWidth,rows:new Set(chips.map(r=>Math.round(r.y))).size,contained:chips.every(r=>r.left>=box.left&&r.right<=box.right&&r.top>=box.top&&r.bottom<=box.bottom),names:[...control.querySelectorAll('.extension-chip-name')].every(el=>el.scrollWidth<=el.clientWidth+1&&getComputedStyle(el).whiteSpace==='normal')};});
+  assert.ok(roster.height>38&&roster.rows>1,'large rosters grow into multiple visible lines');assert.ok(roster.scroll<=roster.client+1&&roster.contained&&roster.names,'selected employees and long names are not clipped or horizontally hidden');
+  await form.locator(`[data-select-manager="${bulkAgents.at(-1).id}"]`).press('Enter');assert.equal(await form.locator('[data-manager=true]').count(),1);await form.locator(`[data-select-manager="${worker.id}"]`).click();await form.locator('#task-members-picker').scrollIntoViewIfNeeded();await page.screenshot({path:join(root,`task-members-${theme}-${width}x${height}.png`)});
+  for(const agent of bulkAgents)await form.locator(`[data-remove-extension="${agent.id}"]`).click();assert.equal(await form.locator('.extension-picked .extension-chip').count(),3);
+  assert.match(await form.locator('[data-manager=true]').textContent(),/★/);await form.locator('[name="workflowTemplateId"]').selectOption(flows[1].id);
   assert.equal(await form.locator('[name="objective"]').inputValue(),description);
   await details.locator('summary').click();await criteria.fill(Array.from({length:21},(_,i)=>'标准 '+i).join('\n'));await details.locator('summary').click();
   await form.getByRole('button',{name:'保存并开始',exact:true}).click();await form.getByText('验收标准最多 20 条。',{exact:true}).waitFor();assert.ok(await criteria.isVisible(),'invalid hidden criteria reopen');
@@ -66,9 +82,29 @@ try{
   await page.screenshot({path:join(root,`${theme}-${width}x${height}.png`)});
   const response=page.waitForResponse(r=>r.url().endsWith('/api/tasks')&&r.request().method()==='POST');await form.getByRole('button',{name:'保存并开始',exact:true}).click();const createdResponse=await response;assert.ok(createdResponse.ok());const {task}=await createdResponse.json();await form.waitFor({state:'detached'});
   await page.locator(`[data-run-task="${task.id}"]`).waitFor();
-  const saved=(await api('/api/tasks')).tasks.find(t=>t.id===task.id);assert.equal(saved.objective,description);assert.equal(Object.hasOwn(saved,'teamId'),false);assert.deepEqual(saved.memberAgentIds,[manager.id,worker.id,extra.id]);assert.equal(saved.workflowTemplateId,flows[1].id);assert.deepEqual(saved.acceptanceCriteria,height===1000?['第一项验收','第二项验收']:[]);assert.equal(Object.hasOwn(saved,'priority'),false);assert.equal(saved.status,'backlog');assert.ok(launchIds.includes(task.id));
+  const saved=(await api('/api/tasks')).tasks.find(t=>t.id===task.id);assert.equal(saved.objective,description);assert.equal(Object.hasOwn(saved,'teamId'),false);assert.deepEqual(saved.memberAgentIds,[manager.id,worker.id,extra.id]);assert.equal(saved.workflowTemplateId,flows[1].id);assert.deepEqual(saved.acceptanceCriteria,height===1000?['第一项验收','第二项验收']:[]);assert.equal(Object.hasOwn(saved,'priority'),false);assert.equal(saved.managerAgentId,worker.id);assert.equal(saved.status,'backlog');assert.ok(launchIds.includes(task.id));
  }
- evidence.cases.push('two themes at 1320x1000, 760x760 and 800x560; six to twelve visible description lines, fixed same-row selectors and submit; optional criteria retain drafts and reopen on validation errors; real HTTP creation persists combined independent employees/workflow and rejects another manager and empty or supplied criteria; rejected launch retains backlog task');
+ for(const [width,height] of [[1320,900],[760,760]]){
+  await page.goto(origin+'/settings/appearance');await page.locator(`[name=theme][value=${width===1320?'minimal':'warm'}]`).check();
+  await app.evaluate(({BrowserWindow},{origin,width,height})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,height),{origin,width,height});
+  await page.goto(origin+'/automations');await page.locator('[data-auto-new]').click();const auto=page.locator('#task-form');await auto.locator('[name=title]').fill('任务级经理 '+width);await auto.locator('[name=objective]').fill('自动化使用所选业务员工协调');
+  await auto.locator('#task-members').fill(teams[0].name);await page.locator(`[data-add-extension="${teams[0].id}"]`).click();await auto.locator(`[data-select-manager="${worker.id}"]`).click();
+  await auto.locator('#task-members').click();await auto.locator('#task-members').fill(bulkTeam.name);await page.locator(`[data-add-extension="${bulkTeam.id}"]`).click();assert.ok(await auto.locator('#task-members-picker .extension-picker-control').evaluate(el=>el.getBoundingClientRect().height>38&&el.scrollWidth<=el.clientWidth+1));
+  const response=page.waitForResponse(r=>r.url().endsWith('/api/automations')&&r.request().method()==='POST');await auto.locator('[value=disabled]').click();const saved=await(await response).json();assert.equal(saved.automation.managerAgentId,worker.id);assert.equal(saved.automation.enabled,false);await auto.waitFor({state:'detached'});
+  await page.locator(`[data-auto-open="${saved.automation.id}"]`).first().click();await page.locator('[data-auto-edit]').click();await auto.waitFor();assert.equal(await auto.locator(`[data-select-manager="${worker.id}"]`).getAttribute('aria-pressed'),'true');
+  await auto.locator(`[data-remove-extension="${worker.id}"]`).click();await auto.locator('[value=start]').click();await auto.getByText('点击已选员工，指定一位本次经理。',{exact:true}).waitFor();await page.screenshot({path:join(root,`automation-manager-${width}.png`)});await auto.locator('[data-close-modal]').click();
+  await page.goto(origin+'/mcp-marketplace');await page.locator(`[data-extension-detail="${toolEntry.id}"]`).first().click();await page.locator('.mcp-tool').first().waitFor();assert.equal(await page.locator('.mcp-tool').count(),23);
+  assert.equal(await page.locator('.mcp-configuration').evaluate(el=>el.tagName),'SECTION');assert.equal(await page.locator('.mcp-configuration summary').count(),0);await page.getByRole('heading',{name:'连接配置',exact:true}).waitFor();
+  const configBox=await page.locator('.mcp-configuration').boundingBox(),toolsBox=await page.locator('.mcp-tools-panel').boundingBox();assert.ok(configBox.y<toolsBox.y);
+  assert.equal(await page.getByRole('searchbox',{name:'搜索工具'}).count(),0);assert.equal(await page.locator('.mcp-tool details,.mcp-tools-panel [data-page]').count(),0);await page.screenshot({path:join(root,`mcp-tools-${width}.png`)});await page.locator('.mcp-tool').last().scrollIntoViewIfNeeded();await page.screenshot({path:join(root,`mcp-tools-last-${width}.png`)});
+  await page.getByRole('button',{name:'刷新工具列表',exact:true}).click();await page.locator('.mcp-tool').first().waitFor();assert.equal(await page.locator('.mcp-tool').count(),23);await page.locator('[data-close-modal]').click();
+ }
+ evidence.cases.push('automation business employee manager persists, editing preserves its star and removal requires reselection; real stdio MCP detail shows non-collapsible configuration before all 23 tools without search, schema controls or pagination, and refreshes in wide/narrow windows');
+ await page.goto(origin+'/agents');await page.locator('.employee-runtime-summary').first().waitFor();assert.doesNotMatch(await page.locator('.employee-runtime-summary').allTextContents().then(x=>x.join(' ')),/CLI 默认模型|思考/);await page.locator(`[data-edit-agent="${worker.id}"]`).click();await page.locator('#agent-form').waitFor();assert.equal(await page.locator('#agent-form [name=kind]').count(),0);assert.equal(await page.locator('.employee-kind').count(),0);await page.locator('#agent-form [data-close-modal]').click();
+ await page.goto(origin+'/runs/'+memberRun.id);await page.locator('[data-edit-task-members]').click();await page.locator('#run-members').fill(worker.name);assert.equal(await page.locator(`[data-add-extension="${worker.id}"]`).count(),0,'the current manager source cannot be added twice');await page.locator('#run-members').fill(secondManager.name);await page.locator(`[data-add-extension="${secondManager.id}"]`).click();
+ await page.locator('#task-members-form [type=submit]').click();await page.locator('#task-members-form').waitFor({state:'detached'});const memberState=await api('/api/runs/'+memberRun.id+'/workspace?view=compact');assert.equal(memberState.run.manager.sourceAgentId,worker.id);assert.ok(memberState.run.participants.some(p=>p.id===secondManager.id));
+ evidence.cases.push('employee edit hides the retained kind field; a business manager has one run alias and can add another stored-manager employee without changing the frozen coordinator');
+ evidence.cases.push('11 selected employees and a long name wrap without clipping; native keyboard continuation, manager switching and removal/save remain available; two themes at 1320x1000, 760x760 and 800x560; six to twelve visible description lines, fixed same-row selectors and submit; optional criteria retain drafts and reopen on validation errors; real HTTP creation persists combined independent employees/workflow and accepts employees of any stored kind and explicit business employee manager, and validates empty or supplied criteria; rejected launch retains backlog task');
  for(const theme of ['minimal','warm']){
   await app.evaluate(({BrowserWindow},origin)=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(1320,1000),origin);
   await page.goto(origin+'/settings/appearance');await page.locator(`[name="theme"][value="${theme}"]`).check();
@@ -114,11 +150,12 @@ try{
   assert.equal(result.code,expected,result.stdout);assert.ok(!result.stdout.includes(password));assert.equal(result.stderr,'');const parsed=JSON.parse(result.stdout);return parsed.data;
  };
  await cli(['auth','login','--username','task-form-qa','--password-stdin'],password+'\n');
+ const cliTools=await cli(['mcps','tools',toolEntry.id,'--search','inspect','--all']);assert.equal(cliTools.tools[0].name,'inspect_asset');assert.equal(cliTools.total,1);assert.equal(cliTools.availableTotal,23);assert.equal(cliTools.tools[0].inputSchema.required[0],'path');
  const createdTeam=(await cli(['teams','create','--file','-'],{name:'CLI 无经理团队',memberAgentIds:[extra.id]})).team;
  assert.equal((await cli(['teams','get',createdTeam.id])).members[0].systemPrompt,undefined,'team output uses employee references');
- const cliInput={title:'CLI 独立任务成员',objective:'验证同一正式 HTTP 和 CLI 协议',memberAgentIds:[manager.id,extra.id],workflowTemplateId:flows[0].id};
+ const cliInput={managerAgentId:manager.id,title:'CLI 独立任务成员',objective:'验证同一正式 HTTP 和 CLI 协议',memberAgentIds:[manager.id,extra.id],workflowTemplateId:flows[0].id};
  const cliTask=(await cli(['tasks','create','--file','-'],cliInput)).task;
- await cli(['tasks','create','--file','-'],{...cliInput,memberAgentIds:[manager.id,secondManager.id,extra.id]},4);
+ await cli(['tasks','create','--file','-'],{...cliInput,memberAgentIds:[manager.id,secondManager.id,extra.id]});
  await cli(['tasks','create','--file','-'],{...cliInput,teamId:createdTeam.id},2);
  await cli(['tasks','list','--team',createdTeam.id],undefined,2);
  await cli(['teams','create','--file','-'],{name:'旧协议拒绝',memberAgentIds:[extra.id],managerAgentId:manager.id},2);
@@ -127,7 +164,7 @@ try{
  assert.deepEqual(independent.members.map(member=>member.id).sort(),[manager.id,extra.id].sort());
  const mixed=(await cli(['tasks','create','--file','-'],{...cliInput,memberAgentIds:[extra.id],teamIds:[teams[0].id,teams[1].id],acceptanceCriteria:[]})).task;
  const mixedTask=await cli(['tasks','get',mixed.id]);assert.deepEqual(mixedTask.members.map(m=>m.id).sort(),[manager.id,worker.id,extra.id].sort());assert.deepEqual(mixedTask.acceptanceCriteria,[]);
- await cli(['tasks','create','--file','-'],{...cliInput,memberAgentIds:[],teamIds:[teams[0].id,teams[2].id]},4);
+ await cli(['tasks','create','--file','-'],{...cliInput,memberAgentIds:[],teamIds:[teams[0].id,teams[2].id]});
  // CLI-created values survive App edits; verify both themes and wide/narrow windows.
  const parityFlow=(await cli(['workflows','create','--file','-'],{name:'双端交接来源',nodes:[{id:'a',title:'输入甲',staffingGuidance:'员工'},{id:'b',title:'输入乙',staffingGuidance:'员工'},{id:'c',title:'输出',staffingGuidance:'员工',dependsOn:['a'],handoffFrom:['b']}]})).workflowTemplate;
  const role=(await cli(['roles','create','--file','-'],{name:'双端角色',prompt:'保留共用提示词'})).role;
@@ -136,12 +173,12 @@ try{
   await app.evaluate(({BrowserWindow},{origin,width})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith(origin)).setContentSize(width,760),{origin,width});
   await page.goto(origin+'/settings/appearance');await page.locator(`[name=theme][value=${theme}]`).check();
   await page.goto(origin+'/workflows');await page.locator('#workflows-search').fill(parityFlow.name);await page.locator(`[data-edit-workflow="${parityFlow.id}"]`).click();
-  const row=page.locator('[data-workflow-node]').nth(2);await row.locator('summary').click();
-  assert.deepEqual(await row.locator('[name=nodeDependencies]').evaluate(el=>[...el.selectedOptions].map(o=>o.value)),['a']);
-  assert.deepEqual(await row.locator('[name=nodeHandoffFrom]').evaluate(el=>[...el.selectedOptions].map(o=>o.value)),['b']);
-  await row.locator('[name=nodeDeliverable]').fill('');await page.screenshot({path:join(root,`parity-workflow-${theme}.png`)});
+  await page.locator('.workflow-canvas-editor[data-ready=true]').waitFor();
+  const selectElement=async(type,id)=>{const cell=page.locator(`.workflow-editor-canvas [data-cell-id="${type==='edge'?'edge:'+id:id}"]`);await cell.focus();await cell.press('Enter');};
+  await selectElement('edge',parityFlow.edges.find(edge=>edge.source==='a'&&edge.target==='c').id);await page.locator('#workflow-edge-title').fill('输入甲完成');
+  await selectElement('node','c');await page.locator('#workflow-item-description').fill('只编辑当前节点提示词，保留补充配置');await page.screenshot({path:join(root,`parity-workflow-${theme}.png`)});
   await page.locator('#workflow-form [type=submit]').click();await page.locator('#workflow-form').waitFor({state:'detached'});
-  const reread=await cli(['workflows','get',parityFlow.id]);assert.deepEqual(reread.nodes[2].dependsOn,['a']);assert.deepEqual(reread.nodes[2].handoffFrom,['b']);assert.ok(reread.nodes[2].deliverable);
+  const reread=await cli(['workflows','get',parityFlow.id]);assert.deepEqual(reread.nodes[2].dependsOn,['a']);assert.deepEqual(reread.nodes[2].handoffFrom,['b']);assert.ok(reread.nodes[2].deliverable);assert.equal(reread.nodes[2].description,'只编辑当前节点提示词，保留补充配置');
   await page.goto(origin+'/agents');await page.locator('#agents-search').fill('独立审片');await page.locator(`[data-edit-agent="${worker.id}"]`).click();
   assert.equal(await page.locator('#agent-form [name=description]').inputValue(),'独立简介');assert.equal(await page.locator('#agent-form [name=capabilities]').inputValue(),'独立审片');
   await page.screenshot({path:join(root,`parity-agent-${theme}.png`)});await page.locator('#agent-form [type=submit]').click();await page.locator('#agent-form').waitFor({state:'detached'});
@@ -160,10 +197,11 @@ try{
  await cli(['mcps','create','--file','-'],{name:'双端 MCP',content:JSON.stringify({mcpServers:{proof:{command:'node',args:['--version']}}})});
  const mcp=(await cli(['mcps','list','--search','双端 MCP'])).items[0];await cli(['mcps','update',mcp.id,'--file','-'],{description:'双端编辑'});
  const currentMcp=(await cli(['mcps','list','--search','双端 MCP'])).items[0];assert.equal((await cli(['mcps','get',currentMcp.id])).description,'双端编辑');await page.goto(origin+'/mcp-marketplace');await page.getByText('双端 MCP',{exact:true}).first().waitFor();await cli(['mcps','delete',currentMcp.id,'--yes']);
+ await cli(['mcps','delete',toolEntry.id,'--yes']);await cli(['mcps','tools',toolEntry.id,'--refresh'],undefined,4);
  evidence.cases.push('CLI/App parity: team union task creation and validation; independent workflow dependencies/handoffs and optional deliverable; employee capability/role preservation and search; team enabled state; role CRUD and bound deletion rejection; plugin import/get/delete and MCP create/update/get/delete visible in App; two themes and wide/narrow editing');
  await cli(['agents','delete',extra.id,'--yes']);
  assert.ok(!(await cli(['agents','list','--all'])).items.some(employee=>employee.id===extra.id));
  assert.deepEqual((await cli(['tasks','get',cliTask.id])).members,independent.members,'deleted source employee retains historical task references');
- evidence.cases.push('real CLI subprocess login/help/schema validation and HTTP create/get/delete; manager-free team; independent task member references; duplicate-manager and retired team inputs rejected; deletion preserves frozen task references');
+ evidence.cases.push('real CLI subprocess login/help/schema validation and HTTP create/get/delete; manager-free team; independent task member references; multiple stored manager kinds accepted and retired team inputs rejected; deletion preserves frozen task references');
  assert.deepEqual(errors,[]);console.log('PASS '+root);
 }catch(error){evidence.error=String(error.stack||error);throw error;}finally{await writeFile(join(root,'evidence.json'),JSON.stringify(evidence,null,2));await app.close();}

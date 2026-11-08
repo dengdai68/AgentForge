@@ -3,7 +3,7 @@
   <h1>AgentForge · AI Team OS</h1>
   <p><strong>面向超级个体的 AI 团队操作系统：像定制虚拟员工一样配置 Agent，组织多 Agent 小组或团队，协作完成任务并交付真实文件。</strong></p>
   <p>你负责目标与决策，让 AI 员工各司其职。</p>
-  <p>Claude Code · Codex · DeepSeek Harness</p>
+  <p>Claude Code · Codex · DeepSeek Harness · Cursor · Gemini · Qwen · Kimi · Pi · OpenCode</p>
   <p><a href="https://github.com/dengdai68/AgentForge/releases/latest">下载 macOS 版</a> · <a href="#快速上手">快速上手</a> · <a href="#cli让-ai-团队接入你的工具链">CLI</a> · <a href="https://github.com/dengdai68/AgentForge/issues">反馈</a></p>
 </div>
 
@@ -75,7 +75,7 @@ AgentForge 是一个 AI 团队操作系统：让负责人组织具备不同能�
    ```
 
    此命令只移除该应用的隔离属性，随后重新打开应用。
-3. 首次打开创建本机管理员，在设置中检查 Runtime 和工作目录。提前安装并授权至少一种 **Claude Code、Codex 或 DeepSeek Harness**，即可配置员工并开始使用。
+3. 首次打开创建本机管理员，在设置中检查 Runtime 和工作目录。提前安装并授权至少一种 支持的原生 CLI（如 **Claude Code、Codex、OpenCode**），即可配置员工并开始使用。
 
 应用自带本机服务，无需部署服务器。软件按 Apache-2.0 开源，模型订阅、API 和第三方工具费用另计。目前为本机单管理员应用，员工以当前系统用户权限执行，不提供 Agent 沙箱；模型调用仍会连接对应服务。尚无 Intel Mac、Windows 或 Linux 安装包。
 

@@ -12,7 +12,7 @@ async function fixture(t, persistent = false) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const databasePath = persistent ? join(root, "state.sqlite") : ":memory:";
   const store = createStore({ databasePath, workspaceRoot: join(root, "workspaces") });
-  const task = store.createTask({ title: "Recovery fixture", objective: "Do not invoke a Provider", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
+  const task = store.createTask({managerAgentId:'system_project_manager', title: "Recovery fixture", objective: "Do not invoke a Provider", memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery" });
   const run = store.createRun(task.id);
   return { root, databasePath, store, task, run };
 }

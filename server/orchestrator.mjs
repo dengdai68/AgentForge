@@ -1,10 +1,10 @@
 import { executionBudget } from "./execution-budget.mjs";
 import { withWorkspaceHooks } from './workspace-hooks.mjs';
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
 import { desktopServiceDataRoot } from "./data-home.mjs";
 import { createRunFiles } from "./run-files.mjs";
-import { runClaudeCodeCli, runCodexCli, runDshCli, promptSnapshot, RuntimeCancelledError, RuntimeSessionMissingError, runtimeFailureDetail, separateRuntimeSession } from "./runtime/local-cli.mjs";
+import { runRuntime, promptSnapshot, RuntimeCancelledError, RuntimeSessionMissingError, runtimeFailureDetail, separateRuntimeSession } from "./runtime/local-cli.mjs";
 import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
 import { terminateExecution, registerExecution } from "./runtime/registry.mjs";
 import { taskPrompt } from "./prompts.mjs";
@@ -54,7 +54,7 @@ export function parseEmployeeResponse(value) {
   return readNodeResult({ summary: raw });
 }
 function nodeInfo(task, nodeId) { return task.workflowSnapshot.nodes.find((node) => node.id === nodeId); }
-async function provider(input) { if (input.runtime.provider === "dsh") return runDshCli(input); if (input.runtime.provider === "codex") return runCodexCli(input); if (input.runtime.provider !== "claude-code") throw new Error(`不支持的真实运行时：${input.runtime.provider}`); return runClaudeCodeCli(input); }
+const provider = runRuntime;
 
 // Keep redacted original wording separate from automatic retry eligibility.
 class RuntimeInvocationError extends Error {
@@ -236,7 +236,7 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
       : await files.snapshotWorkspace(task.workspacePath, { excludeRunFiles: true }).catch(() => new Map());
     // Only explicit inbox/chain messages or this responsibility's handoffs are
     // shared. Other members' private model context is never forwarded.
-    const roster = run.participants.filter(member=>!(run.removedParticipantIds || []).includes(member.id)).map(({ id, type, name, kind, description, capabilities }) => ({ id, type, name, kind, description, capabilities }));
+    const roster = run.participants.filter(member=>!(run.removedParticipantIds || []).includes(member.id)).map(({ id, type, name, description, capabilities }) => ({ id, type, name, taskRole:id===run.manager.id ? "manager" : type==="agent" ? "member" : "human", description, capabilities }));
     // A member keeps one cwd/session even when answering another node's question.
     const cwd = task.repositoryMode === "agent" ? (task.repositoryBindings[agent.id] ? resolve(task.workspacePath, task.repositoryBindings[agent.id].path) : task.workspacePath) : task.workspacePath;
     const session = store.prepareMemberSession(delivery.id, trace.id, cwd);
@@ -246,7 +246,7 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
       attachment.path = files.runAttachmentPath(runId, attachment);
     }
     const inputThroughMessageId = store.latestRunMessageId(runId);
-    let input, inputAcknowledged = false;
+    let input, inputAcknowledged = false, inputProgress = false, nativeSessionConfirmed = agent.runtime.provider === 'claude-code' || session.resume;
     const acknowledgeInput = () => {
       if (!inputAcknowledged) {
         store.confirmMemberInput(trace.id, inputThroughMessageId, input.inputContext, messages.map(item => item.id));
@@ -255,22 +255,26 @@ async function invokeDispatch(store, files, delivery, runBaseline) {
     };
     const onEvent = async (event) => {
       const { sessionId, auditEvent, content } = separateRuntimeSession(event);
-      // Init/thread-connected is not proof of input consumption. New model
-      // content/tool activity is; preserve this receipt even if the turn fails.
-      if (content && ['text', 'thinking', 'input', 'output'].some(key => content.fields?.[key]?.text)) acknowledgeInput();
+      // A receipt needs both new model progress and a resumable native session.
+      // Kimi confirms its ID only at the terminal hint; an earlier failure must
+      // leave the full assignment available for a fresh, unconfirmed session.
+      if (agent.runtime.provider !== 'claude-code' && auditEvent.providerEventType === 'thread.started' && sessionId) { store.bindProviderSession(trace.id, sessionId); nativeSessionConfirmed = true; }
+      if (content && ['output','thinking','tool','tool_result'].includes(auditEvent.data?.presentation) && ['text', 'thinking', 'input', 'output'].some(key => content.fields?.[key]?.text)) inputProgress = true;
+      if (inputProgress && nativeSessionConfirmed) acknowledgeInput();
       if (content) auditEvent.data.contentRef = await files.writeConsoleContent(runId, trace.id, content);
-      if (["codex", "dsh"].includes(agent.runtime.provider) && auditEvent.providerEventType === "thread.started" && sessionId) store.bindProviderSession(trace.id, sessionId);
       await files.appendTrace(runId, trace.id, { occurredAt: new Date().toISOString(), runId, traceId: trace.id, workflowNodeId: node.id, agentId: agent.id, provider: agent.runtime.provider, type: auditEvent.providerEventType, message: auditEvent.message, data: auditEvent.data });
       store.addEvent({ type: "runtime.event", runId, actor: { type: "agent", id: agent.id, name: agent.name }, message: auditEvent.providerEventType + ": " + (auditEvent.message || "收到运行时事件"), data: { traceId: trace.id, workflowNodeId: node.id, providerEventType: auditEvent.providerEventType, ...auditEvent.data } });
     };
     const effectiveNode = delivery.purpose === "node" && task.repositoryMode === "agent" ? { ...node, repositoryPath: task.repositoryBindings?.[agent.id]?.path || null } : node;
-    input = taskPrompt({ task, run, node: effectiveNode, trace, agent, directory, cwd, workspace, messages, roster, mode: delivery.purpose, delivery, session });
+    const workflowContext = agent.id === run.manager.id ? await files.writeWorkflowContext(runId, trace.id, task.workflowSnapshot) : null;
+    input = taskPrompt({ task, run, node: effectiveNode, trace, agent, directory, cwd, workspace, messages, roster, mode: delivery.purpose, delivery, session, workflowContext });
     const onPrompt = async value => {
       try { store.attachTracePrompt(trace.id, await files.writePromptSnapshot(runId, trace.id, promptSnapshot(value))); }
       catch (error) { diagnostic("task.prompt_snapshot_failed", { error, runId, traceId: trace.id }); }
     };
     // The runtime returns text; coordination fields are interpreted when present.
-    const runtimeResult = await invokeRuntime(store, agent, { ...input, onPrompt, traceId: trace.id, session, executionKey: `${runId}:${agent.id}`, canStart: () => store.canExecuteDispatch(delivery.id), runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, finalPath, runId, onEvent }, files);
+    const contextDirectories=[...new Set(messages.flatMap(message=>(message.attachments || []).map(file=>dirname(file.path))))];
+    const runtimeResult = await invokeRuntime(store, agent, { ...input, contextDirectories, onPrompt, traceId: trace.id, session, executionKey: `${runId}:${agent.id}`, canStart: () => store.canExecuteDispatch(delivery.id), runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, finalPath, runId, onEvent }, files);
     output = parseEmployeeResponse(runtimeResult.finalText);
     artifacts = await capture(files, runId, trace.id, task.workspacePath, before, output, effectiveNode, delivery.purpose);
     acknowledgeInput();

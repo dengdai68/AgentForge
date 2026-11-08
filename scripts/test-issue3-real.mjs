@@ -28,7 +28,7 @@ try{
  const {agent:manager}=await api('/api/agents',{name:'目录协作经理',kind:'manager',runtime,systemPrompt:'第一轮必须调用平台 MCP list_employees 搜索只读目录资料员，再调用 read_employee 读取其 systemPrompt 中核验码。将核验码写入第一轮 summary 及给新增交付员工的 handoffMessage，nextNodeId=deliver，nextAgentId=该员工ID。员工交付后返回 nextNodeId=null、nextAgentId=null 请求验收；不重复派工、不自己写文件。'});
  const {agent:placeholder}=await api('/api/agents',{name:'待移除空闲员工',runtime});
  const {workflowTemplate:workflow}=await api('/api/workflow-templates',{name:'目录与澄清验收',nodes:[{id:'deliver',title:'澄清后交付',staffingGuidance:'新增交付员工',artifactPaths:['result.txt']}]});
- const {task}=await api('/api/tasks',{title:'Issue3 真实验收',objective:'经理通过员工目录 MCP 读取只读目录资料员的核验码，派给新增交付员工；员工向人类澄清口令后写 result.txt，读取验证并交付。',memberAgentIds:[manager.id,placeholder.id],workflowTemplateId:workflow.id});
+ const {task}=await api('/api/tasks',{managerAgentId:manager.id,title:'Issue3 真实验收',objective:'经理通过员工目录 MCP 读取只读目录资料员的核验码，派给新增交付员工；员工向人类澄清口令后写 result.txt，读取验证并交付。',memberAgentIds:[manager.id,placeholder.id],workflowTemplateId:workflow.id});
  // Update the live roster immediately after starting; all subsequent dispatches use the Store membership.
  const {run}=await api(`/api/tasks/${task.id}/run`,{});evidence.runId=run.id;evidence.taskId=task.id;
  await api(`/api/runs/${run.id}/members`,{memberAgentIds:[manager.id,worker.id]},'PUT');

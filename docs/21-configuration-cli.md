@@ -1,12 +1,12 @@
 # CLI 指南
 
-核心 App/CLI 对齐：tasks create --file input.json [--start] 支持 teamIds、memberAgentIds 混合选人，服务端展开去重；可只传其中之一，最终恰好一位可用经理。acceptanceCriteria 可省略或 []，最多20条/每条500字符；不再使用任务优先级。--start 显式创建后启动，可能消耗模型额度；失败返回 TASK_CREATED_START_FAILED、taskId 与查询建议，不自动重试、不回滚已创建任务。先 progress 核实，再按状态决定是否 start，不能重复 create。员工搜索包含 capabilities；工作流交付定义可省略，依赖/交接来源独立；团队启停与 App 同步。tasks list 校验状态并按更新时间（归档按归档时间）降序分页。
+核心 App/CLI 对齐：tasks create --file input.json [--start] 支持 teamIds、memberAgentIds 混合选人，服务端展开去重；可只传其中之一，通过managerAgentId从成员中显式指定一位可用经理。acceptanceCriteria 可省略或 []，最多20条/每条500字符；不再使用任务优先级。--start 显式创建后启动，可能消耗模型额度；失败返回 TASK_CREATED_START_FAILED、taskId 与查询建议，不自动重试、不回滚已创建任务。先 progress 核实，再按状态决定是否 start，不能重复 create。员工搜索包含 capabilities；工作流交付定义可省略，依赖/交接来源独立；团队启停与 App 同步。tasks list 校验状态并按更新时间（归档按归档时间）降序分页。
 
 `agentforge tasks list --workflow ID_OR_NAME` 按工作流精确 ID 或唯一名称（当前或任务冻结名称）筛选；同名歧义明确拒绝，改用 ID。与 `--search`、`--status`、`--archived` 组合后分页；文本/JSON 摘要包含 `workflow: {id, name}`，name 为任务冻结名称。
 
 客户端人工恢复会继续原失败员工的 Dispatch 与会话，保留累计 attempts、消息引用和失败 Trace；CLI progress/协作查询继续展示真实历史，本轮不新增恢复命令或输入字段。
 
-任务通过独立成员集合创建，Store 校验恰好一位可用项目经理，团队仅用来批量选人。删除员工与团队的冻结历史语义见 [领域模型](03-domain-model.md)。
+任务通过独立成员集合创建，Store 校验显式managerAgentId属于可用成员，团队仅用来批量选人。删除员工与团队的冻结历史语义见 [领域模型](03-domain-model.md)。
 
 CLI tasks create schema 使用 teamIds 与 memberAgentIds，由 Store 合并为独立成员；移除 teamId 和 tasks list --team。tasks get 返回成员 ID/名称引用，不倾倒员工提示词/Runtime；tasks list 显示成员数。teams create/update 不接受 managerAgentId，memberAgentIds 可以为空。agents delete --yes 逻辑删除并返回 historyRetained，teams delete --yes 不再因任务/群聊历史拒绝。help/schema/example/text/JSON 共用当前协议。长期沟通属于客户端能力，本轮不新增 CLI 群聊权限。
 
@@ -67,9 +67,9 @@ TTY 隐藏输入密码；脚本使用显式 `--password-stdin`。没有密码命
 
 员工通过 `runtime.profileId` 引用连接，扩展只接受完整 `extensionSelection:{pluginIds:[],mcpIds:[]}`。拒绝单 Skill、员工 `mcpJson`、手工路径及派生字段。工作流用 `staffingGuidance` 表达人员需求；员工仅 business/manager 两类，仓库说明写入 systemPrompt；拒绝 developer 与 repository 输入。`pluginSources`、工作流 `ownerRole/repositoryPath/reuseOwnerFrom` 不属于当前写入协议。
 
-插件：`plugins list` 只列已装摘要；`plugins get ID` 按需返回 Skill/Subagent/Hook 详情。`plugins import --file source.json` 接受 `{"url":"https://…git"}` 或 `{"path":"/absolute/plugins"}`，一次原子安装来源全部 Claude/Codex 插件，返回插件摘要与拆分 MCP 摘要；任何条目失败则整批不发布。不再接受 discover/sourceId/pluginName 或安装信任参数。自带 MCP 另入 MCP 市场，员工单独选择，不随插件启用。`mcps create --file mcp.json` 安装单服务 JSON，支持 stdio/SSE/Streamable HTTP，三种 Runtime 均可用；`mcps get ID` 返回脱敏 JSON。安装不执行 Hook/依赖、不自动绑定。员工 create/update 可指定 status 为 active/inactive。详细字段用操作后的 `--help` 查看，在线市场暂不提供。
+插件：`plugins list` 只列已装摘要；`plugins get ID` 按需返回 Skill/Subagent/Hook 详情。`plugins import --file source.json` 接受 `{"url":"https://…git"}` 或 `{"path":"/absolute/plugins"}`，一次原子安装来源全部 Claude/Codex 插件，返回插件摘要与拆分 MCP 摘要；任何条目失败则整批不发布。不再接受 discover/sourceId/pluginName 或安装信任参数。自带 MCP 另入 MCP 市场，员工单独选择，不随插件启用。`mcps create --file mcp.json` 安装单服务 JSON，支持 stdio/SSE/Streamable HTTP，九种 Runtime 均可用；`mcps get ID` 返回脱敏 JSON。安装不执行 Hook/依赖、不自动绑定。员工 create/update 可指定 status 为 active/inactive。详细字段用操作后的 `--help` 查看，在线市场暂不提供。
 
-市场来源遵循 Claude/Codex 的 Git/本地部分规范：相对目录、local/path、HTTPS github/url/git-subdir，支持 ref 和完整 sha（sha 优先），安装所有条目并保留真实提交。不执行 npm/archive/command 来源，遇到时整批失败。`plugins list` 的 Runtime 列只列支持项；`plugins get ID` 的 compatibility 给出三种 Runtime 的 supported/reasons，组件注明 providers。静态支持不代表依赖、CLI 或账号已实测。不兼容的员工选择由 HTTP 拒绝。stdio MCP 额外提供 cwd（绝对路径）/env_vars（变量名数组）时由三种 Runtime 共用私有启动器处理。
+市场来源遵循 Claude/Codex 的 Git/本地部分规范：相对目录、local/path、HTTPS github/url/git-subdir，支持 ref 和完整 sha（sha 优先），安装所有条目并保留真实提交。不执行 npm/archive/command 来源，遇到时整批失败。`plugins list` 的 Runtime 列只列支持项；`plugins get ID` 的 compatibility 给出九种 Runtime 的 supported/reasons，组件注明 providers。静态支持不代表依赖、CLI 或账号已实测。不兼容的员工选择由 HTTP 拒绝。stdio MCP 额外提供 cwd（绝对路径）/env_vars（变量名数组）时由九种 Runtime 共用私有启动器处理。
 
 `runtimes models PROVIDER` 返回真实模型/思考等级目录；`effort` 空值使用 CLI 默认。详细参数以当前命令帮助为准。
 
@@ -101,9 +101,9 @@ TTY 隐藏输入密码；脚本使用显式 `--password-stdin`。没有密码命
 
 DeepSeek Harness 的 CLI 入口为 runtimes list/get/update/test/models，按 dsh 或固定 ID 引用；runtimes models dsh 返回本机 SDK 的 Provider/模型ID 和逐模型档位。update --file 支持 model、effort、enabled，DeepSeek Harness effort 接受空/off/low/high/max，其他 Provider 不接受 off。员工仍只绑定 profileId 和选择扩展版本，不新增 Token/Base URL/可执行路径参数。help/schema/默认文本/显式 JSON 均同步第三个 Provider；test --yes 真实调用 DeepSeek Harness。当前仅内置 DeepSeek 路由；Subagent/command Hook 按 docs/26 原生映射，未映射字段明确拒绝。
 
-Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+Runtime 展示名称为Claude Code、Codex、DeepSeek Harness、Cursor、Gemini CLI、Qwen Code、Kimi Code、Pi、OpenCode；固定 Provider ID、执行文件与能力边界见 [多 Runtime 接入](29-runtime-providers.md)。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
-插件兼容性由统一的源标准执行计划计算（docs/26）。`plugins list/get` 与员工选择共用当前结果；已有插件不需重装，旧 providers 不作为新 Runtime 的能力门禁。`mcps create/get` 的 cwd/env_vars 在三种 Runtime 中经统一私有启动器保留；无新增导入开关或手工降级字段，命令/输入 schema 不变。新增绑定的执行计划摘要为服务生成，CLI 不接受用户伪造引用。
+插件兼容性由统一的源标准执行计划计算（docs/26）。`plugins list/get` 与员工选择共用当前结果；已有插件不需重装，旧 providers 不作为新 Runtime 的能力门禁。`mcps create/get` 的 cwd/env_vars 在九种 Runtime 中经统一私有启动器保留；无新增导入开关或手工降级字段，命令/输入 schema 不变。新增绑定的执行计划摘要为服务生成，CLI 不接受用户伪造引用。
 
 插件兼容语义补充：Runtime v3 对已知 Claude 模型别名在其他 Provider 继承目标模型，保留原名供执行计划核验；不声称使用同一个模型。描述的单行冒号仅在调用私有投影规范化，未知 YAML 结构/标签仍拒绝。list/get 将格式异常限定到相应插件的兼容原因，错误仅包含相对组件路径及行列；既有命令、输入 schema 和关联引用格式不变。
 
@@ -144,3 +144,25 @@ roles create/update 的 schema 与 App 同步增加 extensionSelection，必须�
 `runtimes models PROVIDER [--refresh]`：默认共享 30 秒缓存，--refresh 重查；并发刷新仍合并正在执行的相同查询。失败不缓存。附件路径流式上传，不再整体读入内存，单文件 20 MiB 和每消息 10 个上限不变。
 
 派工协议纠错不增加 CLI 写入能力或创建参数：App/CLI 共用 Store，单人/多人指令均完整定向送达。progress 保留真实失败 Trace 和失败原因，协调格式最多自动纠正一次，重复拒收为 failed；客户端重试继续原成员。collaboration 仍只有角色沟通，不混入纠错系统提示；已存在创建/查询/成员管理的字段与默认值不变。
+
+
+工作流画布与 CLI 使用同一 JSON：nodes 支持可选 type（process/condition，默认process）、description（完整正文）、position:{x,y}；staffingGuidance 改为选填，节点最简只需 title，省略ID生成 node_N。edges 保存连线 source/target/condition/description，condition为默认空的自然语言分支条件（最多2000字符），省略ID生成 link_N，dependency 默认false、handoff默认true；普通交接可回路，前置依赖不可成环。同向节点对不重复、不自连。提供 edges 后节点关系必须与之相符或省略，让 Store 派生 dependsOn/handoffFrom；省略 edges 则使用节点关系。节点1–100个，连线最多300条，坐标有限且绝对值不超过100000，正文最多20000字符。create/update 的 schema、渐进帮助、文本/JSON回读、空数组及错误语义与 App 一致，update仍完整替换；先get再编辑时仅提交schema列出的输入字段。列表、搜索、分页、详情、删除及任务创建工作流选择保持原命令。图形坐标不是执行权限或派工绑定；任务冻结后，经理按系统指令读取 workflow.md。
+
+条件节点按证据选择满足条件的一条分支，由经理解释推进，不执行代码表达式；CLI 与 App 的process节点最多一条出口，多出口需显式指定condition；sourcePort/targetPort为可选top/right/bottom/left，非法值拒绝。create/update及新任务冻结当前模板由同一Store校验。已有冻结Task/Run不重写。省略 type 归一 process，未知类型/非文本或超长 condition 均拒绝。
+
+未填写交付要求时，流程节点默认交付可验收文件，条件节点默认说明判断证据与理由并交回经理，不要求每次判断生成独立文件。
+
+画布工作流可直接用于CLI启动：`agentforge tasks create --workflow ID_OR_NAME --file task.json --start`。当前工作流精确ID优先，名称须唯一；不接受仅在历史任务中的已删模板。文件中的workflowTemplateId若非空须与选择ID一致，否则USAGE且无任务写入；名称不存在/重名分别NOT_FOUND/AMBIGUOUS_REFERENCE。省略--start保留草稿语义；启动失败仍返回已创建任务ID。复用已冻结的节点/条件/连线说明、经理读取文件和同一Run执行链，无独立图执行引擎；最终验收仍仅客户端。
+
+任务级经理：tasks create与automations create必填managerAgentId，为最终所选员工集合中的可用员工ID；不根据Agent.kind推断，不自动选择第一人。选择团队与个人的并集规则不变；automations update省略保持，移除所选经理则同时指定新经理，否则拒绝。Task/Run使用冻结配置与独立经理会话，不改目录员工。员工kind仅保留存储字段，新建省略默认business；App隐藏类型，CLI帮助不赋予类型业务含义。
+MCP工具列表：agentforge mcps tools MCP_ID [--refresh]，返回tools、total、checkedAt，包含工具名称/说明和输入/输出schema，15秒超时，成功缓存60秒，失败明确返回错误且不缓存。使用受认证POST /api/runtime/mcp-marketplace/:id/tools，过期/已删ID拒绝；不读取数据库或绕过私有配置管理，不调用具体工具。
+
+mcps tools支持--search名称/说明筛选后分页，默认每页20条，--page N与--all互斥；--all返回全部匹配工具。输出tools、匹配total、服务availableTotal、page/pageSize/totalPages/hasMore及checkedAt；与App详情搜索和20条分页相同，查询只读取一次工具定义。
+
+一键整理和缩放是图形呈现操作，CLI无需视图命令；可通过既有workflow完整替换写position与可选端口，读取结果相同。CLI创建/编辑、查询与任务启动均遵循单出口规则，不要求调用者手工补齐图形默认值。
+
+新增原生 CLI Runtime 的事件、会话、模型目录和扩展边界见 [docs/29](29-runtime-providers.md)。本轮不将 Claude/Codex 插件方言直接标记为新 Runtime 兼容；未支持的扩展拒绝绑定，不能静默忽略。
+
+新增六种 Runtime 的基础 Skill/可适配 Command 插件、原生 MCP、私有配置及不兼容组件边界见 [多 Runtime 接入](../docs/29-runtime-providers.md)。App 市场详情“检查兼容性”与 CLI `plugins check-compatibility ID` / `mcps check-compatibility ID` 等价；仅刷新当前目录摘要，不改写安装、员工/角色绑定或历史。
+
+runtimes models 的新增目标返回原生可选模型与逐模型 levels，非统一空目录；runtimes update 同一 model/effort 校验。OpenCode effort 可以是模型目录里的自定义 variant（单行安全标识），其余按 Provider 集合校验；Cursor/Gemini/OpenCode 非空 effort 需 model。工作目录视频播放器为客户端能力，不新增 CLI 播放命令；已有下载命令返回原字节。

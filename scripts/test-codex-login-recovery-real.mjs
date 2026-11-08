@@ -45,7 +45,7 @@ try{
  const consoleState=await api('/api/communications/'+chat.id+'/console?agentId='+worker.id);assert.ok(consoleState.traces.some(t=>t.providerSessionId));evidence.communicationRecovered=true;evidence.employeeId=worker.id;
  ({agent:manager}=await api('/api/agents',{name:'续接验收经理',kind:'manager',systemPrompt:'只将唯一节点 check 派给续接验收员工，不自己做文件。员工交接后通过 managerDecision 的 nextNodeId:null、nextAgentId:null 提交人类验收，不额外派工、不要求人类澄清。',runtime:{profileId,extensionSelection:{pluginIds:[],mcpIds:[]}}}));
  const {workflowTemplate:workflow}=await api('/api/workflow-templates',{name:'原员工失败恢复验证',nodes:[{id:'check',title:'求和与测试',staffingGuidance:'续接验收员工',deliverable:'add.mjs 和 add.test.mjs，通过 node --test',artifactPaths:['add.mjs','add.test.mjs'],dependsOn:[]}]});
- ({task}=await api('/api/tasks',{title:'原员工失败恢复真实验收',objective:'经理将 check 派给续接验收员工。员工实现 add.mjs 和 add.test.mjs，测试正数和负数求和并实际运行 node --test。收到成功交接后经理提交人类验收。',memberAgentIds:[manager.id,worker.id],workflowTemplateId:workflow.id}));
+ ({task}=await api('/api/tasks',{managerAgentId:manager.id,title:'原员工失败恢复真实验收',objective:'经理将 check 派给续接验收员工。员工实现 add.mjs 和 add.test.mjs，测试正数和负数求和并实际运行 node --test。收到成功交接后经理提交人类验收。',memberAgentIds:[manager.id,worker.id],workflowTemplateId:workflow.id}));
  ({run}=await api('/api/tasks/'+task.id+'/run',{}));
  }else{const old=await api('/api/runs/'+previous.runId+'/workspace');run=old.run;task=run.task;worker={id:old.traces.find(t=>t.id===previous.failedTraceId).agentId};manager=run.manager;}
  evidence.runId=run.id;

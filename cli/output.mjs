@@ -1,3 +1,4 @@
+import {runtimeLabel} from "../client/runtime-providers.mjs";
 import { guide } from './commands.mjs';
 
 // Plain text only: untrusted names/errors must never emit terminal control codes.
@@ -29,8 +30,10 @@ Object.assign(labels, { previousId: '更新前 ID', employees: '已更新的员�
 Object.assign(labels, {enabled:'自动更新',intervalMinutes:'检查周期（分钟）',intervalMs:'检查间隔（毫秒）',running:'正在检查',lastCheckedAt:'最近检查',nextCheckAt:'下次检查',lastResult:'最近结果',checkedSources:'已检查来源',updatedPlugins:'已更新插件数',updates:'更新记录',errors:'未应用的来源',message:'说明'});
 Object.assign(labels, { compatibility:'Runtime 兼容性', supported:'支持', reasons:'不兼容原因', 'claude-code':'Claude Code', codex:'Codex', dsh:'DeepSeek Harness', providers:'支持的 Runtime' });
 Object.assign(labels, { addressedRecipient:'原消息指向', routingNote:'实际路由说明', deliveries:'关联投递（当前状态）', history:'执行明细（实际发生时间）', scope:'处理范围', currentStatus:'当前投递状态', currentStatusCode:'当前投递状态码', sourceLink:'来源关联依据', sourceNotice:'来源说明', recipientName:'接手成员', previousError:'此前错误（原记录）', endedAt:'结束时间', statusLabel:'本次执行结果', relatedEvents:'关联状态记录', acceptanceRecordId:'对应验收记录 ID', confirmationNote:'确认说明', fileCount:'验收时已记录文件数', files:'文件引用（最多8项）', purposeCode:'投递用途代码' });
+Object.assign(labels, Object.fromEntries(['cursor','gemini','qwen','kimi','pi','opencode'].map(id=>[id,runtimeLabel(id)])));
 const label = key => labels[key] ? `${labels[key]} (${key})` : text(key);
 Object.assign(labels, { automation: '自动化', cron: 'Cron 表达式', timeZone: '时区', nextTriggerAt: '下次执行', plannedAt: '计划时间', outcome: '触发结果', completion: '完成方式', automationId: '自动化 ID', latestTrigger: '最近触发', trigger: '触发记录', workflow: '工作流', manager: '项目经理', workspacePath: '工作目录', title: '任务名称', objective: '用户目标', workflowTemplateId: '工作流 ID', acceptanceCriteria: '验收要求', attempts: '尝试次数', lastErrorKind: '失败类别', lastError: '上次失败', nextRetryAt: '下次重试时间', taskTitle: '任务标题', taskId: '任务 ID', runId: '执行 ID', taskStatus: '任务状态', runStatus: '执行状态', currentFocus: '当前重心', pendingQuestions: '待答人类问题', pendingDispatches: '未结束投递', activeTraces: '正在执行', members: '员工引用', memberCount: '成员数', participants: '执行成员', artifactCount: '已接纳交付数', acceptanceRequest: '经理验收交接', deliveryReview: '历史交付复核', nextAction: '下一步', content: '内容', replyToMessageId: '所回复问题 ID', recipientAgentId: '接收成员 ID', items: '记录', total: '总数', summary: '交付摘要', failure: '失败原因', timestamp: '时间', from: '发送方', to: '接收方' });
+Object.assign(labels, {type:'类型',condition:'分支条件', edges:'连线',target:'连线终点',dependency:'前置依赖',handoff:'读取交接',position:'画布坐标',x:'横坐标',y:'纵坐标'});
 function scalar(value, key) {
   if (key === 'expiresAt' && value === null) return '不过期（主动退出或撤销后失效）';
   if (value === null) return '未设置 (null)';
@@ -64,7 +67,7 @@ function fields(schema, columns, prefix = '', nested = false) {
   return Object.entries(schema.properties || {}).flatMap(([name, field]) => {
     const path = prefix + name, type = Array.isArray(field.type) ? field.type.join(' | ') : field.type;
     const required = schema.required?.includes(name) ? (nested ? '父项提供时必填' : '必填') : '可选';
-    const constraints = [field.enum && `可选值：${field.enum.join(' / ')}`, field.pattern && `格式：${field.pattern}`, field.minItems && `至少 ${field.minItems} 项`, field.maxLength && `最多 ${field.maxLength} 字符`].filter(Boolean);
+    const constraints = [field.enum && `可选值：${field.enum.join(' / ')}`, field.pattern && `格式：${field.pattern}`, field.minItems && `至少 ${field.minItems} 项`, field.maxItems !== undefined && `最多 ${field.maxItems} 项`, field.maxLength && `最多 ${field.maxLength} 字符`].filter(Boolean);
     const description = field.description || '按类型提供；详见输入模板。';
     const output = [paragraph(`${path}  ${type}${field.items ? '<' + field.items.type + '>' : ''} · ${required}`, columns, '  '), paragraph([constraints.length ? description.replace(/[。；]$/, '') : description, ...constraints].join('；'), columns, '    ')];
     if (field.properties) output.push(...fields(field, columns, path + '.', true));
@@ -157,11 +160,11 @@ function list(group, data, columns) {
     teams: [['状态', item => item.status]],
     runtimes: [['可用', item => item.installed === false ? '未安装' : item.enabled ? '是' : '否'], ['模型', item => item.model || 'CLI 默认'], ['思考等级', item => item.effort || 'CLI 默认']],
     workflows: [['节点数', item => count(item.nodes)]],
-    plugins: [['Runtime',item=>(item.providers || []).map(provider=>provider==='dsh'?'DeepSeek Harness':provider==='codex'?'Codex':'Claude Code').join(' / ') || '暂无兼容 Runtime'],['组件', item => `Skill ${item.components?.skills || 0} / Agent ${item.components?.agents || 0} / Hook ${item.components?.hooks || 0}`]],
+    plugins: [['Runtime',item=>(item.providers || []).map(provider=>runtimeLabel(provider)).join(' / ') || '暂无兼容 Runtime'],['组件', item => `Skill ${item.components?.skills || 0} / Agent ${item.components?.agents || 0} / Hook ${item.components?.hooks || 0}`]],
     mcps: [['说明', item => item.description]]
   }[group];
   const headings = ['ID', group === 'runtimes' ? 'Runtime' : '名称', ...extra.map(([heading]) => heading)];
-  const rows = data.items.map(item => [item.id, item.name || item.title || (item.provider === 'codex' ? 'Codex' : item.provider === 'claude-code' ? 'Claude Code' : item.provider === 'dsh' ? 'DeepSeek Harness' : ''), ...extra.map(([, read]) => read(item))].map(value => text(value ?? '—').replaceAll('\n', ' ↵ ')));
+  const rows = data.items.map(item => [item.id, item.name || item.title || runtimeLabel(item.provider), ...extra.map(([, read]) => read(item))].map(value => text(value ?? '—').replaceAll('\n', ' ↵ ')));
   const widths = headings.map((head, i) => rows.reduce((max, row) => Math.max(max, width(row[i])), width(head)));
   const body = rows.length ? widths.reduce((a, b) => a + b, 4) <= columns
     ? [headings, ...rows].map(row => row.map((cell, i) => cell + ' '.repeat(Math.max(0, widths[i] - width(cell)))).join('  ').trimEnd()).join('\n')
@@ -205,3 +208,5 @@ export function formatOutput(args, data, { columns = 100, help: isHelp = false }
 export function formatError(error, exitCode, { columns = 100 } = {}) {
   return [`错误 [${text(error.code)}]：${text(error.message)}`, ...(error.status ? [`HTTP 状态：${error.status}`] : []), `处理建议：${text(error.hint)}`, `退出码：${exitCode}`, '查看参数：在命令后加 --help，例如 agentforge agents get --help；脚本需显式 --json。'].map(value => paragraph(value, columns)).join('\n');
 }
+
+Object.assign(labels,{managerAgentId:"本次经理员工ID",tools:"工具",inputSchema:"输入参数",outputSchema:"返回值定义",annotations:"工具属性",checkedAt:"读取时间",availableTotal:"服务工具总数"});

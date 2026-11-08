@@ -1,5 +1,6 @@
 import { initializeWorkspaceGit, workspaceGitStatus, workspaceGitDiff, sourceControlPath, discoverWorkspaceRepositories, cloneComparisonBase } from "./workspace-git.mjs";
 import { createHash, randomUUID } from "node:crypto";
+import { workflowDescription } from "../client/workflow-description.mjs";
 import { fileFingerprint } from './file-fingerprints.mjs';
 import { execFile } from "node:child_process";
 import { diagnostic, diagnosticRedactor } from "./diagnostics.mjs";
@@ -181,6 +182,10 @@ function mediaTypeFor(name) {
   if (/\.jpe?g$/i.test(name)) return "image/jpeg";
   if (/\.gif$/i.test(name)) return "image/gif";
   if (/\.webp$/i.test(name)) return "image/webp";
+  if (/\.(mp4|m4v)$/i.test(name)) return "video/mp4";
+  if (/\.mov$/i.test(name)) return "video/quicktime";
+  if (/\.webm$/i.test(name)) return "video/webm";
+  if (/\.ogv$/i.test(name)) return "video/ogg";
   if (/\.svg$/i.test(name)) return "image/svg+xml";
   return "application/octet-stream";
 }
@@ -673,6 +678,19 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       const submodule = Boolean(repository && !repository.dynamic && path === repository.path);
       return workspaceGitDiff(task.workspacePath, repository && !submodule ? repository.path : "", path, { submodule, full, registered: repository });
     },
+    async openWorkingVideo(task, path) {
+      workspaceRelative(path);
+      if (path.split('/').some(privateWorkspaceEntry)) throw new Error('不能读取内部或敏感文件');
+      const file=await workspaceFile(task.workspacePath,path),handle=await open(file,constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+      try {
+        const info=await handle.stat(),mediaType=mediaTypeFor(path);
+        if(!info.isFile() || !mediaType.startsWith('video/'))throw new Error('所选文件不是支持的视频');
+        const head=Buffer.alloc(32),{bytesRead}=await handle.read(head,0,32,0);
+        const valid=mediaType==='video/webm'?head.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])):mediaType==='video/ogg'?head.toString('ascii',0,4)==='OggS':bytesRead>=12 && (head.toString('ascii',4,8)==='ftyp' || mediaType==='video/quicktime' && ['moov','mdat','wide'].includes(head.toString('ascii',4,8)));
+        if(!valid)throw new Error('视频容器文件头无法识别，请下载后在本地查看');
+        return {handle,bytes:info.size,mediaType,modifiedAt:info.mtime.toISOString()};
+      } catch(error) {await handle.close();throw error;}
+    },
     async readWorkingFile(task, path, { raw = false, download = false } = {}) {
       if (raw && download) throw new Error("下载与图片预览不能同时请求");
       workspaceRelative(path);
@@ -688,6 +706,7 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       }
       const mediaType = mediaTypeFor(path), image = /^image\/(png|jpeg|gif|webp)$/.test(mediaType);
       if (raw && !image) throw new Error("raw 预览仅支持 PNG、JPEG、GIF 和 WebP 图片");
+      if(mediaType.startsWith('video/'))return {path,bytes:info.size,modifiedAt:info.mtime.toISOString(),mediaType,video:true,binary:true,content:null};
       const maxBytes = image ? DEFAULT_MAX_FILE_BYTES : DEFAULT_PREVIEW_BYTES;
       if (info.size > maxBytes) throw new Error(`文件超过预览上限 ${maxBytes} 字节，请在本地查看`);
       const bytes = await readFile(file);
@@ -776,6 +795,16 @@ export function createRunFiles({ root, maxFiles = DEFAULT_MAX_FILES, maxFileByte
       const { content, bytes } = await readArtifactFile(runRoot, reference.storagePath, 300000);
       if (bytes !== reference.bytes || createHash("sha256").update(content).digest("hex") !== reference.sha256) throw new Error("执行内容完整性校验失败");
       return JSON.parse(content.toString("utf8"));
+    },
+    // Derived only from the Task's frozen definition, never the mutable catalog.
+    // Each invocation keeps its own immutable, private evidence file.
+    async writeWorkflowContext(runId, traceId, workflow) {
+      pathForTrace(runId, traceId);
+      const directory = await privateDirectory(['runs', runId, 'traces', traceId]);
+      const path = join(directory, 'workflow.md'), content = workflowDescription(workflow);
+      if (Buffer.byteLength(content) > 1024 * 1024) throw new Error('工作流说明超过 1 MiB');
+      await writeFile(path, content, {encoding:'utf8', mode:0o600, flag:'wx'});
+      return { path, bytes:Buffer.byteLength(content), sha256:createHash('sha256').update(content).digest('hex') };
     },
     // One redacted dispatch-prompt snapshot per Trace, same on-disk boundary
     // as console content: 0600, fail-if-exists, SHA-256 integrity binding.

@@ -84,3 +84,6 @@ runtime-paths.mjs 复用 server/data-home.mjs 的纯路径函数，将默认任�
 自动化触发记录增加任务标题列后，桌面表格保留1100px最小宽度，防止通用820px密度覆盖挤压状态列；窄窗口在表格内横向滚动。
 
 沟通媒体复用认证 HTTP 与 renderer 原生 dialog：图片覆盖应用窗口，文件走原生下载，不新增宿主 IPC。自动化触发表 compact 最小宽度与共享 CSS 同为 820px，足够宽时无横向滚动。隔离 `test-communication-media.mjs` 使用 Electron will-download 将验证文件保存到测试目录。
+
+
+工作流极简编辑器沿用共享X6，compact.css仅约束模态宽度、工具栏密度及窄屏，不拥有领域状态或图形数据；底部保存保持可见，Graph/观察器由web/workflow-editor.mjs在关闭时释放。

@@ -1,3 +1,4 @@
+import {RUNTIME_IDS} from '../client/runtime-providers.mjs';
 // Packaged macOS Beta smoke test. It deliberately has no dependency on a globally installed Node runtime.
 import assert from "node:assert/strict";
 import { access, appendFile, chmod, cp, mkdtemp, mkdir, readFile, readdir, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
@@ -299,7 +300,7 @@ if (process.env.AF_SHELL_PROOF !== ${JSON.stringify(shellProof)} || process.env.
 let result = { kind: "node_result", summary: "Packaged execution content fixture", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture input is sufficient", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
 if (prompt.includes("人类沟通中回答")) result = { reply: "Packaged unread fixture reply", ...(responseSchema?.properties?.mentionAgentIds ? { mentionAgentIds: [] } : {}) };
 else if (prompt.includes('"purpose":"delivery_review"')) result.deliveryReview = { verdict: "pass", restartFromNodeId: "packaged_verify", findings: ["packaged fixture evidence reviewed"] };
-else if (prompt.includes("任务级项目经理")) result.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "packaged_verify", nextAgentId: prompt.includes('"type":"node"') ? null : roster.find(member => member.type === "agent" && member.kind === "business")?.id, rationale: "fixture selects a business member from the frozen roster" };
+else if (prompt.includes("任务级项目经理")) result.managerDecision = { nextNodeId: (await import('node:fs')).existsSync(join(workspace,'docs/packaged/report.md')) ? null : "packaged_verify", nextAgentId: (await import('node:fs')).existsSync(join(workspace,'docs/packaged/report.md')) ? null : roster.find(member => member.type === "agent" && member.taskRole === "member")?.id, rationale: "fixture selects a business member from the frozen roster" };
 else {
   if (!workspace) throw new Error("fixture did not receive the Task workspace");
   await new Promise(resolve => setTimeout(resolve, 7000)); // bounded UI observation of an actual running fixture Trace
@@ -354,6 +355,7 @@ async function runPackagedTask(page) {
   await form.locator('[name="workflowTemplateId"]').selectOption(workflow.workflowTemplate.id);
   await form.locator('#task-members').fill(team.team.name);
   await form.locator(`[data-add-extension="${team.team.id}"]`).click();
+  await form.locator(`[data-select-manager="${manager.agent.id}"]`).click();
   assert.equal(await form.locator("#node-assignment-panel").count(), 0);
   assert.equal(await form.locator('[name^="nodeAssignment_"]').count(), 0);
   await form.getByRole("button", { name: "保存并开始", exact: true }).click();
@@ -615,7 +617,7 @@ async function runPackagedTask(page) {
   assert.doesNotMatch(textDetail, /memberSnapshots|systemPrompt|managerRuntime|allowedTools/);
   assert.equal((await packagedCli(['workflows', 'get', detail.workflow.id])).name, workflow.workflowTemplate.name);
   assert.equal((await packagedCli(['agents', 'get', detail.manager.id])).name, manager.agent.name);
-  const receipt = await packagedCli(['tasks', 'create', '--file', '-'], JSON.stringify({ title: 'CLI 创建回执验收', objective: '只创建元数据用于输出检查，不启动模型。', memberAgentIds: team.team.memberAgentIds, workflowTemplateId: workflow.workflowTemplate.id }));
+  const receipt = await packagedCli(['tasks', 'create', '--file', '-'], JSON.stringify({managerAgentId:manager.agent.id, title: 'CLI 创建回执验收', objective: '只创建元数据用于输出检查，不启动模型。', memberAgentIds: team.team.memberAgentIds, workflowTemplateId: workflow.workflowTemplate.id }));
   assert.deepEqual(Object.keys(receipt.task).sort(), ['id', 'status', 'title']);
   assert.equal(receipt.task.status, 'backlog');
   assert.equal((await packagedCli(['tasks', 'get', receipt.task.id])).objective, '只创建元数据用于输出检查，不启动模型。');
@@ -779,7 +781,7 @@ try {
   const cliProfiles = await packagedCli(['runtimes', 'list', '--all']);
   const humanProfiles = await packagedCli(['runtimes', 'list'], '', undefined, false);
   assert.match(humanProfiles, /Runtime列表/); assert.match(humanProfiles, /Runtime/); assert.match(humanProfiles, /模型/); assert.ok(!humanProfiles.startsWith('{'));
-  assert.deepEqual(cliProfiles.items.map(item => item.provider).sort(), ['claude-code','codex','dsh']);
+  assert.deepEqual(cliProfiles.items.map(item => item.provider).sort(), [...RUNTIME_IDS].sort());
   for (const runtime of [{profileId:null},{profileId:cliProfiles.items[0].id,extensionSelection:null},{skillPaths:[]}]) {
     const rejected=await page.evaluate(async body=>{
       const response=await fetch('/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -794,7 +796,7 @@ try {
     const status=await page.evaluate(async body=>(await fetch('/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).status,input);
     assert.equal(status,400,'packaged HTTP rejects retired extension input');
   }
-  assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,3);
+  assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,RUNTIME_IDS.length);
   // This HOME/PATH deliberately has no ambient Runtime. Verify that the
   // installation gate rejects toggles, then install a presence-only fixture
   // before testing the enabled setting; never depend on the operator's Codex.
@@ -850,7 +852,7 @@ try {
   // diagnostics are covered by Runtime tests; inspect the actual fixed inline editor.
   await page.goto(urlFor(page,'/settings/runtime'));
   await page.locator('.runtime-provider-row').first().waitFor();
-  assert.equal(await page.locator('.runtime-provider-row').count(),3);
+  assert.equal(await page.locator('.runtime-provider-row').count(),RUNTIME_IDS.length);
   await page.locator('.runtime-provider-row').first().locator('summary').click();
   const runtimeDrawer=page.locator('.runtime-inline-editor');
   await runtimeDrawer.waitFor();
@@ -912,7 +914,7 @@ try {
       assert.match(await packagedCli(['runtimes', 'list'], '', shell, false), /Runtime/);
       const configured = await packagedCli(['runtimes','get','codex'],'',shell);
       await packagedCli(['runtimes','update','codex','--file','-'],JSON.stringify({model:'',effort:''}),shell);
-      assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,3);
+      assert.equal((await api(page,'/api/settings/runtime-profiles')).profiles.length,RUNTIME_IDS.length);
       await packagedCli(['auth', 'logout'], '', shell);
       await page.screenshot({ path: join(evidenceRoot, 'packaged-cli-installed.png'), animations: 'disabled' });
       console.log('PASS General styled host consent cancellation/installation and fresh-shell progressive help/login/configuration/HTTP readback/logout, fixture home only');

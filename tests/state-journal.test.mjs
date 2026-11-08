@@ -90,7 +90,7 @@ test('an existing installation retains list/detail parity and frozen run state o
   const root=mkdtempSync(join(tmpdir(),'af-existing-install-')),path=join(root,'db.sqlite');
   let store=createStore({databasePath:path,workspaceRoot:join(root,'work')});
   try {
-    const task=store.createTask({title:'Existing task',objective:'Preserve this task',memberAgentIds:['system_project_manager']});
+    const task=store.createTask({managerAgentId:'system_project_manager',title:'Existing task',objective:'Preserve this task',memberAgentIds:['system_project_manager']});
     const run=store.createRun(task.id);store.pauseRun(run.id);
     const expected=store.snapshot();store.close();store=null;
     // Same current domain state, stored before the SQL entity read model existed.
@@ -118,7 +118,7 @@ test('compact collaboration pages preserve answered questions, delivery links an
   const root=mkdtempSync(join(tmpdir(),'af-collaboration-pages-')),path=join(root,'db.sqlite');
   let store=createStore({databasePath:path,workspaceRoot:join(root,'work')});
   try {
-    const task=store.createTask({title:'分页',objective:'目标',memberAgentIds:['system_project_manager']}),run=store.createRun(task.id);
+    const task=store.createTask({managerAgentId:'system_project_manager',title:'分页',objective:'目标',memberAgentIds:['system_project_manager']}),run=store.createRun(task.id);
     const state=store.snapshot(),manager=run.manager;
     state.messages=Array.from({length:95},(_,i)=>({id:`message-${String(i).padStart(3,'0')}`,runId:run.id,createdAt:new Date(1700000000000+i*1000).toISOString(),kind:'handoff',sender:{id:manager.id,name:manager.name,type:'agent'},recipient:{id:'other',name:'other',type:'agent'},content:'body '+i}));
     Object.assign(state.messages[0],{kind:'clarification_question',recipient:{id:'human_operator',name:'你',type:'human'}});

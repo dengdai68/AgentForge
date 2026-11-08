@@ -28,7 +28,7 @@ try{
  const plugin=imported.plugins.find(p=>p.name==='catalog-00'),mcp=imported.mcps.find(m=>m.name.startsWith('catalog-00'));
  const profile=(await api('/api/settings/runtime-profiles')).profiles.find(p=>p.provider==='claude-code');
  const employees=[];for(const status of ['active','inactive'])employees.push((await api('/api/agents',{name:'绑定目录 '+status,status,runtime:{profileId:profile.id,extensionSelection:{pluginIds:[plugin.id],mcpIds:[mcp.id]}}},'POST',201)).agent);
- const task=(await api('/api/tasks',{title:'冻结目录',objective:'仅保存冻结引用',memberAgentIds:[manager.id,employees[0].id]},'POST',201)).task;
+ const task=(await api('/api/tasks',{managerAgentId:manager.id,title:'冻结目录',objective:'仅保存冻结引用',memberAgentIds:[manager.id,employees[0].id]},'POST',201)).task;
  const times=[];for(let i=0;i<4;i++){const start=Date.now(),result=await api('/api/runtime/marketplace');times.push(Date.now()-start);assert.equal(result.plugins.length,20);assert.equal(result.total,45);assert.equal(result.totalPages,3);}
  evidence.httpListMs=times;
  for(const path of ['/api/runtime/marketplace','/api/runtime/mcp-marketplace']){const result=await api(path+'?page=3');assert.equal((result.plugins||result.entries).length,5);await api(path+'?page=0',undefined,'GET',400);await api(path+'?unknown=1',undefined,'GET',400);}

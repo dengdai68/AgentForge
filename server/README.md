@@ -1,6 +1,6 @@
 # 控制面
 
-createTask 的 teamIds 只是创建时选人输入：Store 校验团队 active，展开其中 active 成员，与显式 memberAgentIds 合并去重；显式停用成员仍拒绝，最终恰好一位经理。任务仅持久化独立成员及冻结快照，团队后续变化不联动任务。不再使用任务优先级；CLI --start 顺序调用既有创建/启动 HTTP，不新增调度规则。
+createTask 的 teamIds 只是创建时选人输入：Store 校验团队 active，展开其中 active 成员，与显式 memberAgentIds 合并去重；显式停用成员仍拒绝，显式从最终成员中选择一位经理。任务仅持久化独立成员及冻结快照，团队后续变化不联动任务。不再使用任务优先级；CLI --start 顺序调用既有创建/启动 HTTP，不新增调度规则。
 
 失败 Run 的人工恢复继续原 Dispatch/成员会话，保留消息和咨询依赖、累计 attempts 与失败 Trace，不取消其他排队工作。下次领取优先处理人类恢复的投递；已完成投递的旧错误不再成为恢复入口。没有执行投递的准备失败保留原队列，空队列才启动经理。
 
@@ -129,4 +129,18 @@ PUT /api/runs/:id/members 经认证交给 Store 更新当前成员投影，不�
 
 首次保存快照内集合时先完整物化，不能把“脏日志为空”当成“集合已落盘”；实体/事件初始化标记与主快照删除数组同事务提交。`state-journal` 回归覆盖已有安装 ID 的冷启动与再次重启。
 
+
+极简工作流画布与CLI共同提交节点description/position和edges。Store统一校验/规范化连线及派生节点关系，普通交接可返工回路，前置依赖禁止成环；不执行连线正文条件。Run Files按每次经理Trace从任务冻结定义生成0600且排他创建的workflow.md；Orchestrator将文件引用交给纯prompt组装，生成失败按原投递失败处理，不注入全图或改用当前模板。新节点正文进入员工当前职责增量。
+
+工作流分支：nodes.type=process/condition，edges.condition为自然语言条件（最多2000字符），默认流程/空条件；App/CLI同协议并冻结。条件节点菱形、经理选择满足条件的一条分支；预览返回保留画布有效尺寸。test-workflow-editor覆盖反复切换、宽窄布局、类型切换与分支保存回读。
+
 同一轮包含 `summary` 与 `consultation` 时，先将非空且与问题正文不同的报告保存为普通角色 Message，再保存问题和等待关系；两条消息关联同一 Trace/本轮输入。缺少报告或正文与问题相同不另造消息，协调失败仍回滚路由并保留原报告；不从控制台补造旧 Message。
+
+任务必须显式managerAgentId，从最终active成员中选一位，不按员工kind推断。Task冻结经理原配置，Run继续独立经理别名/sourceAgentId与会话；新增其他成员不按kind拒绝，当前经理不可移除。自动化保存/更新/触发同一字段，配置版本与历史Run不联动。
+runtime/mcp-tools.mjs通过已安装不可变配置与现有mcp-launcher建立短连接，仅initialize/tools/list；15秒超时、成功60秒缓存、并发合并/上限和工具体积边界，finally关闭。POST认证tools入口校验当前目录项，CLI/UI共用，详情失败独立于配置读取。
+
+workflow当前写入及新Task冻结模板时校验process最多一出口，condition允许分支；sourcePort/targetPort仅接受四边枚举。读取现有模板与冻结历史不转换、不改写；更新失败保持原记录。
+
+Runtime 固定目录与本机安装门禁覆盖九项；任务/沟通/探测复用 runRuntime，Store 仅保存配置和已确认会话，OpenCode ses_ 标识不再因下划线被拒绝。新增适配边界见 docs/29。
+
+工作目录 content?media=1 的 GET/HEAD 使用 Run Files 视频描述符，单段 Range 返回206/416；保护认证及文件边界，有界流与断连清理，不转码。Runtime 保存的 model/effort 与 App/CLI 共用原生目录。

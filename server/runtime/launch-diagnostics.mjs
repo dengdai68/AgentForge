@@ -1,3 +1,4 @@
+import {RUNTIME_PROVIDERS} from "../../client/runtime-providers.mjs";
 import { access, open, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
@@ -57,7 +58,7 @@ export async function diagnoseLaunch({ command, cwd, searchPath = "/usr/bin:/bin
   }
   if (!selected) {
     problems.push(candidates.some(item => item.exists) ? "CLI 候选存在但不是可执行文件，或当前用户无执行权限。" : "在本次服务实际使用的路径中未找到 CLI；尚不能断言此电脑未安装 CLI。");
-    nextSteps.push(`在这台 Mac 的终端运行 command -v ${provider === "DeepSeek Harness" ? "dsh" : provider === "Codex" ? "codex" : "claude"}，检查该可执行文件已在登录 Shell 的 PATH 中；修复安装/PATH 后重新打开客户端，再在「设置 → Runtime」测试连接。`);
+    nextSteps.push(`在这台 Mac 的终端运行 command -v ${Object.values(RUNTIME_PROVIDERS).find(item=>item.label===provider)?.command || command}，检查该可执行文件已在登录 Shell 的 PATH 中；修复安装/PATH 后重新打开客户端，再在「设置 → Runtime」测试连接。`);
     if (commonLocations.some(item => item.usable)) nextSteps.push("commonLocations 中发现未包含在服务 PATH 的可执行文件。客户端会尝试读取登录 Shell 环境；检查 Shell 配置能否正常结束，并在修复 PATH 后重新打开客户端。");
   }
   if (interpreter?.usable === false) {

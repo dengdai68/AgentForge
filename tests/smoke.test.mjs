@@ -1,4 +1,5 @@
 import test from "node:test";
+import { workflowConnections } from "../client/workflow-description.mjs";
 import { mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
@@ -393,7 +394,7 @@ test("content delivery workflow freezes boundaries and never resurrects deleted 
     { id: "content_creation", title: "内容创作与编辑", dependsOn: ["content_brief"], artifactPaths: ["docs/content/"] },
     { id: "content_review", title: "内容审校与质量核查", dependsOn: ["content_creation"], artifactPaths: ["docs/content-review/"] }
   ]);
-  const task = store.createTask({ title: "交付试用邀请文案", objective: "形成可审校的本地邮件文案。", workspacePath: process.cwd(), memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: template.id });
+  const task = store.createTask({managerAgentId:'system_project_manager', title: "交付试用邀请文案", objective: "形成可审校的本地邮件文案。", workspacePath: process.cwd(), memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: template.id });
   assert.deepEqual(task.nodeAssignments, {});
   assert.ok(task.workflowSnapshot.nodes.every((node) => node.staffingGuidance));
   assert.deepEqual(task.workflowSnapshot.nodes.map(({ id, artifactPaths, repositoryPath }) => ({ id, artifactPaths, repositoryPath })), [
@@ -402,7 +403,7 @@ test("content delivery workflow freezes boundaries and never resurrects deleted 
     { id: "content_review", artifactPaths: ["docs/content-review/"], repositoryPath: null }
   ]);
   const incompleteTeam = store.createTeam({ name: "缺少审校角色的内容团队", memberAgentIds: ["agent_analyst", "agent_designer", "system_project_manager"] });
-  const flexibleTask = store.createTask({ title: "按能力安排审校", objective: "项目经理从现有成员中选择合适的人。", workspacePath: process.cwd(), memberAgentIds: incompleteTeam.memberAgentIds, workflowTemplateId: template.id });
+  const flexibleTask = store.createTask({managerAgentId:'system_project_manager', title: "按能力安排审校", objective: "项目经理从现有成员中选择合适的人。", workspacePath: process.cwd(), memberAgentIds: incompleteTeam.memberAgentIds, workflowTemplateId: template.id });
   assert.deepEqual(flexibleTask.nodeAssignments, {});
 
   const root = await mkdtemp(join(tmpdir(), "agentforge-content-workflow-")), path = join(root, "state.sqlite"), persistence = createSqlitePersistence(path);
@@ -430,7 +431,7 @@ test("task creation presents explicit acceptance criteria before execution", asy
 
 test("task creation keeps optional criteria and a small workspace hint without execution boilerplate", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const modal = source.slice(source.indexOf("function newTaskModal("), source.indexOf("function workflowNodeRow("));
+  const modal = source.slice(source.indexOf("function newTaskModal("), source.indexOf("function workflowModal("));
   assert.match(modal, /系统工作根目录/);
   assert.doesNotMatch(modal, /data-task-execution-boundary|modal-intro|团队项目经理/);
   assert.match(modal, /class="task-acceptance"/);
@@ -511,7 +512,7 @@ if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdi
 else if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "requirements", rationale: "恢复后先完成需求职责" };
 else { mkdirSync("docs/requirements", { recursive: true }); writeFileSync("docs/requirements/recovery.md", "# Recovery\\nverified after checkout."); }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -578,7 +579,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 
 test("task form combines employee selections and workflow without expanded staffing details or preassignments", async () => {
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
-  const modal = source.slice(source.indexOf("function newTaskModal("), source.indexOf("function workflowNodeRow("));
+  const modal = source.slice(source.indexOf("function newTaskModal("), source.indexOf("function workflowModal("));
   assert.match(modal, /name="workflowTemplateId"/);
   assert.match(modal, /id: 'task-members'/);
   assert.doesNotMatch(modal, /name="teamId"/);
@@ -750,14 +751,15 @@ test("custom workflow deletion preserves Task template references", async () => 
   const source = await readFile(new URL("../web/app.js", import.meta.url), "utf8");
   const start = source.indexOf("function renderWorkflows()"), end = source.indexOf("\n\nfunction workflowDetails", start);
   const host = {};
-  const render = new Function("state", "disposeWorkflowGraphs", "$", "esc", "paginate", "renderListPager", `${source.slice(start, end)}; return renderWorkflows;`)({
+  const render = new Function("state", "disposeWorkflowGraphs", "$", "esc", "paginate", "renderListPager", "workflowConnections", `${source.slice(start, end)}; return renderWorkflows;`)({
     tasks: [{ workflowTemplateId: "referenced" }], listPages: { workflows: 1 },
     directoryPages:{workflows:{page:1,items:[
       { id: "referenced", referenceCount:1, name: "受引用", system: false, description: "", nodes: [{ id: "node", dependsOn: [] }] },
       { id: "available", name: "可删除", system: false, description: "", nodes: [{ id: "node", dependsOn: [] }] }
     ]}}
-  }, () => {}, () => host, (value) => String(value), (items) => ({items, page:1}), () => {});
+  }, () => {}, () => host, (value) => String(value), (items) => ({items, page:1}), () => {}, workflowConnections);
   render();
+  assert.match(host.innerHTML, /0 条连线/);
   assert.match(host.innerHTML, /已被 1 个任务引用/);
   assert.doesNotMatch(host.innerHTML, /data-delete-workflow="referenced"/);
   assert.match(host.innerHTML, /data-delete-workflow="available"/);
@@ -934,7 +936,7 @@ test("tasks select their manager, include humans, and freeze independent member 
   const pm = store.createAgent({ name: "自定义经理", role: "协调者", kind: "manager", systemPrompt: "协调通用任务" });
   const team = store.createTeam({ name: "团队", memberAgentIds: [...new Set([worker.id, pm.id])] });
   const flow = store.createWorkflowTemplate({ name: "不匹配名称仍可显式分配", nodes: [{ id: "work", title: "工作", staffingGuidance: "资料整理", dependsOn: [] }] });
-  const task = store.createTask({ title: "任务", objective: "交付", workspacePath: process.cwd(), memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { work: worker.id } });
+  const task = store.createTask({managerAgentId:pm.id, title: "任务", objective: "交付", workspacePath: process.cwd(), memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { work: worker.id } });
   const run = store.createRun(task.id);
   assert.equal(run.manager.sourceAgentId, pm.id);
   assert.equal(worker.kind, "business");
@@ -1261,7 +1263,7 @@ test("task properties render safe recorded facts independently of the active tab
   assert.ok(start >= 0 && end > start);
   const esc = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
   const details = new Function("esc", "workflowDiagramCanvas", "roleColor", "initialsOf", "roleExecutionStatus", "state", `${source.slice(start, end)}; return workspaceDetailsMarkup;`)(esc, () => '<div class="workflow-diagram">职责图</div>', () => "blue", () => "A", roleExecutionStatus, {});
-  const workspace = { run: { id: "run_test", task: { objective: '<script>bad()</script>', workspacePath: '/tmp/" onclick="bad()', team: { name: "A&B" }, workflowSnapshot: { name: "审批流程" } } } };
+  const workspace = { run: { id: "run_test", manager:{id:"manager_test"}, task: { objective: '<script>bad()</script>', workspacePath: '/tmp/" onclick="bad()', team: { name: "A&B" }, workflowSnapshot: { name: "审批流程" } } } };
   for (const tab of ["collaboration", "artifacts", "directory", "console"]) {
     const markup = details(workspace, { agents: [{ id: "a" }], currentFocusNode: { title: "核验交付" }, view: { tab, disclosures: { brief: true } }, artifactCount: 2 });
     assert.match(markup, /^<aside[^>]+aria-label="任务详情"/);
@@ -1306,7 +1308,7 @@ const out = { kind: "node_result", summary: "没有实际文件的交付声明",
 if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: "requirements", rationale: "先完成需求交付" };
 else out.artifacts = [{ path: "docs/requirements/claimed.md", description: "此文件没有被写入" }];
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -1339,7 +1341,7 @@ const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions:
 if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: "requirements", rationale: "先验证本地输出" };
 else { mkdirSync("docs/requirements", { recursive: true }); writeFileSync("docs/requirements/invalid-result.md", "# retained local file\\n"); out.decisions = [{ summary: "不应成为事实", impact: "unknown", affectedNodeIds: ["requirements"], rationale: "非法枚举" }]; }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -1412,7 +1414,7 @@ console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "te
 console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "audit-tool", name: "Bash", input: { command: "cat /private/RUNTIME_TOOL_INPUT" } }] } }));
 console.log(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "audit-tool", content: "RUNTIME_TOOL_OUTPUT" }] } }));
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -1424,7 +1426,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     const reviewer = store.createAgent({ name: "独立验证", runtime: { provider: "claude-code", executable } });
     const team = store.createTeam({ name: "团队", memberAgentIds: [tester.id, reviewer.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "开发与测试", nodes: [{ id: "verify", title: "开发", staffingGuidance: "研发工程师", dependsOn: [] }, { id: "testing", title: "独立测试", staffingGuidance: "非作者验证", artifactPaths: ["docs/testing/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "真实运行", objective: "验证 Trace", acceptanceCriteria: ["验收口径必须进入项目经理复核"], workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id, testing: reviewer.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({managerAgentId:'system_project_manager', title: "真实运行", objective: "验证 Trace", acceptanceCriteria: ["验收口径必须进入项目经理复核"], workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id, testing: reviewer.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
     await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });
     const workspace = store.getRunWorkspace(run.id);
@@ -1474,7 +1476,7 @@ else if (prompt.includes("任务级项目经理")) out.managerDecision = { nextN
 else if (prompt.includes("token 仅内存，成功后停留当前页")) { mkdirSync("docs/architecture", { recursive: true }); mkdirSync("docs/testing", { recursive: true }); writeFileSync("docs/architecture/token-policy.md", "# Token policy\\n仅内存保存。"); writeFileSync("docs/testing/review.md", "# Fixture testing report"); out.summary = "架构师已将咨询结论落实到交付。"; }
 else out.consultation = { audience: "agent", recipientAgentId: "${analyst.id}", question: "请确认 token 与成功页口径", questionType: "业务口径", routingReason: "该成员负责需求定义", consideredMemberIds: ["${analyst.id}"] };
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -1482,7 +1484,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
 `); await chmod(executable, 0o755);
     const team = store.createTeam({ name: "咨询团队", memberAgentIds: [analyst.id, architect.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "咨询流程", nodes: [{ id: "architecture", title: "架构", staffingGuidance: "系统架构师", artifactPaths: ["docs/architecture/", "docs/testing/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "咨询续跑", objective: "验证立即答复", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { architecture: architect.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({managerAgentId:'system_project_manager', title: "咨询续跑", objective: "验证立即答复", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { architecture: architect.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id); await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") }); const workspace = store.getRunWorkspace(run.id);
     assert.equal(workspace.run.status, "awaiting_acceptance"); store.confirmRunCompletion(run.id); assert.equal(store.getRun(run.id).status, "completed"); assert.equal(workspace.run.waitingAgentId, null); assert.ok(workspace.messages.some((message) => message.kind === "agent_consultation")); assert.ok(workspace.messages.some((message) => message.kind === "consultation_answer")); assert.ok(workspace.traces.some((trace) => trace.type === "consultation" && trace.status === "completed")); assert.equal(workspace.traces.filter((trace) => trace.workflowNodeId === "architecture" && trace.type === "node").length, 2);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -1508,7 +1510,7 @@ if (prompt.includes('"purpose":"delivery_review"')) out.deliveryReview = { verdi
 else if (prompt.includes("任务级项目经理")) out.managerDecision = { nextNodeId: prompt.includes('"type":"node"') ? null : "verify", rationale: "失败事实已保留，现可进入复核" };
 else { mkdirSync("docs/verify", { recursive: true }); mkdirSync("docs/testing", { recursive: true }); writeFileSync("docs/verify/retry.md", "# Retry evidence"); writeFileSync("docs/testing/review.md", "# Fixture testing report"); }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -1519,7 +1521,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     const tester = store.createAgent({ name: "验证", role: "验证工程师", runtime: { provider: "claude-code", executable } });
     const team = store.createTeam({ name: "重试团队", memberAgentIds: [tester.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "重试流程", nodes: [{ id: "verify", title: "验证", staffingGuidance: "验证工程师", artifactPaths: ["docs/verify/", "docs/testing/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "人工立即重试", objective: "保留失败事实并继续", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({managerAgentId:'system_project_manager', title: "人工立即重试", objective: "保留失败事实并继续", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
     await executeRun(store, run.id, { runFilesRoot: join(root, "run-files") });
     const waiting = store.getRunWorkspace(run.id), failedTrace = waiting.traces.find((trace) => trace.status === "failed"), waitingDispatch = waiting.dispatches.find((item) => item.id === waiting.run.failure.dispatchId);
@@ -1564,7 +1566,7 @@ else if (!existsSync(".agentforge/first-attempt-marker")) {
   process.exit(1);
 } else { mkdirSync("docs/development", { recursive: true }); writeFileSync("docs/development/src/main.js", "export const answer = 43;\\n"); writeFileSync("docs/development/report.md", "# Retried delivery\\n"); }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -1577,7 +1579,7 @@ console.log(JSON.stringify({ type: "result", result: JSON.stringify(out) }));
     const developer = store.createAgent({ name: "开发", runtime: { provider: "claude-code", executable } });
     const team = store.createTeam({ name: "失败重试团队", memberAgentIds: [developer.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "失败重试流程", nodes: [{ id: "develop", title: "开发", staffingGuidance: "开发", artifactPaths: ["docs/development/"], dependsOn: [] }] });
-    const task = store.createTask({ title: "失败写入后重试", objective: "源码和测试均应接纳", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { develop: developer.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({managerAgentId:'system_project_manager', title: "失败写入后重试", objective: "源码和测试均应接纳", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { develop: developer.id }, managerRuntime: { provider: "claude-code", executable } });
     const run = store.createRun(task.id);
     await executeRun(store, run.id, { runFilesRoot });
     const first = store.getRunWorkspace(run.id), failed = first.traces.find((trace) => trace.type === "node" && trace.status === "failed");
@@ -1652,7 +1654,7 @@ test("termination records Run and Trace cancellation facts without a false failu
     const tester = store.createAgent({ name: "慢", role: "测试工程师", runtime: { provider: "claude-code", executable } });
     const team = store.createTeam({ name: "慢团队", memberAgentIds: [tester.id, "system_project_manager"] });
     const flow = store.createWorkflowTemplate({ name: "慢流程", nodes: [{ id: "verify", title: "验证", staffingGuidance: "测试工程师", dependsOn: [] }] });
-    const task = store.createTask({ title: "终止", objective: "验证", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
+    const task = store.createTask({managerAgentId:'system_project_manager', title: "终止", objective: "验证", workspacePath: root, memberAgentIds: team.memberAgentIds, workflowTemplateId: flow.id, nodeAssignments: { verify: tester.id }, managerRuntime: { provider: "claude-code", executable } });
     run = store.createRun(task.id);
     execution = executeRun(store, run.id, { runFilesRoot: join(root, "files") });
     execution.then(() => { executionSettled = true; }, (error) => { executionSettled = true; executionError = error; });
@@ -1686,7 +1688,7 @@ test("termination records Run and Trace cancellation facts without a false failu
   }
 });
 test("ELK yields non-overlapping dependency positions", async () => { const layout = await new ELK().layout({ id: "flow", layoutOptions: { "elk.algorithm": "layered", "elk.direction": "RIGHT", "elk.edgeRouting": "ORTHOGONAL" }, children: ["a", "b", "c"].map((id) => ({ id, width: 120, height: 64 })), edges: [{ id: "ab", sources: ["a"], targets: ["b"] }, { id: "bc", sources: ["b"], targets: ["c"] }] }); assert.equal(layout.children.length, 3); assert.ok(layout.edges.every((edge) => edge.sections?.[0]?.startPoint)); });
-test("console and diagrams render the PM-owned current focus, not node lifecycle state", async () => { const [app, graphs, projections] = await Promise.all([readFile(new URL("../web/app.js", import.meta.url), "utf8"), readFile(new URL("../web/manual-graphs.mjs", import.meta.url), "utf8"), readFile(new URL("../client/console-projections.mjs", import.meta.url), "utf8")]); assert.match(app, /workflowFocus/); assert.match(projections, /trace\.agentId !== run\.manager\?\.id/); assert.match(graphs, /项目经理当前重心/); assert.match(graphs, /交接参考/); assert.match(graphs, /经理提交人类验收/); assert.doesNotMatch(app, /run\.nodeStates/); });
+test("console and diagrams render the PM-owned current focus, not node lifecycle state", async () => { const [app, graphs, projections] = await Promise.all([readFile(new URL("../web/app.js", import.meta.url), "utf8"), readFile(new URL("../web/manual-graphs.mjs", import.meta.url), "utf8"), readFile(new URL("../client/console-projections.mjs", import.meta.url), "utf8")]); assert.match(app, /workflowFocus/); assert.match(projections, /trace\.agentId !== run\.manager\?\.id/); assert.match(graphs, /项目经理当前重心/); assert.match(graphs, /workflowConnections\(workflow\)/); assert.match(graphs, /经理提交人类验收/); assert.doesNotMatch(app, /run\.nodeStates/); });
 test("termination confirmation describes Run audit facts rather than invented node lifecycle", async () => { const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8"); assert.match(app, /将本次 Run 标记为已终止，并取消尚未完成的协作投递/); assert.match(app, /Trace、Artifact、消息与终止审计记录会保留/); assert.doesNotMatch(app, /所有未完成节点标记为已跳过/); });
 test("collaboration responsibilities come from configured prompts, not role-name branches", async () => { const source = await readFile(new URL("../server/prompts.mjs", import.meta.url), "utf8"); assert.match(source, /agent.systemPrompt/); assert.match(source, /agent.capabilities/); assert.match(source, /consideredMemberIds/); assert.match(source, /consultationMode/); assert.doesNotMatch(source, /function roleGuidance|role === "需求分析师"/); });
 test("workspace Artifact counts do not filter custom business paths by docs/repos prefixes", async () => { const app = await readFile(new URL("../web/app.js", import.meta.url), "utf8"); assert.ok(!app.includes("/^(docs|repos)\\//")); assert.doesNotMatch(app, /历史兼容/); });
@@ -2017,7 +2019,7 @@ const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions:
 if (prompt.includes("你是任务级项目经理")) out.managerDecision = { nextNodeId: "requirements", rationale: "安排需求交付" };
 else { mkdirSync("docs/not_requirements", { recursive: true }); writeFileSync("docs/not_requirements/outside.md", "wrong owner path"); }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -2053,7 +2055,7 @@ else if (prompt.includes("你是任务级项目经理")) {
   out.managerDecision = { nextNodeId: prompt.includes("docs/testing/cross.md") ? null : "requirements", nextAgentId: prompt.includes("docs/testing/cross.md") ? null : "agent_analyst", rationale: "fixture" };
 } else { mkdirSync("docs/testing", { recursive: true }); writeFileSync("docs/testing/cross.md", "cross-node work"); }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }
@@ -2085,7 +2087,7 @@ const out = { kind: "node_result", summary: "fixture", artifacts: [], decisions:
 if (prompt.includes("你是任务级项目经理")) out.managerDecision = { nextNodeId: "requirements", rationale: "安排需求交付" };
 else { mkdirSync("docs/requirements", { recursive: true }); writeFileSync("docs/requirements/delivery.md", "# Delivery\\n"); writeFileSync("docs/requirements/.env", "fixture-secret"); }
 if(out.managerDecision?.nextNodeId && !out.managerDecision.nextAgentId) {
-  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.kind!=="manager");
+  const staff = JSON.parse((prompt.split("可咨询角色：")[1] || "[]").split(String.fromCharCode(10))[0]).filter(row=>row.type==="agent" && row.taskRole!=="manager");
   const node = out.managerDecision.nextNodeId, known = ({development:"agent_engineer",develop:"agent_engineer",testing:"agent_tester",regression:"agent_tester",architecture:"agent_designer"})[node] || "agent_analyst";
   out.managerDecision.nextAgentId = staff.find(row=>row.id===known)?.id || (["testing","architecture"].includes(node) ? staff.at(-1)?.id : staff[0]?.id);
 }

@@ -181,7 +181,7 @@ test("Codex selection persists and native member session resumes without cross-m
     const databasePath = join(root, "state.sqlite"), store = createStore({ databasePath, workspaceRoot: root });
     const manager = store.createAgent({ name: "Custom manager", role: "项目经理", kind: "manager", runtime: { provider: "codex" } });
     const team = store.createTeam({ name: "Test team", memberAgentIds: [...new Set(["agent_analyst", manager.id, manager.id])] });
-    const task = store.createTask({ title: "Read-only test", objective: "Test", memberAgentIds: team.memberAgentIds, workflowTemplateId: "software_delivery", nodeAssignments: { requirements: "agent_analyst", design: "agent_analyst", development: "agent_analyst", testing: "agent_analyst", bug_fix: "agent_analyst", regression: "agent_analyst" } });
+    const task = store.createTask({managerAgentId:manager.id, title: "Read-only test", objective: "Test", memberAgentIds: team.memberAgentIds, workflowTemplateId: "software_delivery", nodeAssignments: { requirements: "agent_analyst", design: "agent_analyst", development: "agent_analyst", testing: "agent_analyst", bug_fix: "agent_analyst", regression: "agent_analyst" } });
     const run = store.createRun(task.id); store.initializeDispatches(run.id);
     const delivery = store.claimDispatch(run.id), trace = store.createTrace(run.id, { workflowNodeId: delivery.workflowNodeId, agentId: delivery.recipientAgentId }); store.attachDispatchTrace(delivery.id, trace.id);
     assert.equal(store.prepareMemberSession(delivery.id, trace.id, root).resume, false);

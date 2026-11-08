@@ -30,7 +30,7 @@ try{
   const {agent:worker}=await api('/api/agents',{name:'克隆员工 '+provider,systemPrompt:`先用独立工具调用 git clone ${quote(source)} project。下一次工具调用将 project/value.mjs 的 value 改为 2，运行 node --input-type=module -e 'import {value} from "./project/value.mjs"; if(value!==2)process.exit(1)'，然后使用 git -C project -c user.name=CloneQA -c user.email=qa@localhost -c commit.gpgsign=false commit 提交（先 git add）。只修改这个文件。不修改全局配置。完成后向经理交接实际测试及提交结果。`,runtime});
   const {agent:manager}=await api('/api/agents',{name:'克隆经理 '+provider,kind:'manager',systemPrompt:'将唯一节点 implement 派给克隆员工，不亲自操作文件。收到成功交接后提交人类验收。managerDecision 只使用 nextNodeId、nextAgentId、rationale 三个字段：派工时 nextNodeId=implement、nextAgentId=员工真实 ID；交付完成时 nextNodeId 和 nextAgentId 都为 null。不使用 action/type/decision 字段。不额外派工或澄清。',runtime});
   const {workflowTemplate:flow}=await api('/api/workflow-templates',{name:'克隆累计差异 '+provider,nodes:[{id:'implement',title:'修改并提交',staffingGuidance:worker.name,deliverable:'project/value.mjs 的 value=2，实际测试并提交',artifactPaths:['project/value.mjs'],dependsOn:[]}]});
-  const {task}=await api('/api/tasks',{title:'Clone CHANGE '+provider,objective:'将测试源仓库克隆至 project，修改 value 为 2，验证并提交。员工成功后经理请求人类验收。',memberAgentIds:[manager.id,worker.id],workflowTemplateId:flow.id});const {run}=await api('/api/tasks/'+task.id+'/run',{});
+  const {task}=await api('/api/tasks',{managerAgentId:manager.id,title:'Clone CHANGE '+provider,objective:'将测试源仓库克隆至 project，修改 value 为 2，验证并提交。员工成功后经理请求人类验收。',memberAgentIds:[manager.id,worker.id],workflowTemplateId:flow.id});const {run}=await api('/api/tasks/'+task.id+'/run',{});
   let final,registeredDuringExecution=false;const started=Date.now();
   while(Date.now()-started<600000){
    final=await api('/api/runs/'+run.id+'/workspace');

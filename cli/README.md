@@ -1,12 +1,12 @@
 # CLI
 
-核心管理能力与 App 对齐：员工搜索包含能力标签；团队支持启停；工作流依赖 dependsOn 与交接 handoffFrom 独立保存，交付定义为空时由 Store 补默认值。tasks create 接受 teamIds 与 memberAgentIds 并集，由 Store 展开可用团队中的 active 成员、去重并校验恰好一位经理；不保存团队绑定。验收标准省略或 [] 均为空，最多20条/每条500字符；不再使用任务优先级。create --start 显式创建并启动，失败输出 TASK_CREATED_START_FAILED 与 taskId，先查询状态勿重复创建。任务列表按更新/归档时间降序，未知状态拒绝。
+核心管理能力与 App 对齐：员工搜索包含能力标签；团队支持启停；工作流依赖 dependsOn 与交接 handoffFrom 独立保存，交付定义为空时由 Store 补默认值。tasks create 接受 teamIds 与 memberAgentIds 并集，由 Store 展开可用团队中的 active 成员、去重并校验managerAgentId指向所选可用成员；不保存团队绑定。验收标准省略或 [] 均为空，最多20条/每条500字符；不再使用任务优先级。create --start 显式创建并启动，失败输出 TASK_CREATED_START_FAILED 与 taskId，先查询状态勿重复创建。任务列表按更新/归档时间降序，未知状态拒绝。
 
 `tasks list --workflow ID_OR_NAME` 支持精确 ID 或唯一的当前/任务冻结名称；歧义须用 ID，不存在明确报错。与 search/status/archived 组合后分页，摘要包含 workflow 的 ID 与任务冻结名称，不返回完整工作流配置。
 
 任务失败人工恢复在客户端继续原失败员工的投递与会话；CLI 无恢复命令，不扩展操作权限。progress 保留累计 attempts/脱敏错误，协作查询保留失败及恢复事件。
 
-任务从团队与员工 ID 合并成独立成员集合，必须恰好有一位可用项目经理；团队不拥有任务或群聊。领域规则见 [领域模型](../docs/03-domain-model.md)，CLI 输入输出见 [CLI 指南](../docs/21-configuration-cli.md)。
+任务从团队与员工 ID 合并成独立成员集合，必须显式从所选员工中指定一位本次经理；团队不拥有任务或群聊。领域规则见 [领域模型](../docs/03-domain-model.md)，CLI 输入输出见 [CLI 指南](../docs/21-configuration-cli.md)。
 
 任务创建可传 teamIds 进行批量选人，持久化使用 memberAgentIds；移除 --team。团队 managerAgentId 废弃，成员可空；员工删除保留持久标记及历史。详情只输出成员 ID/名称引用，不包含员工提示词/扩展配置。长期群聊仍不属于 CLI 命令覆盖范围。
 
@@ -59,7 +59,7 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 
 tasks message 的 recipientAgentId 可省略，默认发给当前 Run 的项目经理；显式提供需为当前 Run 成员 ID。tasks reply 仍必须指定待答问题 ID，普通消息不会被猜成澄清回答；回执保留实际接收方。
 
-插件/MCP 跨 Runtime 支持按源标准计划统一查询；既有安装无需重装，`plugins get` 可核对每种 Runtime 的当前原因。输入命令不新增兼容转换开关，MCP cwd/env_vars 在三种 Runtime 共用私有启动器，详见 docs/26。
+插件/MCP 跨 Runtime 支持按源标准计划统一查询；既有安装无需重装，`plugins get` 可核对每种 Runtime 的当前原因。输入命令不新增兼容转换开关，MCP cwd/env_vars 在九种 Runtime 共用私有启动器，详见 docs/26。
 
 插件导入/查询共享源标准 v3：已知 Claude 模型别名在其他 Runtime 继承目标模型；单行描述冒号在原生投影规范化，未知结构明确拒绝。某个已安装插件格式错误在该条兼容原因中显示，不阻塞全部列表；原始源和冻结任务不改写。命令、输入 schema 和引用输出不新增转换参数。
 
@@ -94,3 +94,27 @@ roles create/update 支持 extensionSelection，和 App 的角色插件/MCP选�
 配置和任务列表现在直接使用服务端分页/搜索/筛选；`--all` 显式逐页取得结果，精确 ID 详情不扫描目录。`tasks progress/questions` 读取 compact 状态，collaboration/artifacts 按游标取得对应页。角色/工作流名称通过轻量引用目录解析，仍拒绝歧义。`runtimes models PROVIDER --refresh` 重查本机目录；任务附件以流上传，仍限 20 MiB。App/CLI 字段、默认值与失败语义不变，最终确认仍只在客户端。
 
 任务协议纠错与客户端共用后端：progress 展示原成员的真实错误和状态；协调格式一次纠正后仍失败则由客户端恢复。没有新增 CLI 派工字段或重试/验收权限；角色协作记录不加入平台纠错消息。
+
+
+workflows create/update 支持最简节点title/description（id省略生成node_N），可选人员需求/交付字段/position，以及有正文的edges；edges提供时为关系来源，节点dependsOn/handoffFrom同时提供必须一致，否则由Store派生。默认普通交接允许返工回路，dependency=true的前置依赖禁止成环。schema/help/文本与JSON回读同步App画布；不新增CLI执行或人类确认权限。
+
+工作流分支：nodes.type=process/condition，edges.condition为自然语言条件（最多2000字符），默认流程/空条件；App/CLI同协议并冻结。条件节点菱形、经理选择满足条件的一条分支；预览返回保留画布有效尺寸。test-workflow-editor覆盖反复切换、宽窄布局、类型切换与分支保存回读。
+
+工作流画布的“连线标题”对应condition（分支标签），“提示词”对应description；本轮仅精简App呈现，CLI/schema/HTTP字段不变。UI不再编辑补充资料与关系标识，保存时保留其值，CLI仍可通过同一配置协议完整读写这些资料。
+
+执行画布工作流：`agentforge tasks create --workflow "工作流名称或ID" --file task.json --start`。文件提供title、objective、memberAgentIds/teamIds、可选acceptanceCriteria；省略--start只存草稿。工作流名称必须唯一；和workflowTemplateId同时指定时需为相同ID，冲突不创建任务。节点、分支和连线提示词冻结为workflow.md，由经理读取；执行/协作与App一致，完成在客户端确认。
+
+任务经理现由tasks create/automations create文件中的必填managerAgentId从所选员工中指定，所有员工都可担任；员工kind保留但不影响身份。自动化部分更新可单独切换经理，不能移除经理而不重选。原Task/Run和成员会话保持冻结。
+mcps tools ID [--refresh]查询真实工具名称、说明、inputSchema/outputSchema及total/checkedAt，支持stdio/SSE/HTTP，仅列工具不调用；15秒超时、60秒成功缓存，失败不缓存。get仍只查询脱敏安装详情。
+
+mcps tools支持--search名称/说明筛选后分页，默认每页20条，--page N与--all互斥；--all返回全部匹配工具。输出tools、匹配total、服务availableTotal、page/pageSize/totalPages/hasMore及checkedAt；与App详情搜索和20条分页相同，查询只读取一次工具定义。
+
+workflows的节点process最多一出口，多个出口使用condition；可选edge.sourcePort/targetPort为top/right/bottom/left，schema/help与Store同步。布局缩放为纯视图，不新增CLI命令；已有position写入和tasks create --workflow执行入口保留。
+
+Runtime list/get/update/test/models 覆盖九项，可用固定 ID、Provider ID 或完整显示名；模型默认/手工输入、已安装开关及 effort 和 App/HTTP/Store 同步。原生插件/子代理/MCP 投影及逐组件兼容边界见 docs/29，不把静态支持当真实账号验证。
+
+新增六种 Runtime 的基础 Skill/可适配 Command 插件、独立子代理、原生 MCP、私有配置及不兼容组件边界见 [多 Runtime 接入](../docs/29-runtime-providers.md)。App 市场详情“检查兼容性”与 CLI `plugins check-compatibility ID` / `mcps check-compatibility ID` 等价；仅刷新当前目录摘要，不改写安装、员工/角色绑定或历史。
+
+插件/MCP check-compatibility 逐 ID 显式刷新目录兼容性；纯 Skill 插件可绑定新增六种 Runtime，专用组件按原因拒绝。
+
+新增六种 runtimes models 查询原生候选和逐模型 levels，App/CLI 相同。effort 为原生思考档位，OpenCode 支持模型目录自定义 variant；Cursor/Gemini/OpenCode 非空 effort 需要 model。

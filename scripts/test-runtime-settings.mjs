@@ -25,10 +25,10 @@ const manager = store.createAgent({name:'配置验收经理',kind:'manager',syst
 const worker = store.createAgent({name:'配置验收成员',systemPrompt:'直接用一句中文回复：固定 Runtime 配置验证成功。无需工具和文件。',runtime:{profileId:profiles.codex.id}});
 const team = store.createTeam({name:'配置验收团队',memberAgentIds: [...new Set([worker.id, manager.id])]});
 const flow = store.createWorkflowTemplate({name:'配置验收流程',nodes:[{id:'check',title:'配置验收',staffingGuidance:'配置验收成员使用 Codex',deliverable:'一句文字交接即可；无需文件。'}]});
-const task = store.createTask({title:'Runtime 固定配置与 CLI 登录验收',objective:'将 check 节点交给配置验收成员，一句文字交接后经理直接提交人类验收。无需文件或额外验证。',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id});
+const task = store.createTask({managerAgentId:'system_project_manager',title:'Runtime 固定配置与 CLI 登录验收',objective:'将 check 节点交给配置验收成员，一句文字交接后经理直接提交人类验收。无需文件或额外验证。',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id});
 const chat = store.openCommunication({kind:'agent',targetId:worker.id});
 // Presentation fixture only: no Provider execution is claimed by this lifecycle.
-const completedTask = store.createTask({title:'已完成任务的直接操作',objective:'仅验收操作展示与确认流程。',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id});
+const completedTask = store.createTask({managerAgentId:'system_project_manager',title:'已完成任务的直接操作',objective:'仅验收操作展示与确认流程。',memberAgentIds: team.memberAgentIds,workflowTemplateId:flow.id});
 const completedRun = store.createRun(completedTask.id);
 store.updateRun(completedRun.id,{status:'running'}); store.setTaskStatus(completedTask.id,'running');
 store.updateRun(completedRun.id,{status:'review'}); store.setTaskStatus(completedTask.id,'review');
@@ -107,7 +107,7 @@ try {
   console.log('PASS desktop shared login'); evidence.cases.push('CLI uses desktop authorization without separate login; CLI logout leaves desktop signed in');
   if(bundle){await poll('default installation',()=>stat(join(home,'.local/bin/agentforge')).catch(()=>null));assert.match(await readFile(join(home,'.zshrc'),'utf8'),/AgentForge CLI PATH/);const shellResult=await promisify(execFile)('/bin/zsh',['-ilc','agentforge auth status --json'],{env:{...process.env,HOME:home,ZDOTDIR:home,PATH:'/usr/bin:/bin:/usr/sbin:/sbin'},timeout:30000});assert.equal(JSON.parse(shellResult.stdout).data.username,'settings-qa');evidence.cases.push('packaged startup installs CLI automatically; a fresh shell authenticates without flags or login');}
   await page.goto(origin+'/settings/runtime'); await page.locator('.runtime-provider-row').first().waitFor();
-  assert.equal(await page.locator('.runtime-provider-row').count(),3); assert.equal(await page.getByText('新增 Runtime',{exact:true}).count(),0);
+  assert.equal(await page.locator('.runtime-provider-row').count(),9); assert.equal(await page.getByText('新增 Runtime',{exact:true}).count(),0);
   const codex = page.locator(`[data-runtime-profile="${profiles.codex.id}"]`);
   await codex.getByRole('switch').uncheck(); await codex.getByText('已停用；',{exact:false}).waitFor();
   assert.equal((await api(`/api/tasks/${task.id}/run`,{})).status,400);

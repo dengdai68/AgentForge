@@ -1,11 +1,11 @@
 import { executionBudget } from "./execution-budget.mjs";
 import { registerExecution } from "./runtime/registry.mjs";
 import { mkdir, writeFile, realpath } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { join, resolve, sep, dirname } from "node:path";
 import { withHistoryTools } from "./history/bridge.mjs";
 import { diagnostic, withDiagnosticContext } from "./diagnostics.mjs";
 import { communicationPrompt } from "./prompts.mjs";
-import { runClaudeCodeCli, runCodexCli, runDshCli, RuntimeSessionMissingError, redactExternalText, separateRuntimeSession, promptSnapshot } from "./runtime/local-cli.mjs";
+import { runRuntime, RuntimeSessionMissingError, redactExternalText, separateRuntimeSession, promptSnapshot } from "./runtime/local-cli.mjs";
 
 // Private replies have one body; groups may explicitly address peer members.
 const replySchema = {type:"object",additionalProperties:false,properties:{reply:{type:"string"}},required:["reply"]};
@@ -43,10 +43,11 @@ export function createCommunicationService(store, { root, invoke, files } = {}) 
             store.appendCommunicationEvent(key, item.id, { providerEventType: 'prompt.snapshot', data: { contentRef } });
           } catch (error) { diagnostic('communication.prompt_snapshot_failed', { error }); }
         };
-        const provider = invoke || (agent.runtime.provider === "dsh" ? runDshCli : agent.runtime.provider === "codex" ? runCodexCli : runClaudeCodeCli);
+        const contextDirectories=[...new Set([context.message,...context.messages].flatMap(item=>(item.attachments || []).map(file=>dirname(resolve(root,key,file.path)))))];
+        const provider = invoke || runRuntime;
         const result = await withHistoryTools(store, agent, {
           runtime: agent.runtime, workspacePath: cwd, traceDirectory: directory, schemaPath, finalPath, outputSchema: schema,
-          ...input, onPrompt, runId: key, executionKey: `communication:${key}:${agent.id}`, session,
+          ...input, contextDirectories, onPrompt, runId: key, executionKey: `communication:${key}:${agent.id}`, session,
           onEvent: async (event) => {
             const { sessionId, auditEvent, content } = separateRuntimeSession(event);
             if (content && files) auditEvent.data.contentRef = await files.writeCommunicationContent(key, item.id, item.attempts, content);

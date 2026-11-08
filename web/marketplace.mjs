@@ -1,3 +1,4 @@
+import {runtimeLabel,RUNTIME_IDS} from "../client/runtime-providers.mjs";
 import { paginationMarkup } from './pagination.mjs';
 import { createFloatingList } from './floating-list.mjs';
 
@@ -7,9 +8,9 @@ export function extensionAvatarColor(id) {
   return ['violet', 'cyan', 'amber', 'blue', 'green'][hash % 5];
 }
 
-const providerLabel = value => value==='dsh'?'DeepSeek Harness':value==='codex'?'Codex':'Claude Code';
+const providerLabel = runtimeLabel;
 const supportReason=(item,provider)=>item.compatibility?.[provider]?.reasons?.join('；') || '此插件的组件与当前 Runtime 不兼容';
-const runtimeBadges=(item,esc)=>`<span class="extension-runtime-badges">${['claude-code','codex','dsh'].map(provider=>`<span class="runtime-support" data-supported="${item.providers.includes(provider)}" title="${esc(item.providers.includes(provider)?'组件静态兼容；依赖与账号需在实际执行时验证':supportReason(item,provider))}">${providerLabel(provider)} · ${item.providers.includes(provider)?'支持':'不兼容'}</span>`).join('')}</span>`;
+const runtimeBadges=(item,esc)=>`<span class="extension-runtime-badges">${RUNTIME_IDS.map(provider=>`<span class="runtime-support" data-supported="${item.providers.includes(provider)}" title="${esc(item.providers.includes(provider)?'组件静态兼容；依赖与账号需在实际执行时验证':supportReason(item,provider))}">${providerLabel(provider)} · ${item.providers.includes(provider)?'支持':'不兼容'}</span>`).join('')}</span>`;
 const warningMarkup=(warnings,esc)=>warnings?.length?`<section role="alert" class="settings-note"><strong>⚠️ ${warnings.length} 项组件未安装</strong><ul>${warnings.map(item=>`<li><strong>${esc(item.plugin)} · ${esc(({skill:'Skill',agent:'Subagent',hook:'Hook',command:'Command'})[item.component] || item.component)}</strong><br><code>${esc(item.path)}</code>：${esc(item.message)}</li>`).join('')}</ul></section>`:'';
 const components = (plugin,esc,key) => `<section class="plugin-detail-section">${plugin.components?.[key]?.length ? plugin.components[key].map(item=>`<div class="plugin-detail-component"><strong>${esc(item.name || item.event)}</strong>${item.providers?`<small class="component-runtimes">${esc(item.providers.map(providerLabel).join(' / '))}</small>`:''}${item.description?`<p>${esc(item.description)}</p>`:''}${item.path?`<code>${esc(item.path)}</code>`:''}${item.matchers?`<pre>${esc(JSON.stringify(item.matchers,null,2))}</pre>`:''}</div>`).join(''):'<p class="empty-state">未包含此类组件</p>'}</section>`;
 
@@ -36,11 +37,16 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
   }
   async function detail(id,errorMessage='') {
     if(!root?.isConnected)return;
-    openModal(`<h2>${label}详情</h2><p class="modal-intro field-error" role="alert" data-extension-delete-error>${esc(errorMessage)}</p><div data-extension-detail-body role="status">正在读取…</div><div class="form-actions">${plugin?'':'<button type="button" class="small-button" data-edit-mcp disabled>编辑</button>'}<button type="button" class="small-button danger" data-delete-extension>删除</button><button type="button" class="ghost-button" data-close-modal>关闭</button></div>`);
+    openModal(`<h2>${label}详情</h2><p class="modal-intro field-error" role="alert" data-extension-delete-error>${esc(errorMessage)}</p><div data-extension-detail-body role="status">正在读取…</div><div class="form-actions">${plugin?'':'<button type="button" class="small-button" data-edit-mcp disabled>编辑</button>'}<button type="button" class="small-button" data-check-compatibility>检查兼容性</button><button type="button" class="small-button danger" data-delete-extension>删除</button><button type="button" class="ghost-button" data-close-modal>关闭</button></div>`);
     const target=document.querySelector('[data-extension-detail-body]');
     target.closest('.modal').classList.add('extension-detail-modal');
     target.closest('.modal').querySelector('[data-close-modal]').focus();
     const entry=items.find(item=>item.id===id);
+    document.querySelector('[data-check-compatibility]').onclick=async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      try{await api(`${path}/${encodeURIComponent(id)}/compatibility`,{method:'POST',body:'{}'});await load();if(root?.isConnected)await detail(id);toast('兼容性已更新。');}
+      catch(error){toast(error.message,true);if(button.isConnected)button.disabled=false;}
+    };
     document.querySelector('[data-delete-extension]').onclick=async event=>{
       const view=root;
       event.currentTarget.disabled=true;
@@ -54,9 +60,25 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
       const item=await api(`${path}/${encodeURIComponent(id)}`);if(!target.isConnected)return;
       if(!plugin){const edit=target.closest('.modal').querySelector('[data-edit-mcp]');edit.disabled=false;edit.onclick=()=>installMcp(item);}
       target.removeAttribute('role');
-      target.innerHTML=`<div class="extension-detail-overview"><span class="agent-card-avatar extension-avatar color-${extensionAvatarColor(item.id)}" aria-hidden="true">${esc([...item.name].slice(0,2).join('').toUpperCase())}</span><div><h3>${esc(item.name)}</h3><p>${esc(item.description || '')}</p><p class="field-hint">${esc(item.providers.map(providerLabel).join(' / '))}${item.source?` · ${esc(item.source.url)}`:''}</p></div></div>${plugin?`<div class="plugin-detail-tabs" role="tablist" aria-label="插件组件">${['skills','agents','hooks'].map((key,index)=>`<button type="button" role="tab" id="plugin-tab-${key}" aria-controls="plugin-component-panel" aria-selected="${index===0}" tabindex="${index===0?0:-1}" data-plugin-tab="${key}">${['Skill','Subagent','Hook'][index]} <span>${item.components[key].length}</span></button>`).join('')}</div><div id="plugin-component-panel" role="tabpanel" aria-labelledby="plugin-tab-skills" tabindex="0">${components(item,esc,'skills')}</div>`:`<pre class="mcp-json-detail">${esc(JSON.stringify(item.configuration,null,2))}</pre><p class="field-hint">${item.redacted?'配置中的鉴权值已隐藏。':''}原始 JSON 保存在本机私有配置目录，列表不携带此配置。</p>`}`;
+      target.innerHTML=`<div class="extension-detail-overview"><span class="agent-card-avatar extension-avatar color-${extensionAvatarColor(item.id)}" aria-hidden="true">${esc([...item.name].slice(0,2).join('').toUpperCase())}</span><div><h3>${esc(item.name)}</h3><p>${esc(item.description || '')}</p><p class="field-hint">${esc(item.providers.map(providerLabel).join(' / '))}${item.source?` · ${esc(item.source.url)}`:''}</p></div></div>${plugin?`<div class="plugin-detail-tabs" role="tablist" aria-label="插件组件">${['skills','agents','hooks'].map((key,index)=>`<button type="button" role="tab" id="plugin-tab-${key}" aria-controls="plugin-component-panel" aria-selected="${index===0}" tabindex="${index===0?0:-1}" data-plugin-tab="${key}">${['Skill','Subagent','Hook'][index]} <span>${item.components[key].length}</span></button>`).join('')}</div><div id="plugin-component-panel" role="tabpanel" aria-labelledby="plugin-tab-skills" tabindex="0">${components(item,esc,'skills')}</div>`:`<section class="mcp-configuration" aria-label="连接配置"><h4>连接配置</h4><pre class="mcp-json-detail">${esc(JSON.stringify(item.configuration,null,2))}</pre><p class="field-hint">${item.redacted?'配置中的鉴权值已隐藏。':''}原始 JSON 保存在本机私有配置目录，列表不携带此配置。</p></section><section class="mcp-tools-panel"><header><h4>工具</h4><button type="button" class="text-action" data-mcp-tools-refresh aria-label="刷新工具列表" title="刷新工具列表"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M19 12a7 7 0 1 0-2 5M20 7l-3-3"/></svg></button></header><div data-mcp-tools role="status">正在读取工具…</div></section>`}`;
+      if(!plugin){
+        const tools=target.querySelector('[data-mcp-tools]'),button=target.querySelector('[data-mcp-tools-refresh]'),heading=target.querySelector('.mcp-tools-panel h4');
+        const renderTools=discovered=>{
+          tools.innerHTML=discovered.length ? discovered.map(tool=>`<article class="plugin-detail-component mcp-tool"><strong>${esc(tool.name)}</strong>${tool.title && tool.title!==tool.name?`<small>${esc(tool.title)}</small>`:''}${tool.description?`<p>${esc(tool.description)}</p>`:''}</article>`).join('') : '<p class="field-hint">此服务当前未提供工具。</p>';
+        };
+        const loadTools=async(refresh=false)=>{
+          button.disabled=true;tools.setAttribute('role','status');tools.textContent='正在读取工具…';
+          try{
+            const result=await api(`${path}/${encodeURIComponent(id)}/tools`,{method:'POST',body:JSON.stringify({refresh})});if(!tools.isConnected)return;
+            heading.textContent=`工具 · ${result.total}`;tools.removeAttribute('role');
+            renderTools(result.tools);
+          }catch(error){if(tools.isConnected){heading.textContent='工具';tools.setAttribute('role','alert');tools.textContent=error.message;}}
+          finally{if(button.isConnected)button.disabled=false;}
+        };
+        button.onclick=()=>loadTools(true);void loadTools();
+      }
       if(plugin){
-        target.querySelector('.extension-detail-overview').insertAdjacentHTML('afterend',`<div class="plugin-runtime-compatibility">${runtimeBadges(item,esc)}${['claude-code','codex','dsh'].filter(provider=>!item.providers.includes(provider)).map(provider=>`<p class="field-hint">${providerLabel(provider)}：${esc(supportReason(item,provider))}</p>`).join('')}<p class="field-hint">支持表示组件静态兼容，不代表本机 CLI、依赖或账号已通过实际执行验证。</p></div>`);
+        target.querySelector('.extension-detail-overview').insertAdjacentHTML('afterend',`<div class="plugin-runtime-compatibility">${runtimeBadges(item,esc)}${RUNTIME_IDS.filter(provider=>!item.providers.includes(provider)).map(provider=>`<p class="field-hint">${providerLabel(provider)}：${esc(supportReason(item,provider))}</p>`).join('')}<p class="field-hint">支持表示组件静态兼容，不代表本机 CLI、依赖或账号已通过实际执行验证。</p></div>`);
         target.querySelector('.extension-detail-overview').insertAdjacentHTML('afterend',warningMarkup(item.warnings,esc));
         const tabs=[...target.querySelectorAll('[data-plugin-tab]')];const select=button=>{tabs.forEach(tab=>{tab.setAttribute('aria-selected',String(tab===button));tab.tabIndex=tab===button?0:-1;});const panel=target.querySelector('[role=tabpanel]');panel.setAttribute('aria-labelledby',button.id);panel.innerHTML=components(item,esc,button.dataset.pluginTab);};tabs.forEach((button,index)=>{button.onclick=()=>select(button);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?tabs[0]:event.key==='End'?tabs.at(-1):tabs[(index+(event.key==='ArrowRight'?1:tabs.length-1))%tabs.length];select(next);next.focus();};});}
     } catch(error) {if(target.isConnected) {target.setAttribute('role','alert');target.textContent=error.message;}}
@@ -95,8 +117,8 @@ function marketUI({api,esc,openModal,closeModal,confirmDialog,toast},kind) {
 export const createMcpMarketplaceUI = options => marketUI(options,'mcp');
 // Shared employee picker: chips and search live inside one field boundary.
 // IDs remain the saved values; display order is not a priority control.
-export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items=[],selectedIds=[],available=()=>true,reason=()=>'',detail=()=>'',emptyMessage=()=> '没有可添加的匹配项',expand=item=>[item.id],preserveGroups=false,hideUnavailable=false,lockedIds=[],lockReason=()=>"当前成员不能移除",onChange=()=>{}}) {
-  const selected=new Set(selectedIds);let catalog=items;
+export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items=[],selectedIds=[],available=()=>true,reason=()=>'',detail=()=>'',emptyMessage=()=> '没有可添加的匹配项',expand=item=>[item.id],preserveGroups=false,hideUnavailable=false,lockedIds=[],lockReason=()=>"当前成员不能移除",onChange=()=>{},managerId=null,onManagerChange=null}) {
+  const selected=new Set(selectedIds);let catalog=items,selectedManager=managerId;
   const values=()=>[...new Set([...selected].flatMap(id=>{const item=catalog.find(row=>row.id===id);return item?expand(item):[id];}))];
   target.classList.add('extension-picker');
   target.innerHTML=`<label for="${esc(id)}">${esc(label)}</label><div class="extension-picker-search"><div class="extension-picker-control"><div class="extension-picked"></div><input id="${esc(id)}" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${esc(id)}-options" autocomplete="off" placeholder="${esc(placeholder)}"></div><div class="extension-picker-options" id="${esc(id)}-options" role="listbox" hidden></div></div>`;
@@ -105,12 +127,14 @@ export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items
   const close=(restoreFocus=false)=>{if(restoreFocus && list.contains(document.activeElement))input.focus({preventScroll:true});floating.close();input.setAttribute('aria-expanded','false');};
   const paint=()=>{
     const covered=new Set(values());
+    if(selectedManager && !covered.has(selectedManager)){selectedManager=null;onManagerChange?.(null);}
     const found=catalog.filter(item=>!selected.has(item.id) && !(preserveGroups && expand(item).length===1 && expand(item)[0]===item.id && covered.has(item.id)) && (!hideUnavailable || available(item)) && `${item.name} ${item.description || ''} ${item.id}`.toLowerCase().includes(input.value.trim().toLowerCase())).slice(0,20);
     list.innerHTML=found.map(item=>`<button type="button" role="option" aria-selected="false" data-add-extension="${esc(item.id)}" ${available(item)?'':`disabled title="${esc(reason(item))}"`}><strong>${esc(item.name)}</strong>${detail(item)}${available(item)?'':`<small>${esc(reason(item))}</small>`}</button>`).join('') || `<p class="field-hint">${esc(emptyMessage())}</p>`;
-    chips.innerHTML=[...selected].map(id=>{const item=catalog.find(item=>item.id===id),incompatible=item && !available(item),name=item ? item.name+(preserveGroups && item.selectionKind==='team'?' · '+expand(item).length+' 人':'') : '未安装版本 '+id.slice(0,8);return `<span class="extension-chip" title="${esc(name)} · ${esc(id)}" data-incompatible="${Boolean(incompatible)}"><span class="extension-chip-name">${esc(name)}</span>${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" ${lockedIds.includes(id)?`disabled title="${esc(lockReason(id))}"`:""} aria-label="移除${esc(name)}">×</button></span>`;}).join('');
+    chips.innerHTML=[...selected].map(id=>{const item=catalog.find(item=>item.id===id),incompatible=item && !available(item),name=item ? item.name+(preserveGroups && item.selectionKind==='team'?' · '+expand(item).length+' 人':'') : '未安装版本 '+id.slice(0,8);return `<span class="extension-chip" title="${esc(name)} · ${esc(id)}" data-incompatible="${Boolean(incompatible)}"${onManagerChange ? ` data-manager="${id===selectedManager}"` : ''}>${onManagerChange ? `<button type="button" class="extension-chip-name extension-manager-choice" data-select-manager="${esc(id)}" aria-pressed="${id===selectedManager}" aria-label="${esc(id===selectedManager ? '本次经理：'+name : '设为本次经理：'+name)}" title="${esc(id===selectedManager ? '本次任务经理' : '点击设为本次任务经理')}">${id===selectedManager ? '<span aria-hidden="true">★</span>' : ''}${esc(name)}</button>` : `<span class="extension-chip-name">${esc(name)}</span>`}${incompatible?'<small>Runtime 不兼容</small>':''}<button type="button" data-remove-extension="${esc(id)}" ${lockedIds.includes(id)?`disabled title="${esc(lockReason(id))}"`:""} aria-label="移除${esc(name)}">×</button></span>`;}).join('');
     input.placeholder=selected.size?'继续添加…':placeholder;
   };
-  const open=()=>{paint();floating.open();input.setAttribute('aria-expanded','true');};
+  // Selection wrapping can move an already-focused search beneath the footer.
+  const open=()=>{paint();input.scrollIntoView({block:'nearest',inline:'nearest'});floating.open();input.setAttribute('aria-expanded','true');};
   input.onfocus=open;input.oninput=open;input.onclick=open;
   control.onclick=event=>{if(!event.target.closest('button') && event.target!==input)input.focus();};
   input.onkeydown=event=>{
@@ -120,12 +144,12 @@ export function createEmployeeMultiSelect(target,{id,label,placeholder,esc,items
   };
   list.onkeydown=event=>{const buttons=[...list.querySelectorAll('button:not(:disabled)')],index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;buttons[next]?.focus();}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(true);}};
   list.onclick=event=>{const button=event.target.closest('[data-add-extension]');if(!button || button.disabled)return;const item=catalog.find(item=>item.id===button.dataset.addExtension);if(preserveGroups){if(item.selectionKind==='team')expand(item).forEach(value=>selected.delete(value));selected.add(item.id);}else expand(item).forEach(value=>selected.add(value));input.value='';paint();onChange(values());input.focus();close();};
-  chips.onclick=event=>{const button=event.target.closest('[data-remove-extension]');if(button && !button.disabled){selected.delete(button.dataset.removeExtension);paint();onChange(values());input.focus();close();}};
+  chips.onclick=event=>{const manager=event.target.closest('[data-select-manager]');if(manager && onManagerChange){selectedManager=manager.dataset.selectManager;paint();onManagerChange(selectedManager);chips.querySelector(`[data-select-manager="${CSS.escape(selectedManager)}"]`)?.focus();close();return;}const button=event.target.closest('[data-remove-extension]');if(button && !button.disabled){selected.delete(button.dataset.removeExtension);paint();onChange(values());input.focus();close();}};
   target.addEventListener('focusout',event=>{if(!search.contains(event.relatedTarget))close();});
   target.onpointerleave=event=>{if(event.pointerType==='mouse')close(true);};
   (target.closest('form') || target).addEventListener('pointerdown',event=>{if(!target.contains(event.target))close(true);});
   paint();
-  return {refresh(items=catalog){catalog=items;paint();},value(){return values();},setValue(nextValues){selected.clear();nextValues.forEach(value=>selected.add(value));paint();onChange(values());}};
+  return {refresh(items=catalog){catalog=items;paint();},value(){return values();},managerId(){return selectedManager;},setValue(nextValues){selected.clear();nextValues.forEach(value=>selected.add(value));paint();onChange(values());}};
 }
 
 async function selectionCatalog(api, path, key, target) {

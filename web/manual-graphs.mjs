@@ -1,3 +1,5 @@
+import { workflowConnections } from '/client/workflow-description.mjs';
+import {routeGraphEdge,formatWorkflowLayout,attachWorkflowViewport} from './workflow-layout.mjs';
 /* 开发手册只读图：X6 负责端口、视口与小地图；ELK 为动态工作流计算布局与折线路径。领域语义仍由 docs/ 与服务端模块定义。 */
 const instances = new Map();
 const palette = {
@@ -22,9 +24,8 @@ function edge(source, sourcePort, target, targetPort, label, options = {}) {
   return { source: { cell: source, port: sourcePort }, target: { cell: target, port: targetPort }, router, vertices: options.vertices || [], connector: { name: "rounded", args: { radius: 8 } }, attrs: { line: { stroke: options.dashed ? "#9ba99a" : "#849579", strokeWidth: 1.6, strokeDasharray: options.dashed ? "6 5" : "", targetMarker: { name: "block", width: 8, height: 6 } } }, labels: label ? [{ position: options.position ?? .5, attrs: { label: { text: label, fill: "#64735f", fontSize: 10 }, body: { fill: "#fbfcf8", stroke: "#dce4d6", strokeWidth: 1, rx: 4, ry: 4, ref: "label", refWidth: "140%", refHeight: "150%", refX: "-20%", refY: "-25%" } } }] : [] };
 }
 
-/* 工作流图不复用手写坐标。它按依赖深度分列、同列按定义顺序分行，
- * 让每一条 dependency 都从真实右侧端口进入下游左侧端口。这样模板和
- * Task 快照节点增减时仍有稳定间距，且不会产生 SVG 悬空线。 */
+/* 工作流优先保留已保存的节点坐标和四边端口。缺少坐标时先提供稳定布局，
+ * 画布就绪后由 ELK 整理；缩放与只读整理不会写回模板或 Task 快照。 */
 function workflowDefinition(workflow, { focus = {}, assignments = {}, agentsById = {}, compact = false } = {}) {
   const nodes = workflow?.nodes || [];
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -41,6 +42,7 @@ function workflowDefinition(workflow, { focus = {}, assignments = {}, agentsById
   // Six standard delivery nodes must remain readable in the compact views.
   // Keep the logical canvas just wider than its card chain; a fixed 300px
   // minimum here previously forced the browser to scale the whole diagram down.
+  const positioned = true;
   const nodeWidth = compact ? 168 : 242;
   const nodeHeight = compact ? 64 : 108;
   const xGap = compact ? 50 : 132;
@@ -66,15 +68,18 @@ function workflowDefinition(workflow, { focus = {}, assignments = {}, agentsById
   };
   return {
     nodes: nodes.map((node) => {
-      const position = positions.get(node.id);
+      const position = node.position || positions.get(node.id);
       const state = focus[node.id];
       const assigned = agentsById[assignments[node.id]];
       const owner = assigned?.name || node.ownerRole || "未分配角色";
       const labels = { active: "正在处理", current: "项目经理当前重心", waiting_human: "等待澄清", waiting_agent: "等待协作", attention: "需要关注", recent: "最近交付" };
-      return card(node.id, position.x, position.y, nodeWidth, nodeHeight, node.title || node.id, [node.id, state ? `${owner} · ${labels[state]}` : owner], toneFor(node));
+      const result=card(node.id, position.x, position.y, positioned ? 140 : nodeWidth, positioned ? (node.type==='condition'?76:52) : nodeHeight, node.title || node.id, positioned ? [] : [node.type==='condition'?'条件判断':node.id, state ? `${owner} · ${labels[state]}` : owner], toneFor(node));
+      if(positioned)result.attrs.label={...result.attrs.label,fontSize:12,lineHeight:16,textWrap:{width:node.type==='condition'?80:116,height:36,ellipsis:true}};
+      if(node.type==='condition'){result.shape='polygon';result.attrs.body.refPoints='0,50 50,0 100,50 50,100';result.attrs.label.fontSize=compact?10:12;}
+      return result;
     }),
-    edges: nodes.flatMap((node) => (node.dependsOn || []).filter((dependency) => byId.has(dependency)).map((dependency) =>
-      edge(dependency, "right", node.id, "left", "交接参考", { position: .5 }))),
+    edges: workflowConnections(workflow).filter(link => byId.has(link.source) && byId.has(link.target)).map(link =>
+      ({...edge(link.source, link.sourcePort || 'right', link.target, link.targetPort || 'left', (link.condition || link.description || (link.dependency ? '前置依赖' : '交接')).replace(/\s+/g,' ').slice(0,24), {position:.5}),data:{workflowEdge:link}})),
   };
 }
 
@@ -247,25 +252,29 @@ async function applyElkWorkflowLayout(key, graph, definition) {
   });
 }
 
-function mountGraph(key, definition, container, minimap, onViewport, { elkLayout = false, fixed = false } = {}) {
+function mountGraph(key, definition, container, minimap, onViewport, { elkLayout = false, fixed = false, workflowView = false } = {}) {
   disposeGraph(key);
   if (!definition || !container) return null;
   try {
     const { Graph, MiniMap } = requireX6();
-    const graph = new Graph({ container, width: container.clientWidth, height: container.clientHeight, panning: { enabled: !fixed, eventTypes: ["leftMouseDown"] }, mousewheel: { enabled: false }, interacting: { nodeMovable: false, edgeMovable: false, edgeLabelMovable: false, arrowheadMovable: false, vertexMovable: false }, background: { color: "#fbfcf8" }, grid: { visible: !fixed, type: "dot", args: { color: "#e6ebdf", thickness: 1 } } });
+    const graph = new Graph({ container, width: container.clientWidth, height: container.clientHeight, panning: { enabled: !fixed, eventTypes: ["leftMouseDown"] }, mousewheel: { enabled: false }, interacting: { magnetConnectable:false, nodeMovable: false, edgeMovable: false, edgeLabelMovable: false, arrowheadMovable: false, vertexMovable: false }, background: { color: "#fbfcf8" }, grid: { visible: !fixed, type: "dot", args: { color: "#e6ebdf", thickness: 1 } } });
     // 手册图的面积较大，保留小地图；线性工作流已有完整主路径与缩放控制，
     // 不额外占用一行高度来重复展示同一条链。
     if (minimap) graph.use(new MiniMap({ container: minimap, width: 156, height: 102, padding: 8, scalable: true, graphOptions: { background: { color: "#f7f8f2" } } }));
     definition.nodes.forEach((node) => graph.addNode(node)); definition.edges.forEach((item) => graph.addEdge(item));
     const viewport = container.closest(".diagram-viewport") || container;
-    const observer = new ResizeObserver(() => { graph.resize(viewport.clientWidth, viewport.clientHeight); if (fixed && viewport.clientWidth && viewport.clientHeight) fitGraph(graph, key, onViewport); });
+    const observer = new ResizeObserver(() => { graph.resize(viewport.clientWidth, viewport.clientHeight); if (fixed && !workflowView && viewport.clientWidth && viewport.clientHeight) fitGraph(graph, key, onViewport); });
     observer.observe(viewport);
-    const disposeInteractions = fixed ? () => {} : attachViewportInteractions(graph, container.closest(".diagram-viewport"), onViewport);
-    instances.set(key, { graph, observer, disposeInteractions });
+    const viewportController=workflowView?attachWorkflowViewport(graph,viewport,onViewport):null;
+    const disposeInteractions=workflowView?()=>viewportController.dispose():fixed?()=>{}:attachViewportInteractions(graph,container.closest('.diagram-viewport'),onViewport);
+    instances.set(key,{graph,observer,disposeInteractions,definition,viewportController,onViewport});
+    if(workflowView)updateWorkflowRoutes(graph);
     graph.on("scale translate", () => updateScale(key, onViewport));
+    const ready=()=>{if(instances.get(key)?.graph!==graph)return;container.dataset.ready='true';container.closest('.workflow-diagram')?.querySelectorAll('[data-workflow-view]').forEach(button=>button.disabled=false);};
     requestAnimationFrame(() => {
+      if(workflowView&&elkLayout){void formatWorkflowGraphByKey(key).catch(()=>fitGraph(graph,key,onViewport)).finally(ready);return;}
       if (!elkLayout) {
-        fitGraph(graph, key, onViewport);
+        fitGraph(graph, key, onViewport);ready();
         return;
       }
       applyElkWorkflowLayout(key, graph, definition)
@@ -279,10 +288,25 @@ export function mountManualGraph(key, container, minimap, onViewport) {
   return mountGraph(`manual:${key}`, graphs[key], container, minimap, onViewport);
 }
 export function mountWorkflowGraph(scope, key, container, minimap, workflow, options, onViewport) {
-  return mountGraph(`workflow:${scope}:${key}`, workflowDefinition(workflow, options), container, minimap, onViewport, { elkLayout: true, fixed: true });
+  return mountGraph(`workflow:${scope}:${key}`, workflowDefinition(workflow, options), container, minimap, onViewport, {elkLayout:!(workflow.nodes || []).some(node=>node.position),fixed:false,workflowView:true});
 }
 function graphFor(key) { return instances.get(key)?.graph; }
 export function zoomManualGraph(key, amount, onViewport) { const graph = graphFor(`manual:${key}`); if (!graph) return; graph.zoom(amount, { minScale: .55, maxScale: 1.85 }); updateScale(`manual:${key}`, onViewport); }
 export function fitManualGraph(key, onViewport) { const graph = graphFor(`manual:${key}`); if (!graph) return; graph.zoomToFit({ padding: 42, maxScale: 1 }); updateScale(`manual:${key}`, onViewport); }
-export function zoomWorkflowGraph(scope, key, amount, onViewport) { const fullKey = `workflow:${scope}:${key}`; const graph = graphFor(fullKey); if (!graph) return; graph.zoom(amount, { minScale: .55, maxScale: 1.85 }); updateScale(fullKey, onViewport); }
+export function zoomWorkflowGraph(scope,key,amount){const item=instances.get(`workflow:${scope}:${key}`);if(item)item.viewportController?.zoom(item.graph.zoom()*(amount>0?1.2:1/1.2));}
 export function fitWorkflowGraph(scope, key, onViewport) { const fullKey = `workflow:${scope}:${key}`; const graph = graphFor(fullKey); if (!graph) return; graph.zoomToFit({ padding: 42, maxScale: 1 }); updateScale(fullKey, onViewport); }
+
+function updateWorkflowRoutes(graph) {
+  const nodes=graph.getNodes().map(node=>({id:node.id,position:node.position(),...node.size()}));
+  for(const edge of graph.getEdges())routeGraphEdge(edge,nodes,edge.getData().workflowEdge);
+}
+async function formatWorkflowGraphByKey(key) {
+  const item=instances.get(key);if(!item)return;
+  const nodes=item.graph.getNodes().map(node=>({id:node.id,...node.size()})),edges=item.graph.getEdges().map(edge=>edge.getData().workflowEdge);
+  const positions=await formatWorkflowLayout(nodes,edges,requireElk());if(instances.get(key)!==item)return;
+  for(const result of positions)item.graph.getCellById(result.id).position(result.position);
+  for(const edge of item.graph.getEdges()){const data={...edge.getData().workflowEdge};delete data.sourcePort;delete data.targetPort;edge.setData({workflowEdge:data});}
+  updateWorkflowRoutes(item.graph);fitGraph(item.graph,key,item.onViewport);
+}
+export function formatWorkflowGraph(scope,key){return formatWorkflowGraphByKey(`workflow:${scope}:${key}`);}
+export function resetWorkflowGraph(scope,key){const item=instances.get(`workflow:${scope}:${key}`);item?.viewportController?.zoom(1);}

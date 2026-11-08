@@ -36,7 +36,7 @@ export function createCatalogFixtureStore(options = {}) {
 export function createFixtureStore(options) {
   const existing = options?.databasePath && options.databasePath !== ":memory:" && existsSync(options.databasePath);
   const store = createCatalogFixtureStore(options);
-  if (!existing && !store.listTasks().length) store.createTask({
+  if (!existing && !store.listTasks().length) store.createTask({managerAgentId:"system_project_manager",managerAgentId:'system_project_manager',
     title: "Fixture task", objective: "Test-only task created through Store commands",
     ...(!store.getWorkspaceSettings().workspaceRoot ? { workspacePath: mkdtempSync(join(tmpdir(), "af-domain-fixture-")) } : {}),
     memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: "software_delivery",

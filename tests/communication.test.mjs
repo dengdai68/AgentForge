@@ -560,7 +560,7 @@ test("communication private/group uniqueness, explicit mentions and restart rete
     const item = store.claimCommunication(privateChat.id);
     const session = store.prepareCommunicationSession(privateChat.id, item.id, root);
     store.confirmCommunicationSession(privateChat.id, item.id, session.sessionId);
-    const disposableTask = store.createTask({ title: "Delete only this fixture", objective: "Communication survives Task deletion", workspacePath: root, memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: store.listWorkflowTemplates()[0].id });
+    const disposableTask = store.createTask({managerAgentId:'system_project_manager', title: "Delete only this fixture", objective: "Communication survives Task deletion", workspacePath: root, memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: store.listWorkflowTemplates()[0].id });
     store.deleteTask(disposableTask.id);
     const reopened = createStore({ databasePath });
     reopened.recoverCommunications();

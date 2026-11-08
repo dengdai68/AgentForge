@@ -14,6 +14,20 @@ const codexFixture = {
   ]
 };
 
+test('portable catalogs expose only native model metadata and preserve per-model effort differences',async t=>{
+ const home=await mkdtemp(join(tmpdir(),'af-native-models-'));t.after(()=>import('node:fs/promises').then(fs=>fs.rm(home,{recursive:true,force:true})));await mkdir(join(home,'.qwen'));await writeFile(join(home,'.qwen/settings.json'),JSON.stringify({security:{auth:{selectedType:'qwen-oauth'}},modelProviders:{openai:[{id:'custom',name:'Custom',apiKey:'PRIVATE_SENTINEL'}]}}));
+ const cases={cursor:'Available models\nmodel-low - Model Low\nmodel-high - Model High\nauto - Auto (current, default)',gemini:JSON.stringify([{id:'gemini-3.1-flash-lite',displayName:'Flash Lite'},{id:'gemini-2.5-pro'}]),kimi:JSON.stringify({providers:{private:{apiKey:'PRIVATE_SENTINEL'}},models:{'kimi/k3':{displayName:'K3',supportEfforts:['low','high'],defaultEffort:'high'},'kimi/fast':{displayName:'Fast'}}}),pi:'provider  model context max-out thinking images\nnative  thinker  1M 10K yes yes\nnative quiet 1M 10K no no'};
+ for(const [provider,stdout]of Object.entries(cases)){
+  const catalog=await runtimeModelCatalog({provider},{environment:{},homeDirectory:home,run:async()=>({stdout})});assert.ok(catalog.models.length>=2);assert.ok(!JSON.stringify(catalog).includes('PRIVATE_SENTINEL'));
+  if(provider==='cursor')assert.deepEqual(catalog.models[0].levels.map(x=>x.id),['low','high']);
+  else if(provider==='gemini'){assert.ok(catalog.models[0].levels.some(x=>x.id==='minimal'));assert.deepEqual(catalog.models[1].levels,[]);}
+  else if(provider==='kimi'){assert.equal(catalog.models[0].levels[1].default,true);assert.deepEqual(catalog.models[1].levels,[]);}
+  else {assert.ok(catalog.models[0].levels.some(x=>x.id==='max'));assert.deepEqual(catalog.models[1].levels,[]);}
+ }
+ const qwen=await runtimeModelCatalog({provider:'qwen'},{environment:{},homeDirectory:home});assert.deepEqual(qwen.models.map(m=>m.id),['custom','coder-model']);assert.ok(!JSON.stringify(qwen).includes('PRIVATE_SENTINEL'));
+ await assert.rejects(runtimeModelCatalog({provider:'kimi'},{run:async()=>{const error=Error('PRIVATE_SENTINEL');error.stdout='PRIVATE_SENTINEL';throw error;}}),e=>!e.message.includes('PRIVATE_SENTINEL')&&!e.cause);
+});
+
 test("codex catalog projects the real CLI catalog without inventing or leaking model internals", async () => {
   const calls = [];
   const run = async (command, args, options) => { calls.push({ command, args, options }); return { stdout: JSON.stringify(codexFixture) }; };

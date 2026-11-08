@@ -1,3 +1,5 @@
+import {RUNTIME_IDS} from '../../client/runtime-providers.mjs';
+import {runtimeLabel} from "../../client/runtime-providers.mjs";
 import { mkdir, lstat, readFile, writeFile, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { join, resolve, dirname, basename, relative } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -163,7 +165,7 @@ async function pluginInfo(plugin,provider,{tolerant=false}={}) {
     }catch(error){skip(error,'hook',path);}
   }
   const reasons=[];
-  if(provider==='dsh') {
+  if(provider!=='claude-code' && provider!=='codex') {
     for(const key of ['lspServers','settings','outputStyles']) if(manifest[key]) reasons.push(`DeepSeek Harness 适配器不支持 ${key}`);
   }
   if(provider==='codex') for(const key of ['lspServers','settings','outputStyles']) if(manifest[key]) reasons.push(`Codex 适配器不支持 ${key}`);
@@ -218,6 +220,7 @@ async function verifyPluginExecutionPlan(ref) {
   return result.plan;
 }
 export function createMarketplace(root) {
+  let toolDiscovery;
   const configuredRoot=resolve(root);
   let managedRoot=configuredRoot, directory=join(managedRoot,'marketplace'), pluginDirectory=join(managedRoot,'installed-plugins'), canonicalRoot=null;
   let locationStamp=null,locations=new Map(),locationWork;
@@ -268,10 +271,10 @@ export function createMarketplace(root) {
   async function parseCompatibility(entry) {
     if(entry.kind==='mcp') {
       parseMcpJson(await readFile(reference(entry).path,'utf8'));
-      return {...entry,providers:['claude-code','codex','dsh']};
+      return {...entry,providers:RUNTIME_IDS};
     }
     const location=dirname(dirname(reference(entry).path)),plans={},runtimeComponents={},components=Object.fromEntries(['skills','agents','hooks','commands'].map(key=>[key,new Map()]));
-    for(const provider of ['claude-code','codex','dsh']) {
+    for(const provider of RUNTIME_IDS) {
       const info=await pluginInfo({path:location,name:entry.name,sourceDialect:provider==='dsh'?undefined:entry.sourceDialects?.[provider]},provider);
       // The installed inventory preserves an explicit marketplace root selection
       // and generated Command instruction files. Reparse their actual bytes;
@@ -294,7 +297,7 @@ export function createMarketplace(root) {
     try {return await currentCompatibility(entry);}
     catch(error) {
       if(!['PLUGIN_MARKDOWN_INVALID','PLUGIN_COMPONENT_INVALID'].includes(error.code))throw error;
-      return {...entry,providers:[],components:Object.fromEntries(Object.entries(entry.components).map(([key,items])=>[key,items.map(item=>({...item,providers:[]}))])),compatibility:Object.fromEntries(['claude-code','codex','dsh'].map(provider=>[provider,{supported:false,reasons:[error.message]}]))};
+      return {...entry,providers:[],components:Object.fromEntries(Object.entries(entry.components).map(([key,items])=>[key,items.map(item=>({...item,providers:[]}))])),compatibility:Object.fromEntries(RUNTIME_IDS.map(provider=>[provider,{supported:false,reasons:[error.message]}]))};
     }
   }
   return {
@@ -321,6 +324,13 @@ export function createMarketplace(root) {
       return {entries:entries.sort((a,b)=>b.createdAt.localeCompare(a.createdAt))};
     },
     async list() {return [...(await this.catalog()).plugins,...(await this.mcpCatalog()).entries];},
+    async tools(id,options={}) {
+      const entry=await read(id,'mcp'),ref=reference(entry),configuration=parseMcpJson(await readExtensionFile(ref));
+      const [name,service]=Object.entries(configuration.mcpServers)[0];
+      const secrets=[...Object.values(service.env || {}),...Object.values(service.headers || {}),...(service.env_vars || []).map(key=>process.env[key]).filter(Boolean)];
+      const discover=await (toolDiscovery ||= import('./mcp-tools.mjs').then(({createMcpToolDiscovery})=>createMcpToolDiscovery()));
+      return discover(ref,name,{...options,secrets});
+    },
     async detail(id,kind) {
       const raw=await read(id,kind),entry=kind==='plugin'?await catalogCompatibility(raw):await currentCompatibility(raw), content=await readExtensionFile(reference(entry));
       if(kind==='plugin') return diagnosticRedactor()({...summary(entry),components:entry.components,manifest:JSON.parse(content)});
@@ -373,7 +383,7 @@ export function createMarketplace(root) {
         try { await tree(plugin.path,target,plugin.sourceRoot || plugin.path); }
         catch(cause) { throw new Error(`插件「${plugin.name}」无法安装：${cause.message}；本批次未安装`,{cause}); }
         const originalTreeSha256=await tree(plugin.path,join(staging,'plugins',id,'source'),plugin.sourceRoot || plugin.path);
-        const variants=Object.fromEntries(await Promise.all(['claude-code','codex','dsh'].map(async provider=>[provider,await pluginInfo({...plugin,path:target},provider,{tolerant:true})])));
+        const variants=Object.fromEntries(await Promise.all(RUNTIME_IDS.map(async provider=>[provider,await pluginInfo({...plugin,path:target},provider,{tolerant:true})])));
         // Preserve all source bytes separately. Only the executable installation
         // excludes rejected Markdown and uses sanitized, dialect-specific manifests.
         for(const info of Object.values(variants))for(const warning of info.warnings)if(!warnings.some(item=>JSON.stringify(item)===JSON.stringify(warning)))warnings.push(warning);
@@ -392,6 +402,7 @@ export function createMarketplace(root) {
           info.components.skills.push({name,description:'从 Command 适配的说明；无斜杠预处理',path});commandSkills.push('./'+path);
         }
         if(commandSkills.length) info.manifest.skills=[...[info.manifest.skills || []].flat(),...commandSkills];
+        Object.assign(info,await pluginExecutionPlan(info,target,provider));
         }
         for(const [provider,variant] of Object.entries(variants)){
           variant.manifest.skills=[...new Set(variant.components.skills.map(item=>'./'+dirname(item.path)))];
@@ -449,13 +460,13 @@ export function createMarketplace(root) {
       const service=configuration.mcpServers[names[0]], remote=['http','sse'].includes(service.type), allowed=remote?['type','url','headers']:['type','command','args','env','cwd','env_vars'];
       if(Object.keys(service).some(key=>!allowed.includes(key))) throw new Error('MCP 包含不支持的字段');
       if(service.cwd && !service.cwd.startsWith('/'))throw new Error('MCP cwd 必须为绝对目录');
-      const content=JSON.stringify(configuration,null,2), id=entryId || randomUUID(), entry={protocol:location?3:2,id,kind:'mcp',name:input.name.trim(),description:input.description.trim(),createdAt:new Date().toISOString(),providers:['claude-code','codex','dsh'],sha256:digest(content),visibility:'market'};
+      const content=JSON.stringify(configuration,null,2), id=entryId || randomUUID(), entry={protocol:location?3:2,id,kind:'mcp',name:input.name.trim(),description:input.description.trim(),createdAt:new Date().toISOString(),providers:RUNTIME_IDS,sha256:digest(content),visibility:'market'};
       await ensure();const target=location || join(directory,id);await mkdir(target,{recursive:true,mode:0o700});await writeFile(join(target,'mcp.json'),content,{flag:'wx',mode:0o600});await writeFile(join(target,'entry.json'),JSON.stringify(entry),{flag:'wx',mode:0o600});return location?entry:summary(entry);
     },
     resolveRole(selection) { return withExtensionValidation(async()=>{
       const selected=selectionIds(selection);
-      const entries=await Promise.all(['plugin','mcp'].flatMap(kind=>selected[kind==='plugin'?'pluginIds':'mcpIds'].map(id=>read(id,kind))));
-      const providers=['claude-code','codex','dsh'].filter(provider=>entries.every(item=>item.providers.includes(provider)));
+      const entries=await Promise.all(['plugin','mcp'].flatMap(kind=>selected[kind==='plugin'?'pluginIds':'mcpIds'].map(async id=>currentCompatibility(await read(id,kind)))));
+      const providers=RUNTIME_IDS.filter(provider=>entries.every(item=>item.providers.includes(provider)));
       if(!providers.length)throw new Error('所选角色扩展没有共同兼容的 Runtime');
       const extensionBindings=Object.fromEntries(await Promise.all(providers.map(async provider=>[provider,await this.resolve(selected,provider)])));
       return {extensionSelection:selected,extensionBindings};
@@ -468,7 +479,7 @@ export function createMarketplace(root) {
       const selected=selectionIds(selection), extensionManifest=[], names=new Set();
       for(const kind of ['plugin','mcp']) for(const id of selected[kind==='plugin'?'pluginIds':'mcpIds']) {
         const entry=await currentCompatibility(await read(id,kind));
-        if(!entry.providers.includes(provider)) throw new Error(`${kind==='plugin'?'插件':'MCP'}「${entry.name}」与 ${provider==='dsh'?'DeepSeek Harness':provider==='codex'?'Codex':'Claude Code'} 不兼容：${entry.compatibility?.[provider]?.reasons?.join('；') || (kind==='mcp'?'当前 MCP 配置包含此 Runtime 不支持的字段':'当前 Runtime 不支持此插件组件')}`);
+        if(!entry.providers.includes(provider)) throw new Error(`${kind==='plugin'?'插件':'MCP'}「${entry.name}」与 ${runtimeLabel(provider)} 不兼容：${entry.compatibility?.[provider]?.reasons?.join('；') || (kind==='mcp'?'当前 MCP 配置包含此 Runtime 不支持的字段':'当前 Runtime 不支持此插件组件')}`);
         const ref=reference(entry,provider);
         if(kind==='plugin' && entry.runtimeComponents) ref.skills=entry.runtimeComponents[provider].skills;
         const content=await readExtensionFile(ref);

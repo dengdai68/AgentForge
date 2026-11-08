@@ -41,13 +41,13 @@ test('role extensions merge with direct selections, freeze task/chat snapshots a
  const employee=store.createAgent({name:'继承员工',roleIds:[role.id]});
  assert.deepEqual(store.listAgents().find(item=>item.id===employee.id).inheritedExtensionSelection,selection);
  assert.equal(Object.hasOwn(role,'extensionBindings'),false);
- const task=store.createTask({title:'冻结角色',objective:'测试',memberAgentIds:['system_project_manager',employee.id]});
+ const task=store.createTask({managerAgentId:'system_project_manager',title:'冻结角色',objective:'测试',memberAgentIds:['system_project_manager',employee.id]});
  assert.deepEqual(task.memberSnapshots[0].runtime.extensionSelection,selection);
  const chat=store.openCommunication({kind:"agent",targetId:employee.id});
  store.sendCommunication(chat.id,{content:'hi',clientRequestId:'role-binding-chat'});const delivery=store.claimCommunication(chat.id);
  assert.deepEqual(delivery.agentSnapshot.runtime.extensionSelection,selection);
  store.updateAgent(employee.id,{runtime:{provider:'claude-code',...binding}});
- const direct=store.createTask({title:'重复去重',objective:'测试',memberAgentIds:['system_project_manager',employee.id]});
+ const direct=store.createTask({managerAgentId:'system_project_manager',title:'重复去重',objective:'测试',memberAgentIds:['system_project_manager',employee.id]});
  assert.equal(direct.memberSnapshots[0].runtime.extensionManifest.length,1);
  store.updateAgent(employee.id,{roleIds:[]});
  assert.deepEqual(store.listAgents().find(item=>item.id===employee.id).runtime.extensionSelection,selection);

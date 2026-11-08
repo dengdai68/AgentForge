@@ -23,9 +23,9 @@ for (let i = 0; i < 22; i++) {
   store.createTeam({ name: '目录搜索团队 ' + i, mission: 'Search boundary ' + i, memberAgentIds: seedTeam.memberAgentIds });
   store.createWorkflowTemplate({ name: '目录搜索流程 ' + i, description: 'Search boundary ' + i, nodes: seedFlow.nodes });
 }
-store.createTask({ title: '目录工具栏验收', objective: '仅检查列表展示，不启动执行。', memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: 'software_delivery' });
+store.createTask({managerAgentId:'system_project_manager', title: '目录工具栏验收', objective: '仅检查列表展示，不启动执行。', memberAgentIds: store.listTeams()[0].memberAgentIds, workflowTemplateId: 'software_delivery' });
 const taskFlow = store.createWorkflowTemplate({ name: '任务筛选流程旧名', nodes: seedFlow.nodes });
-for (let i = 0; i < 23; i++) store.createTask({ title: '工作流筛选任务 ' + i, objective: '仅检查列表，不运行模型。', memberAgentIds: seedTeam.memberAgentIds, workflowTemplateId: taskFlow.id });
+for (let i = 0; i < 23; i++) store.createTask({managerAgentId:'system_project_manager', title: '工作流筛选任务 ' + i, objective: '仅检查列表，不运行模型。', memberAgentIds: seedTeam.memberAgentIds, workflowTemplateId: taskFlow.id });
 store.updateWorkflowTemplate(taskFlow.id, { name: '任务筛选流程新名', nodes: seedFlow.nodes });
 store.createRole({name:'布局验收角色',prompt:'用于检查角色目录。'});
 store.close();

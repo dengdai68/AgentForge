@@ -1,8 +1,8 @@
 # 领域模型
 
-任务创建接受可选 teamIds 和 memberAgentIds；至少选一人或一个团队。Store 展开可用团队中的 active 成员，与显式员工合并去重，校验最终恰好一位可用经理；显式停用/删除员工、停用/不存在团队、数组内重复 ID 拒绝。teamIds 不持久化，不恢复旧 teamId 团队绑定。任务不再使用任务优先级，废弃字段明确拒绝；冻结事实和人类最终确认不变。
+任务创建接受可选 teamIds 和 memberAgentIds；至少选一人或一个团队。Store 展开可用团队中的 active 成员，与显式员工合并去重，校验显式 managerAgentId 为最终员工集合中的一位可用员工；显式停用/删除员工、停用/不存在团队、数组内重复 ID 拒绝。teamIds 不持久化，不恢复旧 teamId 团队绑定。任务不再使用任务优先级，废弃字段明确拒绝；冻结事实和人类最终确认不变。
 
-任务独立持有 `memberAgentIds` 与冻结员工快照，必须且只能有一位可用项目经理；不再写入或接受 `teamId`。团队只是可空的员工集合，可含零位或多位经理；在任务或群聊选团队时展开为员工 ID 并集，之后团队编辑/删除不影响已加入的成员。任务列表、详情和员工控制台不展示团队名称。新任务启动前拒绝已删除成员；在途 Run 继续使用原冻结成员完成执行，不重建会话或改写历史。
+任务独立持有 `memberAgentIds` 与冻结员工快照，通过必填的 `managerAgentId` 从成员中指定唯一的本次经理；不再写入或接受 `teamId`。团队只是可空的员工集合，不绑定经理；在任务或群聊选团队时展开为员工 ID 并集，之后团队编辑/删除不影响已加入的成员。任务列表、详情和员工控制台不展示团队名称。新任务启动前拒绝已删除成员；在途 Run 继续使用原冻结成员完成执行，不重建会话或改写历史。
 
 员工删除为 `status=deleted`、`deletedAt` 的持久标记，目录/选人/团队和群聊成员列表不再显示，禁止编辑和新投递；自动移除当前团队与独立群聊的成员引用，取消尚未执行的沟通投递并留审计。已运行沟通可以保存最后答复，但不再唤醒其他员工；正在执行的任务保留全部冻结成员继续完成。任务协作中的旧发言与控制台证据保留；员工 Tab 不列出已删除者。已删除员工不再阻止当前角色/扩展退役，冻结调用仍使用已保存的提示词/文件。
 
@@ -95,7 +95,7 @@ Runtime 当前目录每种 Provider 恰好一项，ID 保持稳定；saveRuntime
 
 Runtime Provider 新增 dsh，固定槽位 runtime_dsh；与现有两个 Provider 同样由 Store 拥有 enabled/model/effort 及员工绑定。DeepSeek Harness effort 为 off/low/high/max，空为原生默认。已有任务/排队投递保持冻结配置，开关只约束后续调用。DeepSeek Harness 和 Codex 一样须确认原生会话存在后再标记为可恢复；未知会话错误经原恢复入口处理，Runtime 不自建替代会话。新增 Provider 不重置操作者实例或改写旧市场/任务版本；旧市场版本需重新导入/编辑以获得当前 DeepSeek Harness 兼容声明。
 
-Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+Runtime 展示名称为Claude Code、Codex、DeepSeek Harness、Cursor、Gemini CLI、Qwen Code、Kimi Code、Pi、OpenCode；固定 Provider ID、执行文件与能力边界见 [多 Runtime 接入](29-runtime-providers.md)。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
 任务协作的人类新消息未提供 recipientAgentId（省略或 null）时，由 Store 路由给该 Run 的冻结项目经理；显式指定仍校验当前 Run 成员。精确澄清回复继续由 replyToMessageId 决定接收人，普通消息不能隐式回答待答问题。已完成/暂停/终止 Run 的无指定消息仍为经理答疑，不恢复业务执行；失败 Run 拒绝新消息，先重试；已归档继续只读。
 
@@ -153,4 +153,27 @@ Role.extensionSelection 保存 pluginIds/mcpIds，省略创建为空、更新保
 
 合法验收遇到仍在执行、排队或等待答复的工作时，记录延后决定并在其他工作结束后请经理重新协调；延后投递不阻塞后续员工报告，也不消耗协议纠正次数。原始 nextNodeId=null、nextAgentId 非空或同时携带 instruction 属混合决定，明确拒绝，不静默验收。
 
+
+## 极简工作流画布与文件化上下文
+
+工作流仍是项目经理参考的自然语言协作图，不是自动执行引擎。当前 App 与 CLI 共用 `nodes` 和 `edges`：节点最简只需 title，type 为 process（默认流程）或 condition（条件判断），description 保存完整说明，id 省略按数组顺序生成 node_N；staffingGuidance 可空，保留 deliverable、artifactPaths 等补充要求。position 为可选画布坐标 {x,y}，均为 -100000 至 100000 的有限数，仅用于呈现。最多100个节点、300条连线，正文最多20000字符。
+
+每条 edge 包含 id（省略生成 link_N）、source、target、condition（默认空，最多2000字符的自然语言分支条件）、description、dependency（默认false）和 handoff（默认true）。同向节点对唯一，不能自连或引用不存在节点；至少启用一种关系。普通交接允许返工回路，只有 dependency 关系禁止成环。提供 edges 时它是关系来源，nodes.dependsOn/handoffFrom 若同时提供必须一致，Store 输出这两个派生字段；省略 edges 时由节点关系生成连线，不维护两套独立关系。空 edges 表示没有连线。
+
+编辑和删除图元素只改变待保存模板；任务创建冻结节点、连线及正文，后续模板编辑不改变 Task/Run。经理每次调用从该冻结快照生成私有 workflow.md，系统指令只给文件路径、SHA256和读取要求；员工收到当前节点说明与交付指令。原生会话、并行派工、失败恢复、人类确认和自动化验收边界不变。
+
+条件节点以菱形呈现，经理结合实际证据从出线选择满足条件的一条继续，未知条件先澄清；不同时执行互斥分支。流程节点仍可把独立工作交给多人并行。条件与交接说明进入冻结文件，平台不求值表达式、不自动裁判业务结果；不要求草稿图的所有出口均已连好。
+
+未填写交付要求时，流程节点默认交付可验收文件，条件节点默认说明判断证据与理由并交回经理，不要求每次判断生成独立文件。
+
 同一轮包含 `summary` 与 `consultation` 时，先将非空且与问题正文不同的报告保存为普通角色 Message，再保存问题和等待关系；两条消息关联同一 Trace/本轮输入。缺少报告或正文与问题相同不另造消息，协调失败仍回滚路由并保留原报告；不从控制台补造旧 Message。
+
+经理为任务身份：Task创建必须提交managerAgentId（非空员工ID，属于展开后的memberAgentIds且active），不按Agent.kind推断或自动选择；所有员工均可担任。managerSnapshot保存该员工原配置，memberSnapshots保存其余员工；Run继续使用独立经理别名/sourceAgentId和冻结会话，不修改全局员工类型。Agent.kind字段保留但不参与选人、成员增删或任务角色判断，新建默认business；App移除类型输入与标识。Run启动后经理不更换、不能移除；任何其他员工均可作为普通成员加入。已有Task/Run冻结事实保留；旧自动化需显式编辑选择经理，不迁移或猜测。
+
+工作流当前写入规则：process节点最多一条出口连线（包含前置依赖和普通交接），多出口必须显式改为condition；所有创建/完整替换入口和新Task冻结当前模板时使用同一Store校验。已有模板读取及已冻结Task/Run不改写、不推断类型；编辑存在多出口的流程节点时先显式转换。edge可选sourcePort/targetPort为top/right/bottom/left，省略交由视图自动选侧；四边端口只影响呈现，不改变source/target和协作执行。
+
+新增原生 CLI Runtime 的事件、会话、模型目录和扩展边界见 [docs/29](29-runtime-providers.md)。本轮不将 Claude/Codex 插件方言直接标记为新 Runtime 兼容；未支持的扩展拒绝绑定，不能静默忽略。
+
+扩展兼容性检查只更新当前目录派生摘要；不可变安装、冻结计划与 Task/Run/角色/员工引用不重写。新增 Runtime 的冻结插件计划包含所选原生 Skill 元信息；旧三种 Runtime 的计划摘要结构保持。
+
+员工选择新 Runtime 并绑定既有角色时，HTTP 先验证组合扩展，再由 Store 按该角色相同不可变扩展 ID 补齐缺失目标的派生执行计划；已有目标计划、角色选择及历史快照不修改。此为配置命令的按需解析，不在启动或读列表时迁移数据。

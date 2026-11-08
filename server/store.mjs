@@ -1,3 +1,5 @@
+import {RUNTIME_IDS,RUNTIME_EFFORT_LEVELS,runtimeLabel,nativeSessionId} from "../client/runtime-providers.mjs";
+import { workflowConnections } from "../client/workflow-description.mjs";
 import { createStateJournal, copyState } from "./state-journal.mjs";
 import { automationCommands } from "./automations.mjs";
 import { statSync } from "node:fs";
@@ -83,7 +85,7 @@ function extensionBinding(value) {
   if(manifest.some(ref=>(ref.resourceRoot !== undefined || ref.resourceSha256 !== undefined) && (ref.kind !== 'mcp' || !isAbsolute(ref.resourceRoot || '') || !/^[a-f0-9]{64}$/.test(ref.resourceSha256 || '')))) throw new Error('插件资源摘要无效');
   return { extensionSelection: { skillIds: [...selection.skillIds], mcpIds: [...selection.mcpIds], ...(selection.pluginIds === undefined ? {} : {pluginIds:[...selection.pluginIds]}) }, extensionManifest: manifest.map(({id,kind,name,path,sha256,treeSha256,resourceRoot,resourceSha256}) => ({id,kind,name,path,sha256,...(treeSha256 ? {treeSha256} : {}),...(resourceRoot ? {resourceRoot,resourceSha256} : {})})) };
 }
-const runtime = (value = {}) => { const provider = value.provider || "claude-code"; if (!["claude-code", "codex", "dsh"].includes(provider)) throw new Error("运行时必须选择 Claude Code、Codex 或 DeepSeek Harness"); return { ...(value.profileId ? { profileId: String(value.profileId) } : {}), ...extensionBinding(value), pluginSources: pluginSources(value.pluginSources), provider, executable: value.executable?.trim() || null, model: value.model?.trim() || "", effort: effortLevel(provider, value.effort), profile: value.profile?.trim() || "", skillPaths: Array.isArray(value.skillPaths) ? value.skillPaths.map((path) => resolve(path)) : [], pluginPaths: Array.isArray(value.pluginPaths) ? value.pluginPaths.map((path) => resolve(path)) : [], mcpConfigPaths: Array.isArray(value.mcpConfigPaths) ? value.mcpConfigPaths.map((path) => resolve(path)) : [] } };
+const runtime = (value = {}) => { const provider = value.provider || "claude-code"; if (!RUNTIME_IDS.includes(provider)) throw new Error("请选择已支持的 Runtime"); return { ...(value.profileId ? { profileId: String(value.profileId) } : {}), ...extensionBinding(value), pluginSources: pluginSources(value.pluginSources), provider, executable: value.executable?.trim() || null, model: value.model?.trim() || "", effort: effortLevel(provider, value.effort), profile: value.profile?.trim() || "", skillPaths: Array.isArray(value.skillPaths) ? value.skillPaths.map((path) => resolve(path)) : [], pluginPaths: Array.isArray(value.pluginPaths) ? value.pluginPaths.map((path) => resolve(path)) : [], mcpConfigPaths: Array.isArray(value.mcpConfigPaths) ? value.mcpConfigPaths.map((path) => resolve(path)) : [] } };
 function documentPaths(value = []) {
   if(!Array.isArray(value))throw new Error('节点交付位置必须是相对路径数组');
   return [...new Set(value.map(item=>{
@@ -94,8 +96,75 @@ function documentPaths(value = []) {
 }
 function validateWorkflowInput(input) {
   if (Array.isArray(input.nodes) && input.nodes.some(node => ['ownerRole', 'repositoryPath', 'reuseOwnerFrom'].some(key => Object.hasOwn(node || {}, key)))) throw new Error('工作流节点仅使用staffingGuidance描述人员需求；不接受ownerRole、repositoryPath或reuseOwnerFrom');
+  if (Object.keys(input).some(key => !['name','description','nodes','edges'].includes(key))) throw new Error('工作流包含未知字段');
+  if (Array.isArray(input.nodes) && input.nodes.some(node => node && Object.keys(node).some(key => !['id','type','title','description','staffingGuidance','dependsOn','handoffFrom','deliverable','artifactPaths','position'].includes(key)))) throw new Error('工作流节点包含未知字段');
 }
-function workflow(input = {}, { templateId, system, current = false } = {}) { if (!Array.isArray(input.nodes) || !input.nodes.length) throw new Error("工作流至少需要一个节点"); const nodes = input.nodes.map((inputNode, index) => { const nodeId = text(inputNode?.id || `node_${index + 1}`, "节点 ID"); return { id: nodeId, title: text(inputNode?.title, `第 ${index + 1} 个节点标题`), staffingGuidance: text(inputNode?.staffingGuidance || (inputNode?.ownerRole ? `适合由熟悉${inputNode.ownerRole}相关工作的成员承担；请结合成员提示词和能力判断。` : ""), `第 ${index + 1} 个节点人员需求`), dependsOn: [...new Set(inputNode?.dependsOn || [])], handoffFrom: [...new Set(inputNode?.handoffFrom || [])], deliverable: inputNode?.deliverable?.trim() || `完成「${inputNode?.title}」并交付可验收文件。`, artifactPaths: documentPaths(inputNode?.artifactPaths, nodeId), ...(!current ? {repositoryPath: inputNode?.repositoryPath || null} : {}), ...(!current && inputNode?.reuseOwnerFrom ? { reuseOwnerFrom: inputNode.reuseOwnerFrom } : {}) }; }); const ids = new Set(nodes.map((node) => node.id)); if (ids.size !== nodes.length) throw new Error("工作流节点 ID 不能重复"); for (const node of nodes) { if (!/^[a-z][a-z0-9_]*$/.test(node.id)) throw new Error("节点 ID 只能使用小写字母、数字和下划线"); for (const dependency of [...node.dependsOn, ...node.handoffFrom]) if (!ids.has(dependency) || dependency === node.id) throw new Error(`节点「${node.title}」引用了不存在或自身的依赖节点`); if (node.repositoryPath && (!/^repos\/[A-Za-z0-9._-]+$/.test(node.repositoryPath) || ["repos/.", "repos/.."].includes(node.repositoryPath))) throw new Error("代码仓库必须是 repos/ 下的一个直接子目录"); } const visiting = new Set(), visited = new Set(); const visit = (nodeId) => { if (visiting.has(nodeId)) throw new Error("工作流节点依赖不能形成循环"); if (visited.has(nodeId)) return; visiting.add(nodeId); nodes.find((node) => node.id === nodeId).dependsOn.forEach(visit); visiting.delete(nodeId); visited.add(nodeId); }; nodes.forEach((node) => visit(node.id)); return { id: templateId || id("workflow"), system: Boolean(system), name: text(input.name, "工作流名称"), description: input.description?.trim() || "", nodes }; }
+function workflow(input = {}, { templateId, system, current = false, enforceBranches = false } = {}) {
+  if (!Array.isArray(input.nodes) || !input.nodes.length || input.nodes.length > 100) throw new Error("工作流需要 1 至 100 个节点");
+  const optionalText = (value, label, maximum = 20000) => {
+    if (value === undefined) return '';
+    if (typeof value !== 'string' || value.length > maximum) throw new Error(`${label}必须为不超过 ${maximum} 字符的文本`);
+    return value.trim();
+  };
+  const nodes = input.nodes.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('工作流节点必须是对象');
+    const nodeId = text(raw.id === undefined ? `node_${index + 1}` : raw.id, '节点 ID');
+    if (raw.id !== undefined && !/^[a-z][a-z0-9_]*$/.test(raw.id)) throw new Error('节点 ID 只能使用小写字母、数字和下划线');
+    if (raw.type !== undefined && !['process','condition'].includes(raw.type)) throw new Error('节点类型必须是 process 或 condition');
+    const position = raw.position;
+    if (position !== undefined && (!position || typeof position !== 'object' || Array.isArray(position) || Object.keys(position).some(k => !['x','y'].includes(k)) || !['x','y'].every(k => Number.isFinite(position[k]) && Math.abs(position[k]) <= 100000))) throw new Error('节点坐标需要 -100000 至 100000 的 x、y');
+    for (const field of ['dependsOn','handoffFrom']) if (raw[field] !== undefined && (!Array.isArray(raw[field]) || raw[field].some(id => typeof id !== 'string'))) throw new Error('节点依赖和交接来源必须是 ID 数组');
+    return { id: nodeId, ...(current || raw.type !== undefined ? {type: raw.type ?? 'process'} : {}), title: text(raw.title, `第 ${index + 1} 个节点标题`), ...(current || raw.description !== undefined ? {description: optionalText(raw.description, '节点说明')} : {}),
+      staffingGuidance: optionalText(raw.staffingGuidance === undefined ? (raw.ownerRole ? `适合由熟悉${raw.ownerRole}相关工作的成员承担；请结合成员提示词和能力判断。` : '') : raw.staffingGuidance, '人员需求'),
+      dependsOn: [...new Set(raw.dependsOn || [])], handoffFrom: [...new Set(raw.handoffFrom || [])],
+      deliverable: optionalText(raw.deliverable, '交付定义') || (raw.type === 'condition' ? `依据实际证据判断「${raw.title}」，说明理由并交回经理选择分支。` : `完成「${raw.title}」并交付可验收文件。`), artifactPaths: documentPaths(raw.artifactPaths, nodeId),
+      ...(position === undefined ? {} : { position: { x: position.x, y: position.y } }),
+      ...(!current ? { repositoryPath: raw.repositoryPath || null } : {}), ...(!current && raw.reuseOwnerFrom ? { reuseOwnerFrom: raw.reuseOwnerFrom } : {}) };
+  });
+  const ids = new Set(nodes.map(node => node.id));
+  if (ids.size !== nodes.length) throw new Error('工作流节点 ID 不能重复');
+  for (const node of nodes) {
+    if (!/^[a-z][a-z0-9_]*$/.test(node.id)) throw new Error('节点 ID 只能使用小写字母、数字和下划线');
+    for (const ref of [...node.dependsOn, ...node.handoffFrom]) if (!ids.has(ref) || ref === node.id) throw new Error(`节点「${node.title}」引用了不存在或自身的依赖节点`);
+  }
+  if (input.edges !== undefined && !Array.isArray(input.edges)) throw new Error('工作流连线必须是数组');
+  const connections = workflowConnections({ nodes, ...(input.edges === undefined ? {} : { edges: input.edges }) });
+  if (connections.length > 300) throw new Error('工作流最多 300 条连线');
+  const edgeIds = new Set(), pairs = new Set();
+  const edges = connections.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some(key => !['id','source','target','sourcePort','targetPort','condition','description','dependency','handoff'].includes(key))) throw new Error('连线字段无效');
+    const id = text(raw.id === undefined ? `link_${index + 1}` : raw.id, '连线 ID'), pair = JSON.stringify([raw.source, raw.target]);
+    if (raw.id !== undefined && !/^[a-z][a-z0-9_]*$/.test(raw.id)) throw new Error('连线 ID 无效');
+    if (!/^[a-z][a-z0-9_]*$/.test(id) || edgeIds.has(id)) throw new Error('连线 ID 无效或重复');
+    if (!ids.has(raw.source) || !ids.has(raw.target) || raw.source === raw.target) throw new Error('连线必须连接两个不同的现有节点');
+    if (pairs.has(pair)) throw new Error('两个节点之间不能重复创建同向连线');
+    for (const field of ['dependency','handoff']) if (raw[field] !== undefined && typeof raw[field] !== 'boolean') throw new Error('连线关系标识必须为布尔值');
+    const dependency = raw.dependency ?? false, handoff = raw.handoff ?? true;
+    if (!dependency && !handoff) throw new Error('连线至少需要一种交接或前置依赖关系');
+    for(const key of ['sourcePort','targetPort'])if(raw[key]!==undefined&&!['top','right','bottom','left'].includes(raw[key]))throw new Error('连接点必须是 top/right/bottom/left');
+    edgeIds.add(id); pairs.add(pair);
+    return { id, source: raw.source, target: raw.target, ...Object.fromEntries(['sourcePort','targetPort'].filter(key=>raw[key]!==undefined).map(key=>[key,raw[key]])), ...(current || raw.condition !== undefined ? {condition: optionalText(raw.condition, '分支条件', 2000)} : {}), description: optionalText(raw.description, '连线说明'), dependency, handoff };
+  });
+  if(enforceBranches)assertWorkflowBranches({nodes,edges});
+  for (const [index, node] of nodes.entries()) for (const [field, flag] of [['dependsOn','dependency'],['handoffFrom','handoff']]) {
+    const derived = edges.filter(edge => edge.target === node.id && edge[flag]).map(edge => edge.source);
+    if (input.edges !== undefined && input.nodes[index][field] !== undefined && JSON.stringify([...node[field]].sort()) !== JSON.stringify([...derived].sort())) throw new Error('节点关系与连线定义不一致，请按连线同步依赖和交接来源');
+    node[field] = derived;
+  }
+  const visiting = new Set(), visited = new Set();
+  const visit = nodeId => {
+    if (visiting.has(nodeId)) throw new Error('工作流节点依赖不能形成循环；返工请使用普通交接连线');
+    if (visited.has(nodeId)) return;
+    visiting.add(nodeId); nodes.find(node => node.id === nodeId).dependsOn.forEach(visit); visiting.delete(nodeId); visited.add(nodeId);
+  };
+  nodes.forEach(node => visit(node.id));
+  return { id: templateId || id('workflow'), system: Boolean(system), name: text(input.name, '工作流名称'), description: optionalText(input.description, '工作流说明'), nodes, ...(current || input.edges !== undefined ? {edges} : {}) };
+}
+function assertWorkflowBranches(definition) {
+  const degree=new Map();for(const edge of workflowConnections(definition))degree.set(edge.source,(degree.get(edge.source)||0)+1);
+  const node=definition.nodes.find(node=>node.type!=='condition'&&degree.get(node.id)>1);
+  if(node)throw new Error(`流程节点「${node.title}」最多一条出口连线；多个出口请改为条件节点。`);
+}
 const exampleWorkflow = {
   id: "content_delivery", name: "内容交付", description: "从可信材料整理简报、创作内容，再独立审校。",
   nodes: [
@@ -157,17 +226,17 @@ const baseEmployeeConfiguration = agent => {if(!agent)return agent;const {reposi
 // codex debug models supported_reasoning_levels, codex-cli 0.160.0). Codex does
 // not locally reject unknown effort values, so the platform must reject values
 // outside the known vocabulary instead of inventing per-model tables here.
-const EFFORT_LEVELS = { "claude-code": ["low", "medium", "high", "xhigh", "max"], codex: ["low", "medium", "high", "xhigh", "max", "ultra"], dsh: ["off", "low", "high", "max"] };
+const EFFORT_LEVELS = RUNTIME_EFFORT_LEVELS;
 function effortLevel(provider, value) {
   const item = value ?? "";
   if (typeof item !== "string" || item.length > 64 || /[\0\r\n]/.test(item)) throw new Error("Runtime 配置必须为单行文本");
   const trimmed = item.trim();
-  if (trimmed && !EFFORT_LEVELS[provider].includes(trimmed)) throw new Error(`思考等级必须是 ${EFFORT_LEVELS[provider].join(" / ")} 之一或留空`);
+  if (trimmed && !(provider==='opencode' ? /^[a-zA-Z0-9_.-]{1,64}$/.test(trimmed) : EFFORT_LEVELS[provider].includes(trimmed))) throw new Error(`思考等级必须是 ${EFFORT_LEVELS[provider].join(" / ")} 之一或留空`);
   return trimmed;
 }
 function runtimeConnection(value = {}) {
   const provider = value.provider || "claude-code";
-  if (!["claude-code", "codex", "dsh"].includes(provider)) throw new Error("运行时必须选择 Claude Code、Codex 或 DeepSeek Harness");
+  if (!RUNTIME_IDS.includes(provider)) throw new Error("请选择已支持的 Runtime");
   const result = { provider };
   for (const key of ["model", "executable", "profile"]) {
     const item = value[key] ?? "";
@@ -175,6 +244,7 @@ function runtimeConnection(value = {}) {
     result[key] = item.trim() || (key === "executable" ? null : "");
   }
   result.effort = effortLevel(provider, value.effort);
+  if(result.effort && !result.model && ["cursor","gemini","opencode"].includes(provider))throw new Error("请先选择模型，再指定思考等级");
   return result;
 }
 
@@ -244,7 +314,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     if (!item) { item = { id: `runtime_${connection.provider}`, provider: connection.provider, model: "", effort: "", enabled: true }; profiles().push(item); }
     return item;
   };
-  for (const provider of ["claude-code", "codex", "dsh"]) {
+  for (const provider of RUNTIME_IDS) {
     if (profiles().filter(item => item.provider === provider).length > 1) throw new Error(`Runtime ${provider} 存在多项旧配置，请先合并为每种 Provider 一项；不会自动迁移或重置数据`);
     ensureProfile({ provider });
   }
@@ -295,7 +365,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     return [...input];
   }
   function validateTeam(input) {
-    if (Object.hasOwn(input, "managerAgentId")) throw new Error("团队不再指定项目经理，请将经理放入 memberAgentIds；任务创建时校验恰好一位项目经理");
+    if (Object.hasOwn(input, "managerAgentId")) throw new Error("团队不再指定经理，请使用 memberAgentIds；在任务中显式选择 managerAgentId");
     return { memberAgentIds: memberIds(input.memberAgentIds, { empty: true }) };
   }
   const taskReadModel = task => { const { teamId, team, priority, ...record } = task; return clone({ ...record, memberAgentIds: task.memberAgentIds || [...(task.memberSnapshots || []).map(member => member.id), task.managerSnapshot?.id || task.managerAgentId].filter(Boolean) }); };
@@ -501,7 +571,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       if (delivery.status !== "claimed" || trace?.dispatchId !== dispatchId || trace.status !== "running" || !isAbsolute(cwd)) throw new Error("会话必须绑定已领取的成员执行");
       current.memberSessions ||= {};
       let session = current.memberSessions[delivery.recipientAgentId];
-      const needsNativeConfirmation = ["codex", "dsh"].includes(runAgent(current, trace.agentId).runtime.provider);
+      const needsNativeConfirmation = runAgent(current, trace.agentId).runtime.provider !== "claude-code";
       const resume = Boolean(session?.sessionId && (!needsNativeConfirmation || session.nativeConfirmed));
       if (session && session.cwd !== cwd) throw new Error("同一成员会话的工作目录不能改变");
       if (!session?.sessionId) {
@@ -515,7 +585,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     bindProviderSession(traceId, providerSessionId) {
       const trace = getTrace(traceId), current = getRun(trace?.runId), session = current?.memberSessions?.[trace?.agentId];
-      if (!session || session.lastTraceId !== traceId || trace.status !== "running" || !["codex", "dsh"].includes(runAgent(current, trace.agentId).runtime.provider) || !/^[a-zA-Z0-9-]{16,80}$/.test(providerSessionId)) throw new Error("Provider 会话绑定无效");
+      if (!session || session.lastTraceId !== traceId || trace.status !== "running" || runAgent(current, trace.agentId).runtime.provider === "claude-code" || !nativeSessionId(providerSessionId)) throw new Error("Provider 会话绑定无效");
       if (session.nativeConfirmed && session.sessionId !== providerSessionId) throw new Error("Provider 会话与成员绑定不一致");
       session.sessionId = providerSessionId; session.nativeConfirmed = true; trace.providerSessionId = providerSessionId;
       save();
@@ -823,7 +893,6 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         for(const agentId of added) {
           const employee=currentEmployee(agentId);
           if(!employee || employee.status!=="active")throw new Error("新增成员必须是可用数字员工");
-          if(employee.kind==="manager")throw new Error("任务只允许当前一位项目经理");
           const frozen=current.participants.find(item=>item.id===agentId);
           if(!frozen){assertRuntimeEnabled(resolveAgentRuntime(employee.runtime));current.participants.push({...withRoleSnapshot(employeeConfiguration(employee)),type:"agent"});}
         }
@@ -997,8 +1066,8 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
     },
     getRunTrace(runId,traceId){const trace=getTrace(traceId);if(!trace||trace.runId!==runId)throw new Error('Trace 不属于当前 Run');return clone(trace);},
     getRunWorkspace(runId, { summary = false } = {}) { const current = getRun(runId); if (!current) throw new Error("Run 不存在"); const traces = journal.select("traces", "runId", runId).map((item) => ({ ...item, agent: { id: item.agentId, name: current.participants.find(member=>member.id===item.agentId)?.name } })); const artifacts = journal.select("artifacts", "runId", runId).map((item) => (summary ? { ...item } : { ...item, trace: getTrace(item.traceId), agent: { id: item.ownerAgentId, name: current.participants.find(member=>member.id===item.ownerAgentId)?.name } })); return clone({ deletedAgentIds: state.agents.filter(item => item.status === "deleted").map(item => item.id), failureEvents: journal.select("events", "runId", runId).filter(event => event.type === "trace.failed").slice(-20).map(consoleAuditProjection), pendingQuestions: this.pendingQuestions(runId), dispatches: this.listDispatches(runId), run: { ...current, task: this.getRunTask(runId), artifactCount: artifacts.length }, traces, artifacts, messages: journal.select("messages", "runId", runId), decisions: journal.select("decisions", "runId", runId), events: journal.select("events", "runId", runId).filter(item => (!summary || ["dispatch.retry_scheduled", "dispatch.retry_requested", "dispatch.retry_stopped", "dispatch.escalated", "dispatch.coordination_followups_settled", "session.reset", "run.completed", "run.awaiting_acceptance", "run.acceptance_reopened", "run.recovered", "run.cancelled", "run.paused", "run.resumed", "run.inquiries_cancelled", "run.failed", "run.retry_requested", "run.orchestration_retry_requested", "run.reassessment_requested"].includes(item.type))) }); },
-    createWorkflowTemplate(input = {}) { validateWorkflowInput(input); const item = workflow(input, {current: true}); if (state.workflowTemplates.some((candidate) => candidate.name === item.name)) throw new Error("工作流名称必须唯一"); state.workflowTemplates.push(item); save(); return clone(item); },
-    updateWorkflowTemplate(templateId, input = {}) { const current = journal.get("workflowTemplates", templateId); if (!current) throw new Error("工作流不存在"); validateWorkflowInput(input); Object.assign(current, workflow(input, { templateId, system: current.system, current: true })); save(); return clone(current); },
+    createWorkflowTemplate(input = {}) { validateWorkflowInput(input); const item = workflow(input, {current: true,enforceBranches:true}); if (state.workflowTemplates.some((candidate) => candidate.name === item.name)) throw new Error("工作流名称必须唯一"); state.workflowTemplates.push(item); save(); return clone(item); },
+    updateWorkflowTemplate(templateId, input = {}) { const current = journal.get("workflowTemplates", templateId); if (!current) throw new Error("工作流不存在"); validateWorkflowInput(input); Object.assign(current, workflow(input, { templateId, system: current.system, current: true,enforceBranches:true })); save(); return clone(current); },
     deleteWorkflowTemplate(templateId) {
       const current = journal.get("workflowTemplates", templateId);
       if (!current) throw new Error("工作流不存在");
@@ -1047,6 +1116,22 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
           state.extensionCatalog.push({...clone(Object.fromEntries(fields.filter(key=>entry[key] !== undefined).map(key=>[key,entry[key]]))),deletedAt:null});
         }
       });
+    },
+    hasRoleRuntimeBinding(roleId,provider) { return Boolean(state.roles.find(role=>role.id===roleId)?.extensionBindings?.[provider]); },
+    ensureRoleRuntimeBinding(roleId,provider,selection,binding) {
+      const role=state.roles.find(item=>item.id===roleId);if(!role)throw new Error('绑定的角色不存在');
+      if(JSON.stringify(role.extensionSelection)!==JSON.stringify(selection))throw new Error('角色扩展选择已变化，请重新提交');
+      if(role.extensionBindings?.[provider])return;
+      if(!RUNTIME_IDS.includes(provider))throw new Error('角色 Runtime 无效');
+      const checked=validateRoleExtensions({extensionSelection:selection,extensionBindings:{[provider]:binding}});
+      (role.extensionBindings ||= {})[provider]=checked.extensionBindings[provider];save();
+    },
+    refreshExtensionCompatibility(kind,extensionId,metadata) {
+      const entry=state.extensionCatalog.find(item=>item.kind===kind && item.id===extensionId && !item.deletedAt);
+      if(!entry)throw new Error('扩展未安装或已删除');
+      if(metadata.id!==extensionId || !Array.isArray(metadata.providers) || metadata.providers.some(provider=>!RUNTIME_IDS.includes(provider)))throw new Error('扩展兼容性摘要无效');
+      for(const key of ['providers','compatibility','components','warnings'])if(metadata[key]!==undefined)entry[key]=clone(metadata[key]);
+      save();return clone(entry);
     },
     getExtension(kind, extensionId) { return clone(state.extensionCatalog.find(item=>item.kind===kind && item.id===extensionId && !item.deletedAt) || null); },
     listExtensions(kind) { return clone(state.extensionCatalog.filter(item=>(!kind || item.kind===kind) && !item.deletedAt)); },
@@ -1249,14 +1334,13 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const selectedTeams = teamIds.map(teamId => { const team = getTeam(teamId); if (!team || team.status !== "active") throw new Error("请选择存在且可用的团队"); return team; });
       const explicitMembers = memberIds(input.memberAgentIds === undefined ? [] : input.memberAgentIds, { active: true, empty: true });
       const selectedIds = memberIds([...new Set([...explicitMembers, ...selectedTeams.flatMap(team => teamMembers(team).filter(agentId => currentEmployee(agentId)?.status === "active"))])], { active: true }), members = selectedIds.map(getAgent);
-      const managers = members.filter(member => member.kind === "manager");
-      if (managers.length !== 1) throw new Error("任务成员必须且只能包含一位可用项目经理");
-      const managerAgentId = managers[0].id;
-      if (members.some(member => !["business", "manager"].includes(member.kind))) throw new Error("任务成员含旧研发类型，请先编辑为普通员工");
+      const managerAgentId = input.managerAgentId;
+      if (typeof managerAgentId !== 'string' || !selectedIds.includes(managerAgentId)) throw new Error('请选择所选员工中的一位作为任务经理（managerAgentId）');
       if (input.workflowTemplateId != null && typeof input.workflowTemplateId !== "string") throw new Error("工作流 ID 必须是字符串或 null");
       const templateId = input.workflowTemplateId?.trim() || null;
       const template = templateId ? journal.get("workflowTemplates", templateId) : { id: null, name: "默认协作", description: "按任务目标和成员能力协作，由经理推进交接并提交验收。", nodes: [{ id: "delivery", title: "完成任务", staffingGuidance: "经理根据任务目标和成员能力安排执行，成员完成后明确交接；需要更多工作时继续协调，交付后提交验收。", deliverable: "完成用户要求，如实说明交付结果与尚未解决的问题。", artifactPaths: [], dependsOn: [], handoffFrom: [] }] };
       if (!template) throw new Error("工作流不存在");
+      assertWorkflowBranches(template);
       const workspaceRoot = this.getWorkspaceSettings().workspaceRoot, taskId = "task_" + randomUUID();
       if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定");
       const workspacePath = workspaceRoot ? resolve(workspaceRoot, taskId) : text(input.workspacePath, "任务工作目录");
@@ -1276,7 +1360,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const currentTask = getTask(taskId);
       if (!currentTask || currentTask.status !== "backlog") throw new Error("Task 不能启动新的 Run");
       const sourceManager = currentTask.managerSnapshot;
-      if (sourceManager?.kind !== "manager" || !Array.isArray(currentTask.memberSnapshots)) throw new Error("任务缺少冻结成员或负责经理，请重新创建任务");
+      if (!sourceManager?.id || sourceManager.id !== currentTask.managerAgentId || !Array.isArray(currentTask.memberSnapshots)) throw new Error("任务缺少冻结成员或负责经理，请重新创建任务");
       const frozen = [sourceManager, ...currentTask.memberSnapshots];
       if (frozen.some(employee => getAgent(employee.id)?.status === "deleted")) throw new Error("任务尚未开始且有成员已删除，请重新选择成员创建任务");
       for (const employee of frozen) assertRuntimeEnabled(employee.runtime);

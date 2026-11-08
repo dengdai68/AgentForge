@@ -1,3 +1,4 @@
+import {RUNTIME_IDS,RUNTIME_PROVIDERS,PORTABLE_RUNTIME_IDS} from "../../client/runtime-providers.mjs";
 import { dshModelCatalog } from "./dsh.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -164,13 +165,48 @@ async function codexCatalog(executable, { run }) {
   };
 }
 
+// Native outputs can contain provider configuration. Project allowlisted model
+// metadata only; never attach raw stdout/stderr or the original error as cause.
+async function portableCatalog(provider,executable,{environment,homeDirectory,run}) {
+  const levels=ids=>ids.map(id=>({id}));
+  const command=executable || RUNTIME_PROVIDERS[provider].command;
+  const native=async args=>{try{return (await run(command,args,{timeout:30000,maxBuffer:8*1024*1024,env:cliEnvironment(command,{}, {environment,homeDirectory})})).stdout.replace(/\x1b\[[0-9;]*m/g,'');}catch{throw Error(`${RUNTIME_PROVIDERS[provider].label} 模型目录查询失败，请检查原生 CLI 安装及登录`);}};
+  const parse=raw=>{try{return JSON.parse(raw);}catch{throw Error('原生模型目录无法解析，请检查 CLI 版本');}};
+  const safe=value=>typeof value==='string' && value.length>0 && value.length<=256 && !/[\x00-\x20]/.test(value);
+  let models=[],source='';
+  if(provider==='cursor'){
+    source='cursor-agent --list-models';
+    models=(await native(['--list-models'])).split(/\r?\n/).flatMap(line=>{const match=/^([^\s]+) - (.+)$/.exec(line);return match&&safe(match[1])?[{id:match[1],label:match[2].replace(/ \(current.*\)$/,''),current:match[2].includes('(current'),levels:[]}]:[];});
+    for(const model of models){const part=/^(.*)-(none|minimal|low|medium|high|xhigh|max)(-fast)?$/.exec(model.id);if(part)model.levels=levels(models.flatMap(m=>{const p=/^(.*)-(none|minimal|low|medium|high|xhigh|max)(-fast)?$/.exec(m.id);return p&&p[1]===part[1]&&(p[3]||'')===(part[3]||'')?[p[2]]:[]}));model.note='思考档位来自此模型族的原生变体；未列档位可直接选择带思考等级的模型。';}
+  } else if(provider==='gemini'){
+    source='gemini models --output-format json';const rows=parse(await native(['models','--output-format','json']));if(!Array.isArray(rows))throw Error('Gemini 模型目录结构无法识别');
+    models=rows.filter(m=>safe(m.id)).map(m=>({id:m.id,label:m.displayName || m.name || m.id,levels:levels(/^gemini-3/.test(m.id)?RUNTIME_PROVIDERS.gemini.efforts:[]),note:'Gemini 3 使用原生 thinkingLevel；Auto 与仅支持 token budget 的模型保留 CLI 默认。'}));
+  } else if(provider==='kimi'){
+    source='kimi provider list --json（仅模型元数据）';const value=parse(await native(['provider','list','--json']));if(!value.models || typeof value.models!=='object')throw Error('Kimi 模型目录结构无法识别');
+    models=Object.entries(value.models).filter(([id])=>safe(id)).map(([id,m])=>({id,label:m.displayName || id,levels:(m.supportEfforts || []).filter(x=>RUNTIME_PROVIDERS.kimi.efforts.includes(x)).map(id=>({id,default:id===m.defaultEffort}))}));
+  } else if(provider==='pi'){
+    source='pi --list-models';models=(await native(['--list-models'])).split(/\r?\n/).flatMap(line=>{const parts=line.trim().split(/\s+/);return parts.length>=6&&parts[0]!=='provider'&&safe(parts[0])&&safe(parts[1])?[{id:parts[0]+'/'+parts[1],label:parts[0]+'/'+parts[1],levels:levels(parts[4]==='yes'?RUNTIME_PROVIDERS.pi.efforts:[]),note:'原生 Pi 思考档位；具体 Provider 可按实际支持归一。'}]:[];});
+  } else if(provider==='opencode'){
+    source='opencode api --standalone model.list';const value=parse(await native(['api','--standalone','model.list']));if(!Array.isArray(value.data))throw Error('OpenCode 模型目录结构无法识别');
+    models=value.data.filter(m=>m.enabled!==false&&m.type==='chat'&&safe(m.providerID)&&safe(m.id)).map(m=>({id:m.providerID+'/'+m.id,label:m.name || m.id,levels:(m.variants || []).filter(v=>safe(v.id)&&/^[a-zA-Z0-9_.-]{1,64}$/.test(v.id)).map(v=>({id:v.id})),note:'档位为此模型原生 variant，通过 model#variant 执行。'}));
+  } else if(provider==='qwen'){
+    source='Qwen 本机 modelProviders / 官方 OAuth 别名';const path=join(environment.QWEN_HOME || join(homeDirectory,'.qwen'),'settings.json');let config={};try{if((await stat(path)).size>1024*1024)throw Error();const raw=await readFile(path,'utf8');if(Buffer.byteLength(raw)>1024*1024)throw Error();config=parse(raw);}catch(error){if(error.code!=='ENOENT')throw Error('Qwen 模型配置无法读取');}
+    for(const rows of Object.values(config.modelProviders || {}))if(Array.isArray(rows))for(const row of rows)if(safe(row.id))models.push({id:row.id,label:row.name || row.id,levels:levels(RUNTIME_PROVIDERS.qwen.efforts),note:'Qwen 原生 reasoningEffort，各 Provider 按模型实际支持映射和归一。'});
+    if(['qwen-oauth','qwen-subscription'].includes(config.security?.auth?.selectedType))models.push({id:'coder-model',label:'Qwen 原生默认编程模型',levels:levels(RUNTIME_PROVIDERS.qwen.efforts)});
+    if(safe(config.model?.name)&&!models.some(m=>m.id===config.model.name))models.push({id:config.model.name,label:config.model.name,levels:levels(RUNTIME_PROVIDERS.qwen.efforts)});
+  }
+  if(!models.length)throw Error(`${RUNTIME_PROVIDERS[provider].label} 未返回可选模型；请检查原生 CLI 登录和模型配置，也可手工输入`);
+  return {provider,source,models:[...new Map(models.map(m=>[m.id,m])).values()],notes:['目录来自原生 CLI 或本机模型配置，不代表账号额度或访问权限已通过真实调用。']};
+}
+
 // Read-only catalog for the Runtime settings surfaces. Profile field changes do
 // not reach frozen Task/Run snapshots; this query never mutates CLI state.
 async function loadModelCatalog({ provider, executable = null }, { environment = process.env, homeDirectory = homedir(), run = exec } = {}) {
   if (provider === "dsh") return dshModelCatalog();
   if (provider === "claude-code") return claudeCatalog({ environment, homeDirectory });
   if (provider === "codex") return codexCatalog(executable, { run });
-  throw new Error("provider 必须是 claude-code、codex 或 dsh");
+  if(PORTABLE_RUNTIME_IDS.includes(provider))return portableCatalog(provider,executable,{environment,homeDirectory,run});
+  throw new Error("provider 必须是已支持的 Runtime ID");
 }
 
 // Server-side per-model effort check for profile saves. Only models actually
@@ -186,11 +222,13 @@ export function assertModelEffort(catalog, model, effort) {
 // Only a digest of environment values is retained; never store or expose credentials.
 const catalogs=new WeakMap();
 export async function runtimeModelCatalog(input,{environment=process.env,homeDirectory=homedir(),run=exec,refresh=false}={}) {
+  if(!RUNTIME_IDS.includes(input.provider))throw new Error('provider 必须是已支持的 Runtime ID');
   const provider=input.provider, config=environment.CODEX_HOME || join(homeDirectory,'.codex');
-  const command=input.executable||(provider==='codex'?'codex':provider==='claude-code'?'claude':'dsh');
+  const command=input.executable||RUNTIME_PROVIDERS[provider]?.command;
   let executable=isAbsolute(command)?command:null;
   if(!executable)for(const directory of (cliEnvironment(command,{}, {environment,homeDirectory}).PATH||'').split(delimiter)){try{const candidate=join(directory,command);await access(candidate,constants.X_OK);if((await stat(candidate)).isFile()){executable=candidate;break;}}catch{}}
-  const paths=[executable,...(provider==='codex'?[join(config,'auth.json'),join(config,'config.toml')]:provider==='claude-code'?[join(environment.CLAUDE_CONFIG_DIR || join(homeDirectory,'.claude'),'settings.json')]:[])].filter(Boolean);
+  const nativeConfig=provider==='qwen'?join(environment.QWEN_HOME || join(homeDirectory,'.qwen'),'settings.json'):provider==='kimi'?join(environment.KIMI_CODE_HOME || join(homeDirectory,'.kimi-code'),'config.toml'):provider==='pi'?join(environment.PI_CODING_AGENT_DIR || join(homeDirectory,'.pi/agent'),'models.json'):null;
+  const paths=[executable,nativeConfig,...(provider==='codex'?[join(config,'auth.json'),join(config,'config.toml')]:provider==='claude-code'?[join(environment.CLAUDE_CONFIG_DIR || join(homeDirectory,'.claude'),'settings.json')]:[])].filter(Boolean);
   const stamps=await Promise.all(paths.map(async path=>{try{const value=await stat(path,{bigint:true});return [path,String(value.ino),String(value.size),String(value.mtimeNs),String(value.ctimeNs)];}catch{return [path,'missing'];}}));
   const key=createHash('sha256').update(JSON.stringify([input,homeDirectory,stamps,Object.entries(environment).sort(([a],[b])=>a.localeCompare(b))])).digest('hex');
   let cache=catalogs.get(run);if(!cache)catalogs.set(run,cache=new Map());

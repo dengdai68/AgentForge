@@ -111,4 +111,15 @@ Orchestrator 每轮按 removedParticipantIds 过滤当前派工名单；已有�
 
 协调拒收属于 Store 状态：单人与多人派工归一到同一原子命令，Orchestrator 不吞掉拒收异常。实际报告/文件与路由是否生效分别记录；routingError 将具体原因带回原成员当前输入，最多一次自动格式纠正，重复拒收转 failed，外部错误仍人工恢复。合法验收因其他执行/排队未结束而延后，不算协议错误；延后投递不阻塞其依赖的报告。详见 docs/03、22。
 
+
+极简工作流沿用X6与认证配置HTTP；画布只编辑节点/连线，Store拥有规范化、校验和Task冻结。client/workflow-description.mjs是共享纯Markdown投影；Run Files在经理Trace启动前写入workflow.md，Orchestrator只传文件引用，prompts不访问文件或Store。无法生成文件时原投递失败，不退回内联当前模板。工作流不是新增调度引擎，既有协调决定、咨询和验收边界保持不变。
+
 同一轮包含 `summary` 与 `consultation` 时，先将非空且与问题正文不同的报告保存为普通角色 Message，再保存问题和等待关系；两条消息关联同一 Trace/本轮输入。缺少报告或正文与问题相同不另造消息，协调失败仍回滚路由并保留原报告；不从控制台补造旧 Message。
+
+经理是Task的显式managerAgentId，不是Agent.kind分类。Store验证属于所选active成员并冻结，Run保留独立经理别名、sourceAgentId和会话；Orchestrator/Prompt依据Run身份协调。自动化持久保存选择、每次触发创建同协议Task，不重写在途身份。MCP工具发现为runtime适配器，只通过已安装不可变配置执行initialize/tools/list，HTTP认证和目录有效性仍由控制面/Store负责，缓存仅成功元数据且限60秒/64项/16MiB，4并发、15秒超时；不进SQLite，不影响市场分页和业务执行，不调用具体工具。
+
+工作流呈现共用web/workflow-layout.mjs：局部ELK仅决定坐标，正交几何与视口控制不参与任务状态。Store在当前workflow写入及新Task冻结入口执行process单出口规则；四边端口是可选呈现元数据，App/CLI通过同一HTTP保存。历史冻结图保留原事实，只读整理不写回。
+
+新增多 CLI Runtime 的架构边界见 [docs/29](29-runtime-providers.md)：共享目录和单一执行分派，复用现有执行生命周期；不新增任务引擎，不把 Runtime 事件当作业务验收。
+
+六种新增 Runtime 的扩展适配决策见 docs/29：市场拥有源解析/不可变安装/兼容计划，Store 拥有当前目录摘要与冻结绑定，portable-extensions 仅生成原生调用配置。复用既有 MCP 私有启动器和历史桥，不引入第二套工具协议、模型客户端或全局安装服务；兼容性检查通过受认证命令更新目录派生数据，列表仍为数据库分页。

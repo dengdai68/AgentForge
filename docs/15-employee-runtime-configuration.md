@@ -22,7 +22,7 @@ MCP 详情提供编辑名称、说明及 JSON；保存生成新版本并原子�
 
 安装入口仅输入 HTTPS Git 地址或本机目录，直接安装来源中全部插件，不再提供信任勾选、候选读取或单插件选择。识别 Claude `.claude-plugin`、Codex `.codex-plugin`/`.agents/plugins` 和 Agent Plugins 根 manifest；组件标准化后按 Runtime 生成加载投影，不改全局 CLI 配置。可共用 Skill；Subagent/Hook 使用本机 Provider 的真实能力，不能映射的事件明确报告兼容性，不用提示词冒充已执行。
 
-来源中有效组件作为一次原子安装发布；Skill/Hook/Subagent 定义格式错误独立跳过并返回 warnings，不影响有效兄弟组件。路径/完整性等致命错误仍不发布部分目录。详见 docs/26。插件自带 MCP 拆为独立市场版本，仍须员工单独选择，不随插件加载。MCP 接受 stdio、sse、streamableHttp（及标准 http/streamable-http 拼写），复用已有 MCP SDK 的客户端传输，在私有 stdio 启动器中桥接，供三种 Runtime 统一加载；不自动配置 OAuth 或安装依赖。
+来源中有效组件作为一次原子安装发布；Skill/Hook/Subagent 定义格式错误独立跳过并返回 warnings，不影响有效兄弟组件。路径/完整性等致命错误仍不发布部分目录。详见 docs/26。插件自带 MCP 拆为独立市场版本，仍须员工单独选择，不随插件加载。MCP 接受 stdio、sse、streamableHttp（及标准 http/streamable-http 拼写），复用已有 MCP SDK 的客户端传输，在私有 stdio 启动器中桥接，供九种 Runtime 统一加载；不自动配置 OAuth 或安装依赖。
 
 员工新建和编辑均支持 active/inactive；插件与 MCP 搜索器分行排列。员工、插件和 MCP 改为响应式卡片，不改变既有信息或分页语义。插件详情顶部概要，下方 Skill/Subagent/Hook 标签页切换列表。旧的单插件安装/读取来源协议废弃，CLI 同轮同步；开发阶段不转换旧安装版本、不改冻结历史或真实实例。
 
@@ -44,9 +44,9 @@ HTTP/CLI 拒绝 `skillIds`、员工 `mcpJson`、连接字段、手工路径及�
 - 安装复制完整插件及支持文件到 Runtime 根下 `installed-plugins/<批次ID>/plugins/<版本ID>/plugin/`，拆分 MCP 在同批次 `mcps/<版本ID>/`，独立手动 MCP 在 `marketplace/<版本ID>/`。默认根位于 `~/.agentforge/<实例>/runtime-configs/`。准备完整批次后一次 rename 发布，失败清理临时批次，不暴露部分已安装项。版本不可变，保存 manifest 及完整目录摘要；受管副本篡改会拒绝执行。
 - 配置根的祖先目录允许 macOS `/tmp` → `/private/tmp`、卷挂载等正常别名，先解析实际位置再创建与记录路径；配置根本身及受管子目录仍拒绝符号链接，运行中实际位置改变则报错。目录错误在诊断中保留具体路径和错误码，不自动删除或重建真实数据。
 - 导入不运行安装脚本、Hook、依赖安装或 MCP；首次安装不自动绑定员工，重复导入按本页覆盖规则更新已有选择。拆分时解析默认或声明的 MCP JSON，把插件根变量替换成已安装目录；清空加载副本的默认 MCP 文件并移除 manifest 的 MCP 声明，避免 Provider 自动启用。选中员工实际执行 Hook，以本机用户权限运行；bypass 不是沙箱。
-- 插件卡片、详情及员工选择器分别标记三种 Runtime 支持情况；详情给出不兼容原因，组件标记适用 Runtime。列表只给组件数量与兼容性；详情按需读取 Skill、Subagent、Hook 元信息及 manifest。支持表示静态组件可加载，不代表本机 CLI、依赖、模型账号已实测。在线市场浏览本轮不提供。
+- 插件卡片、详情及员工选择器分别标记九种 Runtime 支持情况；详情给出不兼容原因，组件标记适用 Runtime。列表只给组件数量与兼容性；详情按需读取 Skill、Subagent、Hook 元信息及 manifest。支持表示静态组件可加载，不代表本机 CLI、依赖、模型账号已实测。在线市场浏览本轮不提供。
 - 共享市场根目录且显式声明 Skill 子目录时，只加载该条目声明的 Skill；普通独立插件的自定义 Skill 路径仍补充默认目录。遵循 [Claude 插件清单规则](https://code.claude.com/docs/en/plugins-reference#marketplace-entries-and-the-manifest)，不会把同仓库其他插件的 Skill 自动混入所选插件。
-- MCP 通过单服务 `mcpServers` JSON 安装为独立不可变版本，私有文件权限0600。详情接口隐藏 env/headers 等鉴权值；列表不携带 JSON。stdio、SSE、Streamable HTTP 均支持三种 Runtime；`streamableHttp`、`streamable-http` 归一为 Provider 的 `http` 类型。URL 未写 type 时按 HTTP 解析。stdio 的 `cwd`/`env_vars` 经三种 Runtime 共用的私有启动器保留；手动 cwd 必须绝对路径，插件相对 cwd 固定为不可变插件目录。子进程继承当前本机环境，env_vars 不是沙箱白名单。两套清单同名 MCP 若定义不同，拆成独立 Runtime 标记的版本，由员工选择一个，不互相覆盖。Codex 私有启动器复用现有 MCP SDK 桥接远程传输；鉴权不进入命令行，拒绝重定向，不自动配置 OAuth。
+- MCP 通过单服务 `mcpServers` JSON 安装为独立不可变版本，私有文件权限0600。详情接口隐藏 env/headers 等鉴权值；列表不携带 JSON。stdio、SSE、Streamable HTTP 均支持九种 Runtime；`streamableHttp`、`streamable-http` 归一为 Provider 的 `http` 类型。URL 未写 type 时按 HTTP 解析。stdio 的 `cwd`/`env_vars` 经九种 Runtime 共用的私有启动器保留；手动 cwd 必须绝对路径，插件相对 cwd 固定为不可变插件目录。子进程继承当前本机环境，env_vars 不是沙箱白名单。两套清单同名 MCP 若定义不同，拆成独立 Runtime 标记的版本，由员工选择一个，不互相覆盖。Codex 私有启动器复用现有 MCP SDK 桥接远程传输；鉴权不进入命令行，拒绝重定向，不自动配置 OAuth。
 - 员工编辑通过可搜索下拉添加插件/MCP，已选项以可移除标签展示。加载失败、版本缺失或 Provider 不兼容时阻止保存，不静默丢弃选择。
 - 市场别名（如 stable/dev）可分别安装，但同一员工不能同时选择原生名称相同的两个插件版本，避免 Runtime 命名空间互相覆盖。
 
@@ -95,21 +95,21 @@ Web 设置模型字段为可搜索筛选的建议列表 + 手工输入，思考�
 
 ## 固定 Runtime 配置（当前协议）
 
-Runtime 目录固定为 Claude Code、Codex 和 DeepSeek Harness，每种 Provider 只有一项；名称由 Provider 决定，不允许创建、删除或自定义名称/CLI 路径/Codex profile。`GET /api/settings/runtime-profiles` 返回 id、provider、enabled、model、effort、employeeCount；`PUT .../:id` 接受非空部分对象 `{enabled?:boolean, model?:string, effort?:string}`。旧创建/删除、名称及连接字段写入明确拒绝；员工仍用 profileId 引用，现有两项 ID 不变。模型目录不接受自定义 executable，沿服务发现的本机 CLI。当前员工随保存更新模型与档位，已有 Task/Run/排队投递的模型及档位快照不改。
+Runtime 目录固定为Claude Code、Codex、DeepSeek Harness、Cursor、Gemini CLI、Qwen Code、Kimi Code、Pi、OpenCode，每种 Provider 只有一项；名称由 Provider 决定，不允许创建、删除或自定义名称/CLI 路径/Codex profile。`GET /api/settings/runtime-profiles` 返回 id、provider、enabled、model、effort、employeeCount；`PUT .../:id` 接受非空部分对象 `{enabled?:boolean, model?:string, effort?:string}`。旧创建/删除、名称及连接字段写入明确拒绝；员工仍用 profileId 引用，既有 Runtime ID 不变。模型目录不接受自定义 executable，沿服务发现的本机 CLI。当前员工随保存更新模型与档位，已有 Task/Run/排队投递的模型及档位快照不改。
 
 设置以三行固定 Runtime 展示可用开关，配置默认折叠，页内展开仅编辑模型名与思考等级；折叠保留表单 DOM 与草稿。停用是当前实例的调用开关：不终止已启动的 Provider；阻止新的任务启动、沟通发送和后续 Provider 调用，包括旧任务后续调用。现有员工绑定及历史不移除，停用项在员工选择器标注，不可新绑定。重新启用不会伪装失败调用已成功，失败任务/投递按原恢复入口继续。
 
-新工作区预置三项并启用。开发阶段不维护具名多连接协议或迁移：多个同 Provider 配置的旧开发数据须由操作者先合并配置，服务明确报错，不擅自选择或重置真实实例。
+新工作区预置九项，实际可用由本机安装与用户开关共同决定。开发阶段不维护具名多连接协议或迁移：多个同 Provider 配置的旧开发数据须由操作者先合并配置，服务明确报错，不擅自选择或重置真实实例。
 
 DeepSeek Harness 使用唯一 dsh 槽位，不允许创建/删除具名连接。模型目录来自本机原生 SDK；model 为 Provider/模型ID，裸 ID 使用 deepseek-official，空值选择当前真实目录首项。当前接入内置 DeepSeek API Key/账号路由，不自动导入全局 pi-ai 配置。effort 为 off/low/high/max，逐模型约束由原生目录提供；账号访问和真实调用仍以 DeepSeek Harness 验证为准。每个会话使用独立 DSH_HOME，native credentials-local 指向原 DSH_HOME/.credentials.yaml；应用不解析/复制密钥、不修改全局配置。Skill 用原生 filesystem provider 仅扫描所选目录；MCP 复用完整性启动器（含 cwd/env_vars）和平台历史服务。Subagent/command Hook 按 docs/26 映射为原生组件；未映射字段明确拒绝。旧安装当前兼容性只读重算，不补写旧快照，无需重新导入。
 
-Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+Runtime 展示名称为Claude Code、Codex、DeepSeek Harness、Cursor、Gemini CLI、Qwen Code、Kimi Code、Pi、OpenCode；固定 Provider ID、执行文件与能力边界见 [多 Runtime 接入](29-runtime-providers.md)。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
-源标准兼容层见 [docs/26](26-runtime-plugin-compatibility.md)：安装保留源副本；当前安装可只读重算 Runtime 支持与组件标签，不必逐个重装。DeepSeek Harness 0.2.1-rc.2 使用原生独立子代理 Session 和版本匹配的官方 Claude/Codex command Hook 桥，保留源系统正文、继承模型与工具选择；父调用等待子代理真实结果/清理。无法等价映射的事件、字段、模型或动态 Hook 输出明确失败，不把跳过组件当支持。MCP 的 cwd/env_vars/传输在三种 Runtime 共用私有启动器。
+源标准兼容层见 [docs/26](26-runtime-plugin-compatibility.md)：安装保留源副本；当前安装可只读重算 Runtime 支持与组件标签，不必逐个重装。DeepSeek Harness 0.2.1-rc.2 使用原生独立子代理 Session 和版本匹配的官方 Claude/Codex command Hook 桥，保留源系统正文、继承模型与工具选择；父调用等待子代理真实结果/清理。无法等价映射的事件、字段、模型或动态 Hook 输出明确失败，不把跳过组件当支持。MCP 的 cwd/env_vars/传输在九种 Runtime 共用私有启动器。
 
 插件来源描述中的单行字面冒号可在原生调用副本中规范化；其他不合法 YAML 明确指出相对文件与行列，不输出原文。v3 已知 Claude 模型别名在非 Claude Runtime 使用所选 Runtime 的模型，源名称保留在计划中；旧 v2 冻结不转换。DeepSeek 可使用插件自带的完整 Codex 清单。详见 docs/26。
 
-员工类型只接受 business/manager，不再接受 developer、repository；界面和 CLI 同步移除研发类型及仓库输入。原仓库地址和基线可由操作者写入 systemPrompt。新任务从统一工作根执行，不自动准备仓库；旧 Task/Run 仓库事实保留。当前旧员工仅在操作者显式编辑时去除旧绑定，不做启动迁移或重置。
+员工保留的存储字段 kind 只接受 business/manager，界面不再展示“员工类型”，字段不决定任何任务的经理身份；普通任务和自动化显式选择所选员工中的 managerAgentId。废弃的 developer、repository 值及仓库输入明确拒绝。原仓库地址和基线可由操作者写入 systemPrompt。新任务从统一工作根执行，不自动准备仓库；旧 Task/Run 仓库事实保留。当前旧员工仅在操作者显式编辑时去除旧绑定，不做启动迁移或重置。
 
 
 ## 数据库目录与查询
@@ -125,3 +125,15 @@ Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider
 角色支持 extensionSelection（pluginIds/mcpIds）并自动合并到员工执行快照；员工直接选择独立保存，解绑角色不清除直接选择。新增任务和后续沟通使用当前角色扩展，冻结历史保持原引用。删除扩展同步解除角色和员工关联，更新/编辑/重复导入同步替换两类关联。插件源码及 MCP 私有配置继续保存文件；SQLite 只维护索引与关联。
 
 扩展详情通过安装批次目录指纹维护版本 ID→路径索引；绑定/执行准备在单次操作内共享解析与完整性检查，后续操作按文件指纹重新判断。元数据或内容发生变化仍拒绝使用冻结版本，不跳过篡改检测。Runtime 模型目录使用 30 秒短缓存与在途请求合并，账号配置、环境和可执行文件变更使缓存失效，App/CLI 显式刷新可绕过已完成缓存。完整资源边界见 [docs/28](28-performance-architecture.md)。
+
+MCP工具发现：POST /api/runtime/mcp-marketplace/:id/tools，空对象或{refresh?:boolean}；只允许当前已安装项，读取不可变配置，使用与真实调用相同的mcp-launcher进行initialize/tools/list，支持stdio/SSE/HTTP，不调用业务工具。返回{tools:[{name,title?,description,inputSchema,outputSchema?,annotations?}],total,checkedAt}，名称/参数结构保留，真实凭据值脱敏。15秒总超时，成功缓存60秒且同配置请求合并，刷新绕过缓存，失败不缓存；进程与连接总会关闭，最多4个并发发现，每项最多2000工具/2MiB并限制分页。列表页仍只查询数据库元数据，不连接全部MCP。详情在静态展示的连接配置下独立加载并完整显示工具名称和说明，保留刷新；不显示搜索、分页和参数定义，失败不伪装成空列表。HTTP/CLI保留完整参数结构与既有查询能力，CLI mcps tools ID --all [--refresh]读取全部工具。
+
+mcps tools支持--search名称/说明筛选后分页，默认每页20条，--page N与--all互斥；--all返回全部匹配工具。输出tools、匹配total、服务availableTotal、page/pageSize/totalPages/hasMore及checkedAt；与App详情搜索和20条分页相同，查询只读取一次工具定义。
+
+桌面 MCP 工具发现沿用宿主提供的 Node 可执行文件。若本地服务的 Python/Node 环境位于 NAS 等受系统保护位置，应用重新签名后既有 macOS 文件访问授权可能失效；应根据系统 TCC 日志恢复操作者原有授权。工具查询不绕过系统权限，不自动更改服务配置；超时不是工具列表为空的依据。
+
+新增原生 CLI Runtime 的事件、会话、模型目录和扩展边界见 [docs/29](29-runtime-providers.md)。本轮不将 Claude/Codex 插件方言直接标记为新 Runtime 兼容；未支持的扩展拒绝绑定，不能静默忽略。
+
+新增六种 Runtime 的基础 Skill/可适配 Command 插件、原生 MCP、私有配置及不兼容组件边界见 [多 Runtime 接入](../docs/29-runtime-providers.md)。App 市场详情“检查兼容性”与 CLI `plugins check-compatibility ID` / `mcps check-compatibility ID` 等价；仅刷新当前目录摘要，不改写安装、员工/角色绑定或历史。
+
+新增六种模型与思考目录及参数映射见 docs/29。App/CLI 共用 label/levels 与保存校验；OpenCode 档位接受所选模型实际提供的 variant 名称（1–64 字符，仅字母数字点横线下划线）。Cursor/Gemini/OpenCode 指定档位须同时有模型。未知模型可手工输入，真实调用失败如实报告。

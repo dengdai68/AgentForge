@@ -66,7 +66,7 @@ Claude Code print/stream-json 可以在 result 之后等待后台命令、子代
 
 DeepSeek Harness 接入使用本机 dsh sdk（实测 0.2.1-rc.2），系统/角色提示词通过原生 systemPrompt.section 注入，字面模板不插值；用户消息只承载当前输入。通过 session/prompt 入队并以 session/wait 等待原生托管后续执行，检查完成原因和进程退出，不在第一条 turn/end 提前结算。取消终止调用进程组；会话缺失、非 JSON、token 上限和 SDK 不兼容均如实失败。仅助手公开正文/思考及工具事件进入脱敏内容，system/user/request header 不倾倒。详见 docs/25。
 
-Runtime 展示名称为 Claude Code、Codex、DeepSeek Harness，内部 Provider/CLI 命令仍为 claude-code/codex/dsh。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
+Runtime 展示名称为Claude Code、Codex、DeepSeek Harness、Cursor、Gemini CLI、Qwen Code、Kimi Code、Pi、OpenCode；固定 Provider ID、执行文件与能力边界见 [多 Runtime 接入](29-runtime-providers.md)。服务通过与执行相同的 CLI 环境检查可执行文件（不运行模型、不读取凭据）；Store 注入该只读事实，在 list/get 返回 installed 和实际 enabled。未安装或客户端 PATH 找不到可执行文件时 enabled=false、界面开关关闭并锁定，HTTP/CLI 拒绝修改 enabled 和发起新调用；安装检查不改写用户开关偏好、员工或 Task 冻结事实。安装/PATH 修复后重开客户端或重新进入 Runtime 设置重新读取；已安装但未登录不属于未安装。
 
 跨 Runtime 扩展按 docs/26 的源标准计划执行。私有 Trace 物化 DeepSeek 原生子代理/官方 Hook 桥，peer 解析锚定实际 dsh CLI，版本不匹配拒绝含这些组件的调用。纯 Skill 不依赖 Hook 桥版本。原始安装源与历史冻结引用不重写。
 
@@ -93,3 +93,12 @@ Provider 重试和错误的详细正文通过 execution content 保存：错误�
 任务/沟通共享实例执行池：默认总并发 8、每 Provider 4；环境变量 `AGENTFORGE_MAX_EXECUTIONS` 和 `AGENTFORGE_MAX_PROVIDER_EXECUTIONS` 可设置 1–64。排队记录资源等待，暂停/终止可取消；各员工独立会话与同成员串行不变。模型目录缓存 30 秒、并发去重，账号/配置/二进制版本变动失效，界面刷新及 CLI `runtimes models PROVIDER --refresh` 显式重查。
 
 诊断由独立 Worker 写 JSONL：普通队列 4 MiB、关键队列 6 MiB，超载普通日志记录丢弃计数，关键错误同步兜底，退出刷新。保留自有日志最多 256 MiB/30 天、10 MiB 分卷并保留当前分卷；不删除领域事件/Trace/Artifact。详细原始诊断仍先脱敏，不能从日志恢复凭据或完整提示词。
+
+
+工作流文件上下文：经理调用前生成本Trace的私有workflow.md，内容取Task冻结快照，系统只提供绝对路径/SHA256与读取指引；不再内联整个JSON。文件生成失败由原投递记录错误，不调用Provider，也不回退使用当前模板。员工当前节点正文仍作为本轮职责增量传递。来源：server/run-files.mjs、server/orchestrator.mjs、server/prompts.mjs；详见docs/22。
+
+新增原生 CLI Runtime 的事件、会话、模型目录和扩展边界见 [docs/29](29-runtime-providers.md)。本轮不将 Claude/Codex 插件方言直接标记为新 Runtime 兼容；未支持的扩展拒绝绑定，不能静默忽略。
+
+新增原生 CLI 的调用可携带内部 `contextDirectories`：只由任务/沟通服务从当前消息的已存储附件路径派生，不作为公开配置输入。适配器把本轮 Trace 与附件目录映射为 Cursor add-dir、Gemini/Qwen include-directories，保证可读取工作流和上传内容；这不是操作权限或文件沙箱。
+
+当前工作目录视频元数据不整读文件；播放以独立 no-follow 描述符验证容器签名，由认证 HTTP 按请求字节流传输。该读取不扩大工作根/符号链接/凭据路径边界，不声明员工沙箱。

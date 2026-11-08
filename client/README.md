@@ -39,3 +39,20 @@ workspaceAgents 默认排除已移除成员；历史 Trace 保留冻结身份。
 collaborationRecords 保留 Message.attachments 元数据；任务和沟通共用图片预览/下载展示，CLI 保留对应引用。Trace/Artifact 中 agent 为 id/name 引用，完整成员配置从 Run.participants 读取。
 
 ByteCache 按 UTF-8 字节及项数实施 LRU，支持并发读取去重和失败移除。控制台正文、提示词及沟通 Markdown 分别配置预算；缓存不拥有领域状态。collaborationRecords 可接收按页补齐的问题/答复、投递和验收文件摘要，与全历史投影保持消息语义和本轮输入定位一致。
+
+
+workflow-description.mjs 是不读文件、不执行派工的纯投影：将工作流节点和连线确定性组合为Markdown，并为未显式给连线的节点关系提供同一只读投影。画布文本预览与Run Files共用它，完整正文保留，布局不进入模型指令；Store拥有校验、规范化和冻结状态。
+
+工作流分支：nodes.type=process/condition，edges.condition为自然语言条件（最多2000字符），默认流程/空条件；App/CLI同协议并冻结。条件节点菱形、经理选择满足条件的一条分支；预览返回保留画布有效尺寸。test-workflow-editor覆盖反复切换、宽窄布局、类型切换与分支保存回读。
+
+任务经理属于Task/Run上下文，由managerAgentId确定；可咨询成员目录使用taskRole而非持久员工kind判定身份。员工种类仍作为历史字段保留，不作为协调或选人依据。
+
+工作流文字投影继续排除position及端口等呈现参数；process单出口、condition分支由Store写入校验，编辑器与CLI同步。既有冻结workflow.md不修改。
+
+共享 runtime-providers.mjs 统一九种 Runtime ID、显示名、执行文件、思考词汇和原生会话标识；不拥有调用或领域状态。
+
+Runtime 原生 thinking 与最终回复使用不同事件类型；Cursor thinking delta 仅作为公开思考呈现，不可用作完成或会话确认。
+
+市场兼容标签复用 RUNTIME_IDS 九项；原生扩展适配与组件边界见 docs/29。市场详情显式检查兼容性后刷新当前目录，不变更员工选择或历史。
+
+runtime-providers 思考集合同步新增六项；OpenCode 可用档位是模型返回的 native variant，服务端最终按所选模型验证。

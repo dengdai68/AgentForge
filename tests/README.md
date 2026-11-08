@@ -102,4 +102,27 @@ task-attachments.test.mjs 覆盖附件原字节、归属、澄清续接、重启
 
 协作发送滚动的真实 DOM 回归在 `AGENTFORGE_COLLABORATION_SCROLL_ONLY=1 node scripts/test-collaboration-flow.mjs`：宽窄窗口、两条待澄清问题、历史页回复、底部连续回复、HTTP 失败保留草稿/位置及“最新”定位。使用暂停 Run 的真实回复端点并核对无 Trace；settings/smoke 的轻量 DOM 夹具补齐 querySelector 和动画帧接口，仅验证原有呈现契约。
 
+
+workflow-editor.test.mjs覆盖最简节点/连线默认值、回路与依赖环区分、字段冲突原子拒绝、布局坐标、确定性完整Markdown、重启及任务冻结、0600/排他创建/链接拒绝；prompts.test.mjs验证经理只收到工作流文件路径，员工收到当前节点正文。实际画布和认证App/CLI交叉验收由scripts/test-workflow-editor.mjs负责。
+
+工作流分支：nodes.type=process/condition，edges.condition为自然语言条件（最多2000字符），默认流程/空条件；App/CLI同协议并冻结。条件节点菱形、经理选择满足条件的一条分支；预览返回保留画布有效尺寸。test-workflow-editor覆盖反复切换、宽窄布局、类型切换与分支保存回读。
+
+工作流编辑简化不改变Store字段；test-workflow-editor验证保留人员/交付/路径与关系标识、视口稳定添加、画布按钮及键盘删除/连接，移除已退役的属性清单断言；test-task-creation继续用真实App/CLI回读工作流定义。
+
+CLI工作流执行入口覆盖tasks create --workflow精确ID/唯一名称、默认草稿/显式启动、缺失/重名/文件冲突写前拒绝。工作流标题宽度与画布使用scripts/test-workflow-editor.mjs的隔离Electron验收；真实Provider由REAL模式验证。
+
 同一轮包含 `summary` 与 `consultation` 时，先将非空且与问题正文不同的报告保存为普通角色 Message，再保存问题和等待关系；两条消息关联同一 Trace/本轮输入。缺少报告或正文与问题相同不另造消息，协调失败仍回滚路由并保留原报告；不从控制台补造旧 Message。
+
+任务/自动化用显式managerAgentId测试所选员工身份、冻结和错误输入；既有夹具同步必填字段。mcp-tools.test.mjs验证宿主指定的Node启动器、真实stdio/SSE/HTTP、分页、鉴权、并发合并、成功缓存/刷新、参数schema保留、超时/完整性失败及不调用工具。configuration-cli覆盖经理必填和mcps tools/--refresh认证端点。
+
+员工卡片摘要的显示约束由test-task-creation的实际DOM验收覆盖；settings.test继续验证模型/思考配置可编辑与真实参数提交，不要求目录重复展示思考档位。
+
+workflow-editor.test验证单出口原子拒绝、condition分支、四边端口枚举/持久化、ELK处理回路且节点不重叠、直线/单折角与不合法单折角回退；实际鼠标/键盘和CLI契约由test-workflow-editor验证。
+
+portable-runtime.test.mjs 覆盖新增六种原生事件、精确会话和实际子进程 stdin/续接、UTF-8 JSONL、扩展隔离及九项冻结配置；这些协议夹具不代表账号已真实通过。
+
+portable-extensions 覆盖选中源完整性、相对资源、私有凭据引用、角色九项绑定、明确组件拒绝与目录兼容性刷新；configuration-cli 覆盖检查命令的认证路由和离线参数拒绝。
+
+portable-extensions 覆盖独立子代理原生投影、正文/资源保留和源工具约束的兼容边界；pi-plugin-agents 使用隔离原生加载器/子进程夹具验证独立会话、源工具清单、取消及启动失败，真实模型证据仍由 portable 两套脚本提供。
+
+model-catalog/portable-runtime 覆盖原生模型/variant 投影、凭据不泄漏和参数映射；run-files-security 覆盖视频元数据/流读取、签名与路径边界。真实播放器/HTTP Range 与运行档位由 portable 验收脚本另验。

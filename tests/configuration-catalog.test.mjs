@@ -17,7 +17,7 @@ test('independent instances share a workspace root without same-millisecond task
   const source = `import {createCatalogFixtureStore} from './tests/fixture-store.mjs';
     Date.now=()=>1700000000000;
     const store=createCatalogFixtureStore({workspaceRoot:${JSON.stringify(root)},databasePath:${JSON.stringify(root)}+'/instance-'+process.pid+'.sqlite'});
-    const task=store.createTask({title:'Independent task',objective:'Isolated path proof',memberAgentIds: store.listTeams()[0].memberAgentIds,workflowTemplateId:'software_delivery'});
+    const task=store.createTask({managerAgentId:'system_project_manager',title:'Independent task',objective:'Isolated path proof',memberAgentIds: store.listTeams()[0].memberAgentIds,workflowTemplateId:'software_delivery'});
     console.log(JSON.stringify({id:task.id,path:task.workspacePath}));store.close();`;
   const launch = () => JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', source], { cwd: new URL('..', import.meta.url), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
   const a = launch(), b = launch();
@@ -68,7 +68,7 @@ test('employee deletion hides current membership and retains frozen tasks, messa
   assert.ok(store.getRunAgent(run.id,'agent_analyst'));
   assert.ok(store.getRunWorkspace(run.id).deletedAgentIds.includes('agent_analyst'));
   assert.throws(()=>store.updateAgent('agent_analyst',{name:'Resurrect'}),/已删除/);
-  assert.throws(()=>store.createTask({title:'New',objective:'No deleted member',memberAgentIds:taskBefore.memberAgentIds,workflowTemplateId:taskBefore.workflowTemplateId}),/已删除/);
+  assert.throws(()=>store.createTask({managerAgentId:'system_project_manager',title:'New',objective:'No deleted member',memberAgentIds:taskBefore.memberAgentIds,workflowTemplateId:taskBefore.workflowTemplateId}),/已删除/);
   store.deleteTeam(team.id); assert.deepEqual(store.getTask(task.id),taskBefore);
   assert.equal(store.getCommunication(chat.id).conversation.members.length,team.memberAgentIds.length-1);
   assert.throws(()=>store.deleteWorkflowTemplate(task.workflowTemplateId),/冻结快照引用/);
@@ -78,10 +78,10 @@ test('employee deletion hides current membership and retains frozen tasks, messa
 test('tasks own an explicit unique roster with exactly one manager, teams need none', () => {
   const store=createStore({workspaceRoot:tmpdir()}),[manager,writer]=store.listAgents();
   const team=store.createTeam({name:'No manager',memberAgentIds:[writer.id]});
-  const base={title:'Task',objective:'Independent staff',workflowTemplateId:store.listWorkflowTemplates()[0].id};
+  const base={managerAgentId:manager.id,title:'Task',objective:'Independent staff',workflowTemplateId:store.listWorkflowTemplates()[0].id};
   for (const ids of [[],[writer.id],[manager.id,manager.id],['missing',manager.id]]) assert.throws(()=>store.createTask({...base,memberAgentIds:ids}));
   const other=store.createAgent({name:'Another manager',kind:'manager'});
-  assert.throws(()=>store.createTask({...base,memberAgentIds:[manager.id,other.id,writer.id]}),/只能/);
+  assert.equal(store.createTask({...base,memberAgentIds:[manager.id,other.id,writer.id]}).managerAgentId,manager.id);
   assert.throws(()=>store.createTask({...base,teamId:team.id}),/不再绑定/);
   assert.throws(()=>store.createTeam({name:'Old protocol',memberAgentIds:[writer.id],managerAgentId:manager.id}),/不再指定/);
   const task=store.createTask({...base,memberAgentIds:[manager.id,writer.id]});
@@ -151,14 +151,15 @@ test('task team selection merges active employees once and freezes independent m
   const team = store.createTeam({name:'团队',memberAgentIds:[manager.id,worker.id,inactive.id]});
   const overlap = store.createTeam({name:'重叠团队',memberAgentIds:[worker.id]});
   const flow = store.createWorkflowTemplate({name:'流程',nodes:[{id:'work',title:'工作',staffingGuidance:'可用员工'}]});
-  const input = {title:'任务',objective:'验证独立成员',teamIds:[team.id,overlap.id],memberAgentIds:[worker.id],workflowTemplateId:flow.id,acceptanceCriteria:[]};
+  const input = {managerAgentId:manager.id,title:'任务',objective:'验证独立成员',teamIds:[team.id,overlap.id],memberAgentIds:[worker.id],workflowTemplateId:flow.id,acceptanceCriteria:[]};
   const task = store.createTask(input);
   assert.deepEqual(task.memberAgentIds,[worker.id,manager.id]); assert.deepEqual(task.acceptanceCriteria,[]); assert.equal(Object.hasOwn(task,'priority'),false);
   assert.equal(task.teamIds,undefined); assert.equal(task.teamId,undefined);
   assert.throws(()=>store.createTask({...input,teamIds:[team.id,team.id]}),/teamIds/);
   assert.throws(()=>store.createTask({...input,teamIds:null}),/teamIds/);
   assert.throws(()=>store.createTask({...input,memberAgentIds:[inactive.id]}),/停用/);
-  assert.throws(()=>store.createTask({...input,memberAgentIds:[otherManager.id]}),/一位/);
+  assert.ok(store.createTask({...input,memberAgentIds:[otherManager.id]}).memberAgentIds.includes(otherManager.id));
+  assert.throws(()=>store.createTask({...input,managerAgentId:inactive.id}),/所选员工/);
   assert.throws(()=>store.createTask({...input,teamIds:['missing']}),/团队/);
   assert.throws(()=>store.createTask({...input,priority:'invalid'}),/优先级/);
   store.updateTeam(team.id,{status:'inactive'});
@@ -174,7 +175,7 @@ test('saved task drafts persist without execution and start explicitly exactly o
   let store = createStore(options);
   try {
     const manager = store.createAgent({name:'草稿经理',kind:'manager'});
-    const task = store.createTask({title:'持久化草稿',objective:'只在显式启动后执行',memberAgentIds:[manager.id]});
+    const task = store.createTask({managerAgentId:manager.id,title:'持久化草稿',objective:'只在显式启动后执行',memberAgentIds:[manager.id]});
     assert.equal(task.status,'backlog');
     assert.equal(store.listRuns().length,0);
     assert.equal(existsSync(task.workspacePath),false);
@@ -187,4 +188,19 @@ test('saved task drafts persist without execution and start explicitly exactly o
     assert.throws(()=>store.createRun(task.id),/不能启动/);
     assert.equal(store.listRuns().length,1);
   } finally { store.close(); }
+});
+
+test('any selected employee can coordinate a task without changing global kind; snapshots and role survive catalog edits',()=>{
+ const store=createStore({workspaceRoot:tmpdir()});
+ try{
+  const architect=store.createAgent({name:'架构师',systemPrompt:'负责设计'}),developer=store.createAgent({name:'开发',systemPrompt:'实现功能'}),tester=store.createAgent({name:'测试',kind:'manager'});
+  const input={title:'任务身份',objective:'按本次指定角色协作',memberAgentIds:[architect.id,developer.id,tester.id],managerAgentId:architect.id};
+  for(const managerAgentId of [undefined,null,[], 'missing'])assert.throws(()=>store.createTask({...input,managerAgentId}),/请选择/);
+  const task=store.createTask(input);assert.equal(task.managerSnapshot.kind,'business');assert.deepEqual(task.memberSnapshots.map(a=>a.id),[developer.id,tester.id]);
+  store.updateAgent(architect.id,{name:'新名字',systemPrompt:'新职责'});const run=store.createRun(task.id);assert.equal(run.manager.sourceAgentId,architect.id);assert.equal(run.manager.name,'架构师');assert.equal(run.manager.systemPrompt,'负责设计');
+  assert.equal(store.listAgents().find(a=>a.id===architect.id).kind,'business');
+  const reverse=store.createTask({...input,managerAgentId:developer.id});assert.equal(reverse.managerSnapshot.id,developer.id);
+  const extra=store.createAgent({name:'另一个员工',kind:'manager'});assert.doesNotThrow(()=>store.updateRunMembers(run.id,{memberAgentIds:[architect.id,developer.id,tester.id,extra.id]}));
+  assert.throws(()=>store.updateRunMembers(run.id,{memberAgentIds:[developer.id,tester.id]}),/保留当前项目经理/);
+ }finally{store.close();}
 });

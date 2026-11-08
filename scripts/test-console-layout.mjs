@@ -14,7 +14,7 @@ const root=await mkdtemp(resolve('.data/console-layout-')),bundle=process.env.AG
 const storage=desktopStoragePaths(bundle?join(root,'.agentforge','desktop'):root,{home:root}),password=randomBytes(24).toString('hex');
 const auth=createAuth({databasePath:storage.AGENTFORGE_AUTH_DB_PATH});await auth.setAdministrator('layout-test',password);auth.close();
 const store=createStore({databasePath:storage.AGENTFORGE_DB_PATH,workspaceRoot:storage.AGENTFORGE_WORKSPACE_ROOT});
-const task=store.createTask({title:'Console layout verification',objective:'Isolated visual check',memberAgentIds: store.listTeams()[0].memberAgentIds,workflowTemplateId:'software_delivery'}),run=store.createRun(task.id);
+const task=store.createTask({managerAgentId:'system_project_manager',title:'Console layout verification',objective:'Isolated visual check',memberAgentIds: store.listTeams()[0].memberAgentIds,workflowTemplateId:'software_delivery'}),run=store.createRun(task.id);
 const trace=store.createTrace(run.id,{agentId:run.manager.id,workflowNodeId:'development',type:'node'});
 store.completeTrace(trace.id,{status:'completed'});store.pauseRun(run.id,'Presentation only; never start Provider');
 const markdown=['## 长正文排版','',...Array.from({length:18},(_,i)=>`${i+1}. 正文列表第 ${i+1} 项：编号应完整可见，长段落应由时间线统一滚动。`),'','> 引用内容与正文保持相同的阅读区域。','','```js','const answer = 42;','```','', '| 列 | 值 |','| --- | --- |','| 内容 | 正常显示 |'].join('\n');

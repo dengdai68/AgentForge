@@ -4,7 +4,7 @@ import { previewSchedule, localTimeZone } from './automation-schedule.mjs';
 
 const clone = copyState;
 const active = new Set(['planning', 'running', 'review', 'awaiting_human', 'paused']);
-const fields = new Set(['title', 'objective', 'memberAgentIds', 'teamIds', 'workflowTemplateId', 'acceptanceCriteria', 'cron', 'enabled']);
+const fields = new Set(['title', 'objective', 'memberAgentIds', 'managerAgentId', 'teamIds', 'workflowTemplateId', 'acceptanceCriteria', 'cron', 'enabled']);
 function pageOf(items, query = {}, project = value => value) {
   const pageSize = Number(query.pageSize ?? 20), requested = Number(query.page ?? 1);
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100 || !Number.isInteger(requested) || requested < 1) throw new Error('分页参数无效');
@@ -55,9 +55,9 @@ export function automationCommands(state, journal, persistence) {
       if (next.enabled !== undefined && typeof next.enabled !== 'boolean') throw new Error('enabled 必须是布尔值');
       next.timeZone = localTimeZone();
       const times = previewSchedule(next.cron, next.timeZone, at);
-      const task = this.buildTask({ title: next.title, objective: next.objective, memberAgentIds: next.memberAgentIds, teamIds: input.teamIds, workflowTemplateId: next.workflowTemplateId, acceptanceCriteria: next.acceptanceCriteria });
+      const task = this.buildTask({ title: next.title, objective: next.objective, memberAgentIds: next.memberAgentIds, managerAgentId: next.managerAgentId, teamIds: input.teamIds, workflowTemplateId: next.workflowTemplateId, acceptanceCriteria: next.acceptanceCriteria });
       return this.transaction(() => {
-        const item = { id: previous?.id || 'automation_' + randomUUID(), version: (previous?.version || 0) + 1, title: task.title, objective: task.objective, memberAgentIds: task.memberAgentIds, workflowTemplateId: task.workflowTemplateId, acceptanceCriteria: task.acceptanceCriteria, cron: next.cron.trim().replace(/\s+/g,' '), timeZone: next.timeZone, enabled: next.enabled ?? true, nextTriggerAt: null, createdAt: previous?.createdAt || at.toISOString(), updatedAt: at.toISOString() };
+        const item = { id: previous?.id || 'automation_' + randomUUID(), version: (previous?.version || 0) + 1, title: task.title, objective: task.objective, memberAgentIds: task.memberAgentIds, managerAgentId: task.managerAgentId, workflowTemplateId: task.workflowTemplateId, acceptanceCriteria: task.acceptanceCriteria, cron: next.cron.trim().replace(/\s+/g,' '), timeZone: next.timeZone, enabled: next.enabled ?? true, nextTriggerAt: null, createdAt: previous?.createdAt || at.toISOString(), updatedAt: at.toISOString() };
         item.nextTriggerAt = item.enabled ? times[0] : null;
         if (previous) Object.assign(previous, item); else state.automations.push(item);
         this.addEvent({ type: 'automation.saved', message: '自动化配置已保存', data: { automationId: item.id, version: item.version } });
@@ -97,7 +97,7 @@ export function automationCommands(state, journal, persistence) {
       }
       try {
         return this.transaction(() => {
-          const task = this.createTask({ title: automationTaskTitle(item.title, record.plannedAt, item.timeZone), objective: item.objective, memberAgentIds: item.memberAgentIds, workflowTemplateId: item.workflowTemplateId, acceptanceCriteria: item.acceptanceCriteria });
+          const task = this.createTask({ title: automationTaskTitle(item.title, record.plannedAt, item.timeZone), objective: item.objective, memberAgentIds: item.memberAgentIds, managerAgentId: item.managerAgentId, workflowTemplateId: item.workflowTemplateId, acceptanceCriteria: item.acceptanceCriteria });
           Object.assign(journal.get("tasks", task.id), { kind: 'automation', automationId: id, automationTriggerId: record.id, automationVersion: item.version });
           const run = this.createRun(task.id); record.taskId = task.id; record.runId = run.id;
           for (const previous of state.runs.filter(value => value.id !== run.id && value.status === 'awaiting_acceptance' && journal.get("tasks", value.taskId)?.automationId === id)) {

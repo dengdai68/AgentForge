@@ -97,7 +97,7 @@ test('all task commands progressively disclose their own data and compact relate
   assert.deepEqual(detail.manager, { id: manager.id, name: manager.name });
   assert.equal(detail.objective, task.objective); assert.deepEqual(detail.acceptanceCriteria, task.acceptanceCriteria);
   for (const operation of ['get', 'list', 'progress', 'create', 'start', 'message', 'reply', 'questions']) {
-    const value = operation === 'create' ? { title: task.title, objective: task.objective, memberAgentIds: task.memberAgentIds, workflowTemplateId: task.workflowTemplateId } : operation === 'message' ? { content: '追加资料', recipientAgentId: manager.id } : operation === 'reply' ? { content: '标题采用知识简报', replyToMessageId: question.id } : undefined;
+    const value = operation === 'create' ? {managerAgentId:'system_project_manager', title: task.title, objective: task.objective, memberAgentIds: task.memberAgentIds, workflowTemplateId: task.workflowTemplateId } : operation === 'message' ? { content: '追加资料', recipientAgentId: manager.id } : operation === 'reply' ? { content: '标题采用知识简报', replyToMessageId: question.id } : undefined;
     const result = await invoke(operation, value);
     assert.ok(!JSON.stringify(result).includes(marker), operation);
     assert.ok(!JSON.stringify(result).includes('memberSnapshots'), operation);
@@ -650,7 +650,10 @@ test('runtime connection schema validates effort vocabulary and model stays free
   await assert.rejects(f.invoke(['runtimes', 'update', 'runtime_one', '--file', '-'], { ...base, name: 'z', effort: 'extreme' }), error => error.code === 'USAGE');
   await assert.rejects(f.invoke(['runtimes', 'update', 'runtime_one', '--file', '-'], { ...base, name: 'z', effort: undefined, unknown: 1 }), error => error.code === 'USAGE');
   const schema = await execute(['schema', 'runtimes']);
-  assert.deepEqual(schema.schema.properties.effort.enum, ['', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  assert.equal(schema.schema.properties.effort.maxLength,64);
+  assert.match(schema.schema.properties.effort.description,/variant/);
+  await f.invoke(['runtimes','update','runtime_one','--file','-'],{...base,effort:'custom-variant'});
+  await assert.rejects(f.invoke(['runtimes','update','runtime_one','--file','-'],{...base,effort:'unsafe value'}),error=>error.code==='USAGE');
   assert.match(schema.schema.properties.model.description, /runtimes models/);
 });
 
@@ -737,7 +740,7 @@ test('task lists expose frozen workflow references and combine workflow filterin
 
 test('CLI task creation supports teams, empty criteria and explicit create/start with recoverable failure', async () => {
   const f = await fixture(), writes = [];
-  const value = {title:'任务',objective:'目标',teamIds:['team_one'],memberAgentIds:[],workflowTemplateId:'flow_one',acceptanceCriteria:[]};
+  const value = {managerAgentId:'system_project_manager',title:'任务',objective:'目标',teamIds:['team_one'],memberAgentIds:[],workflowTemplateId:'flow_one',acceptanceCriteria:[]};
   let rejectStart = false;
   const fetcher = async (url, options) => {
     writes.push({url,body:JSON.parse(options.body)});
@@ -836,4 +839,59 @@ test('task progress exposes all concurrent members and failed-run settlement in 
  assert.match((await captured(args,{fetcher})).stdout,/收尾/);
  workspace.traces[1].status='completed';assert.doesNotMatch((await execute(args,{fetcher})).nextAction,/收尾/);
  assert.match(resources.tasks.notes.join(' '),/不同员工并行/);
+});
+
+test('workflow progressive help exposes minimal nodes, directed edge text and shared defaults', async()=>{
+  const help=await captured(['workflows','create','--help']);
+  for(const field of ['nodes[].type','nodes[].description','nodes[].position','edges[].condition','edges[].source','edges[].target','edges[].description','edges[].dependency','edges[].handoff'])assert.ok(help.stdout.includes(field));
+  assert.match(help.stdout,/默认 false/);assert.match(help.stdout,/默认 true/);assert.match(help.stdout,/返工回路/);
+  assert.deepEqual(resources.workflows.schema.properties.nodes.items.required,['title']);
+});
+
+test('task create selects saved canvas workflow by unique name or ID and rejects conflicts before creating',async()=>{
+  const f=await fixture(),posts=[];
+  const fetcher=async(url,init)=>{
+    if(new URL(url).pathname==='/api/catalog-references')return new Response(JSON.stringify({workflowTemplates:[{id:'wf_one',name:'分支流程'},{id:'wf_a',name:'重名'},{id:'wf_b',name:'重名'}]}));
+    posts.push({path:new URL(url).pathname,body:JSON.parse(init.body)});
+    return new Response(JSON.stringify(new URL(url).pathname.endsWith('/run')?{run:{id:'run_one',status:'running'}}:{task:{id:'task_one',title:'流程验证',status:'backlog'}}));
+  };
+  const invoke=(workflow,value={},extra=[])=>execute(['tasks','create','--workflow',workflow,'--file','-',...extra,'--session-file',f.sessionFile],{fetcher,stdin:input({managerAgentId:'manager',title:'流程验证',objective:'完成所选分支',memberAgentIds:['manager'],...value})});
+  const started=await invoke('分支流程',{},['--start']);assert.equal(started.run.id,'run_one');assert.equal(posts[0].body.workflowTemplateId,'wf_one');assert.equal(posts[1].path,'/api/tasks/task_one/run');
+  posts.length=0;await invoke('wf_one',{workflowTemplateId:'wf_one'});assert.equal(posts.length,1);assert.equal(posts[0].body.workflowTemplateId,'wf_one');
+  for(const [value,body,code] of [['重名',{},'AMBIGUOUS_REFERENCE'],['不存在',{},'NOT_FOUND'],['wf_one',{workflowTemplateId:'wf_other'},'USAGE']]){posts.length=0;await assert.rejects(invoke(value,body),error=>error.code===code);assert.equal(posts.length,0);}
+  assert.match(resources.tasks.notes.join(' '),/create --workflow ID_OR_NAME/);
+});
+
+test('MCP tools CLI uses the authenticated discovery endpoint and explicit refresh without invoking tools',async()=>{
+ const f=await fixture(),calls=[];const fetcher=async(url,init)=>{calls.push({path:new URL(url).pathname,method:init.method,body:JSON.parse(init.body)});return new Response(JSON.stringify({tools:[{name:'lookup',description:'查找',inputSchema:{type:'object'}}],total:1,checkedAt:'2026-11-07T00:00:00Z'}));};
+ const args=['mcps','tools','mcp_one','--session-file',f.sessionFile];const result=await execute(args,{fetcher});assert.equal(result.tools[0].name,'lookup');assert.deepEqual(calls[0],{path:'/api/runtime/mcp-marketplace/mcp_one/tools',method:'POST',body:{refresh:false}});
+ await execute([...args,'--refresh'],{fetcher});assert.equal(calls[1].body.refresh,true);assert.match(resources.mcps.notes.join(' '),/不调用工具/);
+});
+
+test('task CLI requires explicit managerAgentId offline and automation uses the same field',async()=>{
+ const f=await fixture(),value={title:'任务',objective:'明确任务身份',memberAgentIds:['employee']};
+ await assert.rejects(execute(['tasks','create','--file','-','--session-file',f.sessionFile],{stdin:input(value),fetcher:()=>assert.fail('missing manager must not write')}),e=>e.code==='USAGE');
+ assert.ok(resources.tasks.schema.required.includes('managerAgentId'));assert.ok(resources.automations.schema.required.includes('managerAgentId'));
+ assert.equal(resources.agents.schema.required.includes('kind'),false);
+});
+
+test('MCP tool search and pagination match the App before slicing, with explicit all and empty results',async()=>{
+ const f=await fixture(),tools=Array.from({length:25},(_,i)=>({name:'lookup_'+i,description:'相同说明',inputSchema:{type:'object'}}));
+ const fetcher=async()=>new Response(JSON.stringify({tools,total:25,checkedAt:'2026-11-07T00:00:00Z'}));
+ const invoke=flags=>execute(['mcps','tools','mcp_one',...flags,'--session-file',f.sessionFile],{fetcher});
+ const first=await invoke([]);assert.equal(first.tools.length,20);assert.equal(first.total,25);assert.equal(first.hasMore,true);
+ const second=await invoke(['--page','2']);assert.equal(second.tools.length,5);assert.equal(second.tools[0].name,'lookup_20');
+ const selected=await invoke(['--search','LOOKUP_2','--all']);assert.deepEqual(selected.tools.map(t=>t.name),['lookup_2','lookup_20','lookup_21','lookup_22','lookup_23','lookup_24']);assert.equal(selected.total,6);assert.equal(selected.availableTotal,25);assert.equal(selected.page,null);
+ assert.equal((await invoke(['--search','不存在'])).tools.length,0);
+ await assert.rejects(invoke(['--all','--page','2']),error=>error.code==='USAGE');
+});
+
+test('plugins and MCPs share explicit compatibility refresh with authenticated App endpoint and offline input validation',async()=>{
+ const f=await fixture();try{
+  for(const [group,path]of [['plugins','marketplace'],['mcps','mcp-marketplace']]){
+   assert.ok(resources[group].operations.includes('check-compatibility'));
+   const result=await execute([group,'check-compatibility','extension_one','--session-file',f.sessionFile],{fetcher:async(url,options)=>{assert.equal(url,origin+'/api/runtime/'+path+'/extension_one/compatibility');assert.equal(options.method,'POST');assert.equal(options.headers.Cookie,cookie);assert.deepEqual(JSON.parse(options.body),{});return new Response(JSON.stringify({id:'extension_one',providers:['cursor']}));}});assert.deepEqual(result.providers,['cursor']);
+   await assert.rejects(execute([group,'check-compatibility','extension_one','--file','-'],{fetcher:()=>assert.fail('invalid options must fail offline')}),error=>error.code==='USAGE');
+  }
+ }finally{await rm(f.root,{recursive:true,force:true});}
 });

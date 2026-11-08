@@ -34,7 +34,7 @@ try {
  c=await employee('并行 C','只做 C：读取 a.txt，写 c.txt 内容为 a.txt 数字的两倍，用 Node assert 验证结果为42，交接经理。不要改其他文件。');
  manager=await employee('并行经理',`这是实际并发验收。首轮必须 managerDecision.assignments 同时派 A(${a.id}) 节点 a 和 B(${b.id}) 节点 b，给出独立 instruction。收到 A 完成就立即派 C(${c.id}) 节点 c，不等待 B；只派一次 C。B 会等待 c.txt，因此串行会超时。尚有执行/排队时使用 wait:true。三人都返回成功且所有队列已处理后 nextNodeId:null,nextAgentId:null 提交验收。你自己不操作文件，不询问人类，不复派已完成员工。`,'manager');
  const {workflowTemplate:workflow}=await api('/api/workflow-templates',{name:'并行交接验收',nodes:[{id:'a',title:'A 独立计算',staffingGuidance:'并行 A',deliverable:'a.txt',dependsOn:[]},{id:'b',title:'B 独立工作',staffingGuidance:'并行 B',deliverable:'b.txt',dependsOn:[]},{id:'c',title:'C 使用 A',staffingGuidance:'并行 C',deliverable:'c.txt',dependsOn:['a']}]});
- ({task}=await api('/api/tasks',{title:'真实并行 A B 与后续 C',objective:'经理同时派 A/B；A 完成后立即派 C，B 在 C 文件出现前保持执行。最终 a.txt=21、b.txt=independent、c.txt=42。依赖由经理安排。',memberAgentIds:[manager.id,a.id,b.id,c.id],workflowTemplateId:workflow.id}));
+ ({task}=await api('/api/tasks',{managerAgentId:manager.id,title:'真实并行 A B 与后续 C',objective:'经理同时派 A/B；A 完成后立即派 C，B 在 C 文件出现前保持执行。最终 a.txt=21、b.txt=independent、c.txt=42。依赖由经理安排。',memberAgentIds:[manager.id,a.id,b.id,c.id],workflowTemplateId:workflow.id}));
  ({run}=await api('/api/tasks/'+task.id+'/run',{}));
  }else{const old=await api('/api/runs/'+previous.runId+'/workspace');run=old.run;task=run.task;[a,b,c]=['并行 A','并行 B','并行 C'].map(name=>run.participants.find(p=>p.name===name));}
  evidence.runId=run.id;evidence.taskId=task.id;

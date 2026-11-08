@@ -223,4 +223,24 @@
 
 发送后的附件复用 `.communication-attachment-list`：图片和文件按原顺序横向排列，间距8px，仅超出可用宽度换行。图片仅显示预览，不再显示下方名称/大小；原图下载入口位于全屏预览顶部，文件保留名称、大小及下载链接。
 
-多选约束：所有 createEmployeeMultiSelect 使用固定38px高度，选择前后高度不变；.extension-picked 单行横向滚动，长标签省略，输入至少70px，保留键盘移除和候选浮层。禁止 flex-wrap 或选中标签撑高控件。位置：web/marketplace.mjs、web/styles.css 的 .extension-picker-control/.extension-picked/.extension-chip；宿主继续使用现有 tokens。自动化与普通任务的成员、模板、目录说明进入 .modal-scroll，.task-form-footer 只保留操作按钮（web/app.js newTaskModal）。
+多选约束：角色、插件、MCP、团队等常规 createEmployeeMultiSelect 使用固定38px高度，选择前后高度不变；.extension-picked 单行横向滚动，长标签省略，输入至少70px，保留键盘移除和候选浮层。常规多选禁止 flex-wrap 或选中标签撑高控件。任务创建/自动化共用的 #task-members-picker 为明确例外：最小38px、随已选成员自动换行增高，长姓名完整换行，不截断、不横向隐藏，不限制96px高度；搜索输入保持同一边框内，成员较多时随表单正文滚动。位置：web/marketplace.mjs、web/styles.css 的 .extension-picker-control/.extension-picked/.extension-chip；宿主继续使用现有 tokens。自动化与普通任务的成员、模板、目录说明进入 .modal-scroll，.task-form-footer 只保留操作按钮（web/app.js newTaskModal）。
+
+
+工作流画布（web/workflow-editor.mjs、web/app.js）：标题行直接使用工作流名称输入框，13px/600、32px固定高度与5px 9px内边距，宽度最多480px且不超过可用空间，paper/line与5px圆角；标题容器保留2px焦点环空间，聚焦使用accent边线和control-focus-ring的2px阴影，禁止被父容器裁成半圈；下方总体说明独占一行。宽屏modal上限1180px，画布/右属性区292px两列，850px以下右区250px。流程节点140×52px、5px圆角，条件节点140×76px菱形，约为旧节点的2/3；保留12px标题、10px摘要保证可读。复用paper/line与accent/soft选中态。
+
+画布负责添加、拖动、连接与删除；右侧仅“标题”和“提示词”，不展示节点类型、补充设置、上下游/元素清单。提示词用surface-soft表面。选中节点时删除图标在右上角，选中连线时位于线上，24px原生按钮、14px图标，hover使用danger语义，保留键盘焦点与Delete删除。节点/连线可Tab聚焦、Enter选择；Shift+Enter选择起点，再聚焦终点按Enter连线，无需额外表单。节点类型由添加入口和图形区分。
+
+添加不平移、不缩放现有视口；优先当前可见画布中心，已占用时选择最近可用空位，不遮挡其他节点。没有可用空位时明确提示移动或缩小画布。文本预览与返回保留有效尺寸、视口和选择。底部保存复用共享操作区，失败保留图和文本草稿。
+
+工作流只读详情保留节点类型和出线完整条件/交接说明，预览图仅显示摘要；正文按原换行、长内容自动换行。
+
+任务级经理选择：复用任务成员多行选择框（最小38px），选择团队展开为个人标签。点击已选姓名的原生button指定唯一经理，深蓝accent-hover底、paper文字及前置★；其余标签保持选中，不按员工kind过滤。aria-pressed与键盘Enter/Space等价；移除经理清空指派，保存就地提示重新选择。普通任务/自动化共用，编辑预选原经理，任务详情与自动化配置用accent星标识当前任务身份；员工卡片/编辑/普通沟通不展示类型。源码web/marketplace.mjs、web/app.js、web/automations.mjs、web/communication.js、web/styles.css。
+MCP详情：连接配置置于工具列表上方，以静态标题和正文直接展示并保留脱敏，无折叠控件；工具一次展示全部名称、可选标题和说明，不提供搜索、分页和参数定义。13px半粗名称、12px辅助文本、8/12/16px间距，正文沿用弹窗单一滚动区域；刷新图标与工具标题同行，加载/失败/真实空结果分别呈现，按钮原生disabled。位置web/marketplace.mjs与web/styles.css .mcp-tools-*。HTTP/CLI仍保留完整工具元数据和既有查询参数，界面不改变业务协议。
+
+员工卡片省略“CLI 默认模型”占位和思考强度，保留Runtime名称、明确配置的模型及现有profile信息；插件/MCP数量保持同行右对齐。仅目录展示精简，不改员工配置或执行参数（web/app.js renderAgents）。
+
+成员换行后的搜索输入在打开候选时滚动至最近可见位置，任务搜索保留10px滚动留白，避免被固定底栏遮挡；由marketplace.mjs与styles.css #task-members-picker input共用，不改变选中值。
+
+工作流画布新增“一键整理”和紧凑缩放组（small-button、4px间距、百分比按钮恢复100%，手动5%–300%）。编辑器/只读详情均支持滚轮、+/-/0和平移。四边连接点同样可连入/连出；普通流程节点最多一出口，多出口时给出就地“改为条件节点”，不自动删除或改写节点。整理优先直线/单个直角，回路和指定端口保留必要正交避障线；只读整理不保存。
+
+工作流编辑连接点默认透明，节点悬停或键盘焦点可见时仅显示该节点的四边连接点；在画布按住鼠标拖动期间显示候选连接点，松开恢复按需显示。仅改变圆点透明度，不移除端口或改变已有连线端点。实现：web/styles.css 的 .workflow-editor-canvas 端口状态规则；只读详情继续隐藏端口。

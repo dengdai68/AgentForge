@@ -1,3 +1,4 @@
+import {runtimeLabel,RUNTIME_EFFORT_LEVELS} from "../client/runtime-providers.mjs";
 import { DIRECTORY_THEMES, NAVIGATION, normalizePreferences } from "./preferences.mjs";
 import { createFloatingList, closeFloatingLists } from './floating-list.mjs';
 
@@ -7,7 +8,7 @@ const escape = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&
 // Mirrors the provider effort vocabularies observed from the real CLIs in
 // server/runtime/model-catalog.mjs; tests assert both sides stay equal. The
 // catalog endpoint refines per-model availability whenever it loads.
-export const RUNTIME_EFFORT_LEVELS = { "claude-code": ["low", "medium", "high", "xhigh", "max"], codex: ["low", "medium", "high", "xhigh", "max", "ultra"], dsh: ["off", "low", "high", "max"] };
+export {RUNTIME_EFFORT_LEVELS};
 
 const runtimeOptionLabel = value => String(value).replace(/^[a-z]/, char => char.toUpperCase());
 
@@ -17,6 +18,7 @@ const runtimeOptionLabel = value => String(value).replace(/^[a-z]/, char => char
 export function runtimeEffortOptions(provider, modelId, catalog) {
   const defaults = [{ value: "", label: "默认（CLI 决定）" }];
   const entry = modelId && catalog?.models ? catalog.models.find(item => item.id === modelId) : null;
+  if(!modelId && ['cursor','gemini','opencode'].includes(provider))return {options:defaults,note:'选择模型后显示其原生思考档位。'};
   if (provider === "claude-code") {
     if (entry) {
       if (!entry.levels?.length) return { options: defaults, note: entry.note || "配置声明该模型不支持思考档位。" };
@@ -26,10 +28,10 @@ export function runtimeEffortOptions(provider, modelId, catalog) {
   }
   if (entry) {
     const levels = (entry.levels || []).map(level => ({ value: level.id, label: level.default ? `${runtimeOptionLabel(level.id)}（模型默认）` : runtimeOptionLabel(level.id) }));
-    if (!levels.length) return { options: defaults, note: "目录中该模型未声明思考档位。" };
-    return { options: [...defaults, ...levels], note: provider === "dsh" ? "档位来自 DeepSeek Harness 原生模型目录；账号实际可用性以调用为准。" : "档位来自 codex debug models 目录；账号实际可用性以调用为准。" };
+    if (!levels.length) return { options: defaults, note: entry.note || "目录中该模型未声明可调整的思考档位。" };
+    return { options: [...defaults, ...levels], note: entry.note || `档位来自 ${catalog.source}；账号实际可用性以调用为准。` };
   }
-  return { options: [...defaults, ...RUNTIME_EFFORT_LEVELS[provider].map(id => ({ value: id, label: runtimeOptionLabel(id) }))], note: modelId ? "模型不在目录中（手工输入）；档位按此 Runtime 集合展示，逐模型支持以调用为准。" : "未选择模型；逐模型档位在选择模型后精确展示。" };
+  return { options: [...defaults, ...(RUNTIME_EFFORT_LEVELS[provider] || []).map(id => ({ value: id, label: runtimeOptionLabel(id) }))], note: modelId ? "模型不在目录中（手工输入）；档位按此 Runtime 集合展示，逐模型支持以调用为准。" : "未选择模型；逐模型档位在选择模型后精确展示。" };
 }
 
 export function createAppUpdateUI(panel, desktop) {
@@ -247,7 +249,7 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
       if (!container.isConnected) return;
       closeFloatingLists(container); container.replaceChildren();
       for (const profile of profiles) {
-        const label = profile.provider === 'dsh' ? 'DeepSeek Harness' : profile.provider === 'codex' ? 'Codex' : 'Claude Code';
+        const label = runtimeLabel(profile.provider);
         const row = document.createElement('div'); row.className = 'runtime-provider-row'; row.dataset.runtimeProfile = profile.id;
         const availabilityLabel = () => profile.installed ? (profile.enabled ? '可用' : '已停用') : '未安装';
         row.innerHTML = `<details class="runtime-config"><summary aria-label="${label} 配置"><span class="runtime-expand-icon" aria-hidden="true">›</span><div><h4>${label}</h4><p class="field-hint" data-runtime-summary></p></div></summary></details><div class="runtime-provider-actions"><label class="runtime-availability"><input type="checkbox" role="switch" aria-label="${label} 可用" ${profile.enabled ? 'checked' : ''} ${profile.installed ? '' : 'disabled'} /><span data-enabled-label>${availabilityLabel()}</span></label></div><p role="status" data-row-result></p>`;
@@ -337,12 +339,12 @@ export function createSettingsUI({ api, notify, navigate, getPreferences, update
           }
           function syncEffort(cleared = '') {
             const previous = effortSelect.value;
-            const { options } = runtimeEffortOptions(profile.provider, modelInput.value.trim(), catalog.state === 'ok' ? catalog.data : null);
+            const { options, note } = runtimeEffortOptions(profile.provider, modelInput.value.trim(), catalog.state === 'ok' ? catalog.data : null);
             effortSelect.replaceChildren(...options.map(option => { const element = document.createElement('option'); element.value = option.value; element.textContent = option.label; return element; }));
             if (previous && options.some(option => option.value === previous)) effortSelect.value = previous;
             else if (previous) { effortSelect.value = ''; cleared = '原思考等级不适用于当前模型，已清除；保存前请重新选择。'; }
-            effortStatus.textContent = cleared;
-            effortStatus.hidden = !cleared;
+            effortStatus.textContent = cleared || note;
+            effortStatus.hidden = !effortStatus.textContent;
           }
           async function loadCatalog(refresh=false) {
             if (!profile.installed) { syncModel(); return; }
