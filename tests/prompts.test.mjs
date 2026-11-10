@@ -88,6 +88,15 @@ test('ordinary communication never adds automatic routing candidates', () => {
   assert.equal(first.prompt, second.prompt);
 });
 
+for (const kind of ['agent','group']) test(`${kind} communication permits requested operations and only suggests Tasks for complex work`, () => {
+  const message={id:'requested-operation',content:'请在当前目录创建 note.txt，内容为已完成',sender:{type:'human'}};
+  const result=communicationPrompt({agent:{id:'worker',name:'员工'},cwd:'/chat',context:{conversation:{kind,members:[]},message},messages:[message]});
+  assert.ok(result.systemPrompt.includes('你正在与用户沟通，可以根据用户要求直接执行操作。对于复杂、需要多人协作或持续跟进的工作，可以提醒用户创建任务；是否创建由用户决定，不作为继续处理的前提。'));
+  assert.doesNotMatch(result.systemPrompt,/仅讨论和答疑|不修改业务文件|更改系统配置|实际交付请引导创建任务|不是在执行 Task\/Run/);
+  assert.match(result.systemPrompt,kind==='group'?/mentionAgentIds/:/只输出 JSON 对象/);
+  assert.equal(result.prompt.split(message.content).length-1,1);
+});
+
 test('explicit manager selection is not overridden by static Task node assignments', () => {
   const store = createFixtureStore(), run = store.createRun(store.listTasks()[0].id);
   store.updateRun(run.id, { status: 'running' });

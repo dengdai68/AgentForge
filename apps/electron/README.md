@@ -97,3 +97,9 @@ runtime-paths.mjs 与 server/data-home.mjs 共用存储布局，默认根 ~/.age
 业务记录统一位于 `<工作目录>/records`：数据库、历史索引及 runs/communications 执行正文与校验记录共享此根；沟通 cwd/上传附件在 `<工作目录>/communications/<会话ID>`。不再创建 `.agentforge/desktop/agentforge-runs`；配置仍在 Home。路径与目录切换契约见 docs/30。App/CLI storage get/update 使用同一 HTTP 定位，不直接读取数据库。
 
 工作目录定位只持久化 workspaceRoot，records 路径固定由 workspaceRoot/records 推导；storage.json 不接受 businessRoot。App/CLI 返回的 businessRoot 为只读计算结果，开发实例通过独立工作根隔离，见 docs/30。
+
+## 认证优先启动
+
+宿主保留数据盘定位检查，子服务 cwd 使用配置目录。服务 ready 只代表认证与 HTTP 已建立，业务库由首次业务请求或后台恢复打开；安装空闲预约等待真实业务状态，未知/失败不得视为空闲。任务和沟通的员工 cwd 规则保持不变。
+
+系统通知由 `notifications.mjs` 校验、去重和管理，main 只接收自有已登录子服务提交的任务待验收/完成与员工沟通新消息元数据，点击打开对应任务/会话；原生失败不影响业务，不增加 renderer 发送桥。未关闭编辑表单先确认跳转。退出登录/后台替换清理通知，系统授权和专注模式决定真实显示。页面 toast 通过共享手动 Popover 跨过模态遮罩，详见 docs/18、06。

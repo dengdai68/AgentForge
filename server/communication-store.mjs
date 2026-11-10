@@ -9,7 +9,7 @@ const now = () => new Date().toISOString();
 const id = (prefix) => prefix + "_" + randomUUID();
 
 // Invoked only inside createStore. No IO, Provider calls or external domain writes.
-export function communicationCommands(state, save, employeeSnapshot, journal, persistence) {
+export function communicationCommands(state, save, employeeSnapshot, journal, persistence, notify = () => {}) {
   for (const key of ["communicationConversations", "communicationMessages", "communicationDeliveries", "communicationEvents", "communicationAttachments"]) state[key] ||= [];
   let migratedReadState = false;
   for (const thread of state.communicationConversations) if (!Object.hasOwn(thread, "humanReadThroughMessageId")) {
@@ -279,6 +279,7 @@ export function communicationCommands(state, save, employeeSnapshot, journal, pe
           state.communicationDeliveries.push({ id: id("chat_delivery"), conversationId: key, messageId: message.id, rootMessageId, agentId, agentSnapshot: withRole(journal.get("agents", agentId)), status: "queued", attempts: 0, createdAt: now(), updatedAt: now(), nextAttemptAt: null, error: null });
         }
         event(item, "completed", "回复已保存"); save();
+        notify({id:message.id,type:'communication.message',conversationId:key,title:thread.kind==='agent'?item.agentSnapshot.name:thread.name,senderName:item.agentSnapshot.name});
       });
     },
     failCommunication(key, deliveryId, reason, resetSession = false) {

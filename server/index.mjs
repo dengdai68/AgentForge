@@ -30,6 +30,7 @@ import { queryHistory } from "./history/bridge.mjs";
 import { createDataReset } from "./data-reset.mjs";
 import {createPluginUpdates} from './plugin-updates.mjs';
 import {validateStorageDestination} from './storage-layout.mjs';
+import {createConfigurationStore} from './configuration-store.mjs';
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const webRoot = join(root, "web");
@@ -55,30 +56,23 @@ const runtimeConfigRoot = storage.runtimeConfigRoot;
 // The default instance data root is private; explicit AGENTFORGE_* override
 // targets stay exactly as the operator configured them.
 const usesDefaultRoot = [storage.databasePath, storage.authDatabasePath, storage.runFilesRoot, storage.runtimeConfigRoot, storage.workspaceRoot].some(path => path === storage.dataRoot || path.startsWith(storage.dataRoot + sep));
-if (usesDefaultRoot) { await mkdir(storage.dataRoot, { recursive: true, mode: 0o700 }); await chmod(storage.dataRoot, 0o700); }
 const authOptions = { databasePath: storage.authDatabasePath, origins: [], bootstrapToken };
 const dataReset = createDataReset({workspaceRoot,configurationRoot:storage.controlRoot,protectedPaths:[root,diagnostics().status().directory]});
-await dataReset.recover();
 let auth;
 const storeOptions = { databasePath, workspaceRoot,workspaceRootAuthoritative:true, configurationDirectory:storage.controlRoot, runtimeInstalled, onSaveDiagnostic: (record) => {
   if (record.outcome === "error" || record.elapsedMs >= 250) diagnostic("persistence.save", record);
-} };
-let store = createStore(storeOptions);
+}, onLoadDiagnostic: record => diagnostic('persistence.collection_loaded',record) };
+let store = null, businessInitialization = null, businessFailure = null;
+let configurationPreview = null;
 const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const communicationFiles=()=>createRunFiles({root:runFilesRoot,communicationsRoot:join(workspaceRoot,'communications'),resolveCommunicationWorkspace:key=>store.getCommunicationWorkspace(key)});
-let runFiles = communicationFiles();
+let runFiles = null, communications = null, taskPatrol = null, automationScheduler = null;
 const taskDeletionLocks = new Set();
 const automationDeletionLocks = new Set();
 const eventStreams = new Set();
 let runtimeTestActive = false;
 let resettingData = false, resetCommitted = false, writeRequests = 0;
 let updateRestartLease = null;
-try {
-  const recovery = await runFiles.recoverStagedTaskDeletions((runId) => store.hasRun(runId));
-  if (recovery.failed) console.error(`Task deletion recovery retained ${recovery.failed} invalid or inaccessible staging record(s).`);
-} catch {
-  console.error("Task deletion staging recovery could not complete; retained files were not removed.");
-}
 const runtimeConfiguration = createRuntimeConfiguration(runtimeConfigRoot);
 const marketplace = createMarketplace(runtimeConfigRoot);
 // Serialize manual imports through preparation and commit, so simultaneous
@@ -108,8 +102,54 @@ function importExtensions(prepare) {
 }
 const pluginUpdates=createPluginUpdates({getStore:()=>store,marketplace,canRun:()=>!resettingData && !updateRestartLease && !store.configurationBlocked()});
 const runExecutionOptions = { runFilesRoot, resolveGitCredential: (url) => runtimeConfiguration.resolveGitCredential(url) };
-let communications = createCommunicationService(store, { root: join(workspaceRoot, "communications"), files: runFiles });
+// Subscribe only to future committed metadata. No history scan or polling.
+function subscribeDesktopNotifications(current) {
+  current.subscribeNotifications(notice=>{
+    if(store!==current || resettingData || !process.connected)return;
+    try { process.send({type:'agentforge-notification',notice},error=>{if(error)diagnostic('desktop.notification_send_failed',{error});}); }
+    catch(error){diagnostic('desktop.notification_send_failed',{error});}
+  });
+}
 const wakeCommunication = (id) => setImmediate(() => { if (!resettingData && !updateRestartLease && !store.configurationBlocked()) communications.kick(id).catch(error => diagnostic("communication.dispatch_error", { conversationId: id, error })); });
+
+// Authentication and the owned-service handshake never open the business DB.
+// The first business request or ten-second background tick initializes it once.
+function ensureBusiness() {
+  if (businessInitialization) return businessInitialization;
+  businessInitialization = (async () => {
+    const started = performance.now();
+    let phase = 'workspace';
+    try {
+      diagnostic('business.starting', { phase });
+      if (usesDefaultRoot) { await mkdir(storage.dataRoot, { recursive: true, mode: 0o700 }); await chmod(storage.dataRoot, 0o700); }
+      phase = 'reset_recovery'; await dataReset.recover();
+      phase = 'store'; diagnostic('business.starting', { phase });
+      store = createStore(storeOptions); subscribeDesktopNotifications(store); runFiles = communicationFiles();
+      phase = 'deletion_recovery';
+      try {
+        const recovery = await runFiles.recoverStagedTaskDeletions(runId => store.hasRun(runId));
+        if (recovery.failed) diagnostic('business.deletion_recovery_incomplete', { failed: recovery.failed });
+      } catch (error) { diagnostic('business.deletion_recovery_failed', { error }); }
+      phase = 'execution_recovery';
+      communications = createCommunicationService(store, { root: join(workspaceRoot, 'communications'), files: runFiles });
+      communications.recover();
+      for (const runId of store.listRecoveryRunIds()) {
+        const plan = store.getRunRecoveryPlan(runId);
+        if (plan.interruptedTraceIds.length || plan.recoveredDispatchIds.length) store.recoverInterruptedRun(runId);
+        if (store.getRunRecoveryPlan(runId).shouldExecute) void executeRun(store, runId, runExecutionOptions).catch(error => diagnostic('task.recovery_error', { error, runId }));
+      }
+      pluginUpdates.start(); startSchedulers();
+      void communications.poll().catch(error => diagnostic('communication.recovery_error', { error }));
+      diagnostic('business.ready', { elapsedMs: performance.now() - started });
+      return store;
+    } catch (error) {
+      businessFailure = error;
+      diagnostic('business.start_failed', { phase, elapsedMs: performance.now() - started, error });
+      throw error;
+    }
+  })();
+  return businessInitialization;
+}
 async function employeeInput(request, agentId = null) {
   const input = await readJson(request);
   const allowed = ['name', 'kind', 'description', 'systemPrompt', 'capabilities', 'status', 'runtime', 'roleIds'];
@@ -149,7 +189,11 @@ function extensionPage(kind, searchParams) {
   if ([...searchParams.keys()].some(key=>!['page','search'].includes(key)) || ['page','search'].some(key=>searchParams.getAll(key).length>1)) throw new Error('目录查询只接受 page 与 search');
   const rawPage = searchParams.get('page') ?? '1';
   if (!/^[1-9][0-9]*$/.test(rawPage)) throw new Error('page 必须为正整数');
-  const {items,...pagination} = store.queryExtensions(kind, {page:Number(rawPage),search:searchParams.get('search') || ''});
+  const input = {page:Number(rawPage),search:searchParams.get('search') || ''};
+  if (!Number.isSafeInteger(input.page) || input.search.length > 200) throw new Error('目录查询参数无效');
+  const businessAvailable = store && !businessFailure;
+  if (!businessAvailable) configurationPreview ||= createConfigurationStore({directory:storage.controlRoot,databasePath,readOnly:true});
+  const {items,...pagination} = businessAvailable ? store.queryExtensions(kind,input) : configurationPreview.query(kind,input);
   return {...pagination,[kind==='plugin'?'plugins':'entries']:items};
 }
 async function roleInput(request,roleId=null) {
@@ -233,6 +277,10 @@ async function withTaskDeletionLock(locks, taskId, work) {
 }
 
 async function routeApi(request, response, pathname, searchParams = new URLSearchParams()) {
+  if (request.method === 'GET' && pathname === '/api/bootstrap' && searchParams.get('view') === 'connection') {
+    sendJson(response,200,{settings:{workspaceRoot,source:'startup'},businessReady:Boolean(communications && !businessFailure)});
+    return true;
+  }
   if(!['GET','HEAD','OPTIONS'].includes(request.method)) {
     const runId=pathname.match(/^\/api\/runs\/([^/]+)/)?.[1],taskId=pathname.match(/^\/api\/tasks\/([^/]+)/)?.[1];
     if(taskDeletionLocks.has(taskId) || (runId && taskDeletionLocks.has(store.getRun(runId)?.taskId)))throw new Error('任务正在删除，请稍候');
@@ -251,9 +299,10 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
       eventStreams.clear();
       closeExecutionBudget(store);store.close();
       await dataReset.recover();
-      store = createStore(storeOptions); runFiles=communicationFiles();
+      store = createStore(storeOptions); subscribeDesktopNotifications(store); runFiles=communicationFiles();
       pluginUpdates.reset();
       communications = createCommunicationService(store, { root: join(workspaceRoot, "communications"), files: runFiles });
+      startSchedulers();
       diagnostic("instance.reset_completed");
       resetCommitted = false;
       sendJson(response, 200, { ok: true, next: "/" });
@@ -405,7 +454,7 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     return true;
   }
   if (pathname === "/api/settings/workspace" && request.method === "GET") {
-    sendJson(response, 200, { ...store.getWorkspaceSettings(), version,businessRoot:storage.dataRoot,databasePath,runFilesRoot,runtimeConfigRoot,configurationRoot:storage.controlRoot,configurationFile:join(storage.controlRoot,'configuration.json'),authenticationRoot:storage.controlRoot,logDirectory:diagnostics().status().directory }); return true;
+    sendJson(response, 200, { workspaceRoot,source:'startup',version,businessRoot:storage.dataRoot,databasePath,runFilesRoot,runtimeConfigRoot,configurationRoot:storage.controlRoot,configurationFile:join(storage.controlRoot,'configuration.json'),authenticationRoot:storage.controlRoot,logDirectory:diagnostics().status().directory }); return true;
   }
   if (pathname === "/api/settings/workspace" && request.method === "PUT") {
     const input = await readJson(request);
@@ -648,6 +697,10 @@ async function routeApi(request, response, pathname, searchParams = new URLSearc
     return true;
   }
   const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)$/);
+  if (request.method === 'PUT' && taskMatch) {
+    sendJson(response,200,{task:store.updateTask(taskMatch[1],await readJson(request))});
+    return true;
+  }
   if (request.method === "DELETE" && taskMatch) {
     const taskId = taskMatch[1];
     return withTaskDeletionLock(taskDeletionLocks, taskId, async () => {
@@ -936,12 +989,18 @@ const server = createServer(async (request, response) => {
   if (!auth) { sendJson(response, 503, { error: "服务正在启动" }); return; }
   const write = !["GET", "HEAD"].includes(request.method);
   if (write && updateRestartLease) { sendJson(response, 503, { error: "应用正在准备重启更新，请稍后重试" }); return; }
-  if(store.configurationBlocked()){sendJson(response,503,{error:'配置发布尚未完成，请修复配置目录后重启恢复；不要重复提交'});return;}
   if (resettingData) { sendJson(response, 503, { error: "正在清除数据，请稍后重试" }); return; }
   if (write) ++writeRequests;
   try {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     if (await auth.guard(request, response, url)) return;
+    const connectionRead = request.method === 'GET' && url.pathname === '/api/bootstrap' && url.searchParams.get('view') === 'connection';
+    const configurationRead = request.method === 'GET' && ['/api/settings/workspace','/api/settings/log-files','/api/runtime/git-credentials','/api/runtime/marketplace','/api/runtime/mcp-marketplace'].includes(url.pathname);
+    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/health' && !connectionRead && !configurationRead) {
+      try { await ensureBusiness(); }
+      catch (error) { sendJson(response, 503, { error: `业务数据未就绪：${error.message}` }); return; }
+      if(store.configurationBlocked()){sendJson(response,503,{error:'配置发布尚未完成，请修复配置目录后重启恢复；不要重复提交'});return;}
+    }
     const handled = await routeApi(request, response, url.pathname, url.searchParams);
     if (handled) return;
     if (url.pathname.startsWith("/api/")) {
@@ -961,23 +1020,12 @@ server.listen(port, host, () => {
   auth = createAuth(authOptions);
   console.log(`AgentForge is running at http://${host}:${listeningPort}`);
   process.send({ type: "agentforge-ready", port: listeningPort, instanceId });
-  communications.recover();
-  pluginUpdates.start();
-  communications.poll().catch(error => diagnostic("communication.recovery_error", { error }));
-  for (const runId of store.listRecoveryRunIds()) {
-    const run=store.getRunSummary(runId).run;
-    const plan = store.getRunRecoveryPlan(run.id);
-    if (plan.interruptedTraceIds.length || plan.recoveredDispatchIds.length) store.recoverInterruptedRun(run.id);
-    if (!store.getRunRecoveryPlan(run.id).shouldExecute) continue;
-    console.log(`Scheduling pending work for Run ${run.id}; business status remains ${run.status}.`);
-    executeRun(store, run.id, runExecutionOptions).catch((error) => console.error(`Run ${run.id} recovery failed: ${error.message}`));
-  }
 });
 
 server.on('close',()=>pluginUpdates.stop());
 process.once('disconnect',()=>process.kill(process.pid,'SIGTERM'));
 for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{
-  closeExecutionBudget(store);
+  if (store) closeExecutionBudget(store);
   // Abort owned Git work before preserving the service's exit semantics.
   const finish=()=>process.exit(signal==='SIGINT'?130:143);
   setTimeout(finish,3000).unref();
@@ -985,13 +1033,15 @@ for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{
 });
 // Only the owning parent can reserve an idle restart. Reserve synchronously,
 // before acknowledging it, so no new HTTP write or scheduler can slip through.
-process.on('message', message => {
+process.on('message', async message => {
   if (!message || !/^[a-f0-9-]{36}$/.test(message.id || '')) return;
   if (message.type === 'agentforge-update-release' && updateRestartLease?.id === message.id) {
     clearTimeout(updateRestartLease.timer); updateRestartLease = null;
     process.send?.({type:'agentforge-update-released',id:message.id}); return;
   }
   if (message.type !== 'agentforge-update-prepare') return;
+  try { await ensureBusiness(); }
+  catch { process.send?.({ type: 'agentforge-update-readiness', id: message.id, ready: false }); return; }
   const busy = Boolean(updateRestartLease || resettingData || writeRequests || runtimeTestActive || taskDeletionLocks.size || pluginUpdates.status().running || communications.isActive()
     || store.listPatrolRunIds().length || store.listRecoveryRunIds().some(hasActiveExecution));
   if (!busy) {
@@ -1000,16 +1050,21 @@ process.on('message', message => {
   }
   process.send?.({ type: 'agentforge-update-readiness', id: message.id, ready: !busy });
 });
-setInterval(() => { if (!resettingData && !updateRestartLease && !store.configurationBlocked()) communications.poll().catch(error => diagnostic("communication.poll_error", { error })); }, 15000).unref();
-const taskPatrol = createTaskPatrol({
-  store, execute: runId => executeRun(store, runId, runExecutionOptions),
-  isExecuting: runId => isRunExecuting(store, runId) || hasActiveExecution(runId),
-  blocked: () => resettingData || Boolean(updateRestartLease) || store.configurationBlocked(),
-  onError: (error, runId) => diagnostic("task.patrol_failed", { error, runId })
-});
-taskPatrol.start();
-server.on("close", () => taskPatrol.stop());
-
-const automationScheduler = createAutomationScheduler({ getStore: () => store, execute: (current, runId) => executeRun(current, runId, runExecutionOptions), blocked: () => resettingData || Boolean(updateRestartLease) || store.configurationBlocked(), onError: (error, runId) => diagnostic("automation.scheduler_failed", { error, runId }) });
-automationScheduler.start();
-server.on("close", () => automationScheduler.stop());
+const backgroundBootstrap = setInterval(() => {
+  if (!businessInitialization && auth?.configured()) void ensureBusiness().catch(() => {});
+}, 10000);
+backgroundBootstrap.unref();
+const communicationPoll = setInterval(() => { if (communications && !businessFailure && !resettingData && !updateRestartLease && !store.configurationBlocked()) communications.poll().catch(error => diagnostic("communication.poll_error", { error })); }, 15000);
+communicationPoll.unref();
+function startSchedulers() {
+  taskPatrol?.stop(); automationScheduler?.stop();
+  taskPatrol = createTaskPatrol({
+    store, execute: runId => executeRun(store, runId, runExecutionOptions),
+    isExecuting: runId => isRunExecuting(store, runId) || hasActiveExecution(runId),
+    blocked: () => resettingData || Boolean(updateRestartLease) || store.configurationBlocked(),
+    onError: (error, runId) => diagnostic('task.patrol_failed', { error, runId })
+  });
+  automationScheduler = createAutomationScheduler({ getStore: () => store, execute: (current, runId) => executeRun(current, runId, runExecutionOptions), blocked: () => resettingData || Boolean(updateRestartLease) || store.configurationBlocked(), onError: (error, runId) => diagnostic('automation.scheduler_failed', { error, runId }) });
+  taskPatrol.start(); automationScheduler.start();
+}
+server.on('close', () => { clearInterval(backgroundBootstrap); clearInterval(communicationPoll); taskPatrol?.stop(); automationScheduler?.stop(); });

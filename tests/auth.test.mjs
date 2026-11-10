@@ -1,11 +1,46 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { createAuth } from "../server/auth.mjs";
+import { createConfigurationStore } from '../server/configuration-store.mjs';
+
+for (const corrupt of [false,true]) test(`login and configuration do not depend on ${corrupt?'a corrupt':'an unopened'} business database`,async t=>{
+  const {fork}=await import('node:child_process'),{randomBytes}=await import('node:crypto');
+  const root=await mkdtemp(join(tmpdir(),'af-auth-first-')),databasePath=join(root,'business.sqlite'),controlRoot=join(root,'control');
+  const configuration=createConfigurationStore({directory:controlRoot,databasePath});
+  configuration.stage({extensionCatalog:[{id:'p',kind:'plugin',name:'Installed plugin',createdAt:'2026-01-01'},{id:'m',kind:'mcp',name:'Installed tools',createdAt:'2026-01-01'}]});configuration.commit();
+  if(corrupt)await writeFile(databasePath,'intentionally invalid isolated SQLite fixture');
+  const token=randomBytes(32).toString('hex');
+  const child=fork(new URL('../server/index.mjs',import.meta.url),[],{stdio:['ignore','ignore','pipe','ipc'],env:{...process.env,HOME:root,AGENTFORGE_DESKTOP_PORT:'0',AGENTFORGE_BOOTSTRAP_TOKEN:token,AGENTFORGE_DESKTOP_CONTROL_ROOT:controlRoot,AGENTFORGE_DB_PATH:databasePath,AGENTFORGE_AUTH_DB_PATH:join(controlRoot,'auth.sqlite'),AGENTFORGE_RUN_FILES_ROOT:join(root,'records'),AGENTFORGE_RUNTIME_CONFIG_ROOT:join(controlRoot,'runtime'),AGENTFORGE_WORKSPACE_ROOT:join(root,'work')}});
+  let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk});
+  t.after(async()=>{if(child.exitCode===null){const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}await rm(root,{recursive:true,force:true});});
+  const ready=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('startup timeout '+stderr)),30000);child.once('message',value=>{clearTimeout(timer);resolve(value)});child.once('exit',code=>{clearTimeout(timer);reject(Error('exit '+code+' '+stderr))});});
+  const origin='http://127.0.0.1:'+ready.port;
+  assert.equal((await fetch(origin+'/api/health')).status,200);
+  assert.equal((await fetch(origin+'/api/tasks?page=1')).status,401);
+  const setup=await fetch(origin+'/setup',{redirect:'manual',headers:{'X-AgentForge-Bootstrap':token}});
+  const bootstrapCookie=setup.headers.get('set-cookie').split(';')[0];
+  const login=await fetch(origin+'/api/auth/bootstrap',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:bootstrapCookie},body:JSON.stringify({username:'fixture-admin',password:'Disposable-startup-test-519'})});
+  assert.equal(login.status,201,await login.text());
+  const cookie=login.headers.get('set-cookie').split(';')[0];
+  const get=path=>fetch(origin+path,{headers:{Cookie:cookie}});
+  assert.equal((await get('/api/auth/session')).status,200);
+  assert.equal((await (await get('/api/bootstrap?view=connection')).json()).businessReady,false);
+  assert.equal((await (await get('/api/settings/workspace')).json()).workspaceRoot,join(root,'work'));
+  assert.equal((await (await get('/api/runtime/marketplace?page=1')).json()).plugins[0].id,'p');
+  assert.equal((await (await get('/api/runtime/mcp-marketplace?page=1')).json()).entries[0].id,'m');
+  if(!corrupt)await assert.rejects(access(databasePath),{code:'ENOENT'});
+  const business=await get('/api/tasks?page=1');assert.equal(business.status,corrupt?503:200);
+  if(corrupt){assert.match((await business.json()).error,/业务数据未就绪/);assert.equal(await readFile(databasePath,'utf8'),'intentionally invalid isolated SQLite fixture');}
+  else assert.equal((await (await get('/api/bootstrap?view=connection')).json()).businessReady,true);
+  assert.equal((await get('/api/auth/session')).status,200);assert.equal((await get('/api/health')).status,200);
+  assert.equal((await get('/api/settings/workspace')).status,200);
+  assert.equal((await (await get('/api/runtime/mcp-marketplace?page=1')).json()).entries[0].id,'m');
+});
 
 test("local service requires an owning client before opening storage", async () => {
   const {execFile}=await import("node:child_process");

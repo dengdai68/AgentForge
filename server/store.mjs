@@ -248,9 +248,9 @@ function runtimeConnection(value = {}) {
   return result;
 }
 
-export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || ":memory:", workspaceRoot = null,workspaceRootAuthoritative=false, onSaveDiagnostic, configurationDirectory, configurationPublish, runtimeInstalled = () => true } = {}) {
+export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || ":memory:", workspaceRoot = null,workspaceRootAuthoritative=false, onSaveDiagnostic, onLoadDiagnostic, configurationDirectory, configurationPublish, runtimeInstalled = () => true } = {}) {
   if (workspaceRoot !== null && (!isAbsolute(workspaceRoot) || resolve(workspaceRoot) === "/")) throw new Error("系统工作根目录必须是非根绝对目录");
-  const persistence = createSqlitePersistence(databasePath, { onSaveDiagnostic, configurationDirectory, configurationPublish }), loaded = persistence.load({lazy:true}); const initialState = (loaded?.settings?.installationId ? loaded : migrate(loaded)) || { agents: clone(agents), teams: [], tasks: [], workflowTemplates: [workflow(exampleWorkflow, { templateId: exampleWorkflow.id, current: true })], runs: [], traces: [], artifacts: [], messages: [], decisions: [], roles: [], events: [{ id: "evt_welcome", type: "workspace.ready", runId: null, timestamp: now(), actor: { type: "system", name: "AgentForge" }, message: "工作区已就绪。", data: {} }] };
+  const persistence = createSqlitePersistence(databasePath, { onSaveDiagnostic, onLoadDiagnostic, configurationDirectory, configurationPublish }), loaded = persistence.load({lazy:true}); const initialState = (loaded?.settings?.installationId ? loaded : migrate(loaded)) || { agents: clone(agents), teams: [], tasks: [], workflowTemplates: [workflow(exampleWorkflow, { templateId: exampleWorkflow.id, current: true })], runs: [], traces: [], artifacts: [], messages: [], decisions: [], roles: [], events: [{ id: "evt_welcome", type: "workspace.ready", runId: null, timestamp: now(), actor: { type: "system", name: "AgentForge" }, message: "工作区已就绪。", data: {} }] };
   if(!loaded){const values=persistence.configurationValues();initialState.settings={...values.settings,...initialState.settings};for(const key of ['extensionCatalog','extensionRemovals'])if(values[key])initialState[key]=values[key];}
   const journal = createStateJournal(initialState), state = journal.state;
   state.roles ||= [];
@@ -349,11 +349,19 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   persistence.save(state, loaded?.settings?.installationId ? journal : null); journal.commit();
   if(!loaded?.settings?.installationId)Object.assign(initialState,persistence.load({lazy:true}));
   let transactionDepth = 0;
-  const pendingEvents = [];
+  const pendingEvents = [], pendingNotifications = [];
+  const notificationListeners = new Set();
+  const deliverNotification = notice => { for (const listener of notificationListeners) { try { listener(clone(notice)); } catch { /* Presentation cannot roll back business state. */ } } };
+  const notify = notice => { if(transactionDepth)pendingNotifications.push(notice);else deliverNotification(notice); };
   const listeners = new Set(), save = () => { if (!transactionDepth) { persistence.save(state, journal); journal.commit(); } }, getAgent = (value) => journal.get("agents", value), getTeam = (value) => journal.get("teams", value), getTask = (value) => journal.get("tasks", value), getRun = (value) => journal.get("runs", value), getTrace = (value) => journal.get("traces", value), getRole = (value) => journal.get("roles", value);
   const taskRuns = taskId => journal.select('runs','taskId',taskId).sort((a,b)=>b.startedAt.localeCompare(a.startedAt)||(journal.entry('runs',b.id).position-journal.entry('runs',a.id).position));
   const runAgent = (current, agentId) => current?.participants?.find((item) => item.type === "agent" && item.id === agentId && !(current.removedParticipantIds || []).includes(item.id)) || (current?.manager?.id === agentId ? current.manager : null);
-  const addEvent = ({ type, runId = null, actor = { type: "system", name: "AgentForge" }, message, data = {} }) => { const item = { id: id("evt"), type, runId, timestamp: now(), actor: clone(actor), message: text(message, "事件说明"), data: clone(data) }; state.events.push(item); save(); if (transactionDepth) pendingEvents.push(item); else listeners.forEach((listener) => listener(clone(item))); return item; };
+  const addEvent = ({ type, runId = null, actor = { type: "system", name: "AgentForge" }, message, data = {} }) => { const item = { id: id("evt"), type, runId, timestamp: now(), actor: clone(actor), message: text(message, "事件说明"), data: clone(data) }; state.events.push(item); save();
+    if(['run.awaiting_acceptance','run.completed'].includes(type)) {
+      const task=getTask(getRun(runId)?.taskId);
+      if(task)notify({id:item.id,type,runId,taskId:task.id,title:task.title});
+    }
+    if (transactionDepth) pendingEvents.push(item); else listeners.forEach((listener) => listener(clone(item))); return item; };
   const definition = (current, nodeId) => getTask(current.taskId)?.workflowSnapshot?.nodes.find((item) => item.id === nodeId); const assertNode = (current, nodeId) => { if (!definition(current, nodeId)) throw new Error("工作流节点不存在"); };
   function assignments(currentMembers, template, input = {}) { const result = {}; for (const item of template.nodes) { const agentId = input[item.id] || (item.reuseOwnerFrom && result[item.reuseOwnerFrom]); if (!agentId || !currentMembers.memberAgentIds.includes(agentId) || getAgent(agentId)?.status !== "active") throw new Error(`节点「${item.title}」必须显式分配给一位可用任务成员`); result[item.id] = agentId; } const repositories = new Map(); for (const item of template.nodes.filter((node) => node.repositoryPath)) { const owner = result[item.id]; if (repositories.has(owner) && repositories.get(owner) !== item.repositoryPath) throw new Error("一个成员只能处理一个 Git 仓库"); repositories.set(owner, item.repositoryPath); } return result; }
   const currentEmployee = value => { const employee = getAgent(value); return employee?.status === "deleted" ? null : employee; };
@@ -420,11 +428,11 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
   }
   let navigationCache,catalogCache;
   return {
-    ...communicationCommands(state, save, withRoleSnapshot, journal, persistence),
+    ...communicationCommands(state, save, withRoleSnapshot, journal, persistence, notify),
     ...automationCommands(state, journal, persistence),
     ...historyCommands(state, { databasePath, employeeConfiguration, journal, persistence }),
     configurationBlocked(){return persistence.configurationBlocked();},
-    close() { this.closeHistory(); listeners.clear(); persistence.close(); },
+    close() { this.closeHistory(); listeners.clear(); notificationListeners.clear(); pendingNotifications.length=0; persistence.close(); },
     prepareDataReset() {
       if (state.runs.some(run => ["planning", "running", "review"].includes(run.status)) || state.traces.some(trace => trace.status === "running") || state.dispatches.some(delivery => delivery.status === "claimed") || state.communicationDeliveries.some(delivery => ["claimed", "running"].includes(delivery.status))) throw new Error("请先停止正在执行的任务和沟通，再清除数据");
       return state.runs.filter(run => getTask(run.taskId)?.workspaceManaged).map(run => ({ taskId: run.taskId, runId: run.id, path: resolve(run.workspacePath) }));
@@ -507,9 +515,10 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       journal.begin(); transactionDepth = 1;
       let result;
       try { result = command(); if (result?.then) throw new Error("Store 事务必须同步"); persistence.save(state, journal); journal.commit(); }
-      catch (error) { if(error.committed)journal.commit();else journal.rollback(); pendingEvents.length = 0; throw error; }
+      catch (error) { if(error.committed)journal.commit();else journal.rollback(); pendingEvents.length = 0; pendingNotifications.length=0; throw error; }
       finally { transactionDepth = 0; }
       const events = pendingEvents.splice(0); events.forEach((event) => listeners.forEach((listener) => { try { listener(clone(event)); } catch { /* A subscriber cannot roll back committed state. */ } }));
+      pendingNotifications.splice(0).forEach(deliverNotification);
       return result;
     },
     getWorkspaceSettings() { return workspaceRootAuthoritative?{workspaceRoot,source:'startup'}:{ workspaceRoot: state.settings?.workspaceRoot || workspaceRoot, source: state.settings?.workspaceRoot ? "saved" : "startup" }; },
@@ -1026,7 +1035,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       for(const {collection,event} of page.rows){sample[collection].push(event);if(collection==='events'){const run=include('runs',event.runId)||getRun(event.runId);if(run)include('tasks',run.taskId);}else{include('communicationConversations',event.conversationId);include('communicationDeliveries',event.deliveryId);}}
       const result=executionLogs(sample,{...query,before:null});return {...result,hasMore:page.hasMore};
     },
-    snapshot: () => clone(state), subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, addEvent,
+    snapshot: () => clone(state), subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, subscribeNotifications(listener) { notificationListeners.add(listener); return () => notificationListeners.delete(listener); }, addEvent,
     listAgents: () => state.agents.filter(item => item.status !== "deleted").map(employeeConfiguration), listTeams: () => clone(state.teams.map((item) => {
       const { managerAgentId, ...team } = item, memberAgentIds = teamMembers(item);
       return { ...team, memberAgentIds, members: memberAgentIds.map(value => ({ ...employeeConfiguration(getAgent(value)), type: "agent" })) };
@@ -1339,7 +1348,7 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
         save(); return this.listTeams().find(item => item.id === teamId);
       });
     },
-    buildTask(input = {}) {
+    buildTask(input = {}, previous = null) {
       if (Object.hasOwn(input, "teamId")) throw new Error("任务不再绑定团队，请将团队员工加入 memberAgentIds");
       if (input.repositorySources !== undefined) throw new Error("不再接受仓库绑定，请将仓库说明写入提示词或任务内容");
       const teamIds = input.teamIds === undefined ? [] : input.teamIds;
@@ -1356,19 +1365,32 @@ export function createStore({ databasePath = process.env.AGENTFORGE_DB_PATH || "
       const template = templateId ? journal.get("workflowTemplates", templateId) : { id: null, name: "默认协作", description: "按任务目标和成员能力协作，由经理推进交接并提交验收。", nodes: [{ id: "delivery", title: "完成任务", staffingGuidance: "经理根据任务目标和成员能力安排执行，成员完成后明确交接；需要更多工作时继续协调，交付后提交验收。", deliverable: "完成用户要求，如实说明交付结果与尚未解决的问题。", artifactPaths: [], dependsOn: [], handoffFrom: [] }] };
       if (!template) throw new Error("工作流不存在");
       assertWorkflowBranches(template);
-      const workspaceRoot = this.getWorkspaceSettings().workspaceRoot, taskId = "task_" + randomUUID();
+      const workspaceRoot = this.getWorkspaceSettings().workspaceRoot, taskId = previous?.id || "task_" + randomUUID();
       if (workspaceRoot && input.workspacePath !== undefined) throw new Error("工作目录由系统自动分配，不能为任务指定");
-      const workspacePath = workspaceRoot ? resolve(workspaceRoot, "tasks", taskId) : text(input.workspacePath, "任务工作目录");
+      const workspacePath = previous?.workspacePath || (workspaceRoot ? resolve(workspaceRoot, "tasks", taskId) : text(input.workspacePath, "任务工作目录"));
       if (!workspaceRoot && (!isAbsolute(workspacePath) || !statSync(resolve(workspacePath)).isDirectory())) throw new Error("任务工作目录必须是存在的绝对路径");
       const memberSnapshots = members.filter(member => member.id !== managerAgentId).map(member => withRoleSnapshot(employeeConfiguration(member)));
       const managerSnapshot = withRoleSnapshot(employeeConfiguration(getAgent(managerAgentId)));
       const repositories = { repositorySources: [], repositoryBindings: {} }, effectiveTemplate = clone(template);
       effectiveTemplate.nodes.forEach(node => { node.staffingGuidance ||= node.ownerRole ? `适合由熟悉${node.ownerRole}相关工作的成员承担；请结合成员提示词和能力判断。` : `选择能够完成「${node.title}」交付的成员。`; node.repositoryPath = null; });
       const nodeAssignments = input.nodeAssignments ? assignments({ memberAgentIds: selectedIds.filter(value => value !== managerAgentId) }, effectiveTemplate, input.nodeAssignments) : {};
-      const item = { id: taskId, workspaceManaged: Boolean(workspaceRoot), repositoryMode: "workspace", ...repositories, memberAgentIds: selectedIds, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), kind: "manual", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId, managerRuntime: runtime(input.managerRuntime || managerSnapshot.runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: now(), updatedAt: now() };
+      const item = { id: taskId, workspaceManaged: previous ? previous.workspaceManaged : Boolean(workspaceRoot), repositoryMode: "workspace", ...repositories, memberAgentIds: selectedIds, memberSnapshots, managerSnapshot, title: text(input.title, "任务标题"), objective: text(input.objective, "任务目标"), workspacePath: resolve(workspacePath), kind: "manual", workflowTemplateId: template.id, workflowSnapshot: effectiveTemplate, nodeAssignments, deliveryAuthorization: null, managerAgentId, managerRuntime: runtime(input.managerRuntime || managerSnapshot.runtime), status: "backlog", archivedAt: null, acceptanceCriteria: taskAcceptanceCriteria(input.acceptanceCriteria), createdAt: previous?.createdAt || now(), updatedAt: now() };
       return item;
     },
     createTask(input = {}) { const item = this.buildTask(input); state.tasks.push(item); save(); return clone(item); },
+    updateTask(taskId, input = {}) {
+      const current = getTask(taskId);
+      if (!current) throw new Error('任务不存在');
+      if (current.kind !== 'manual' || current.status !== 'backlog' || current.archivedAt || taskRuns(taskId).length) throw new Error('只有尚未启动的普通任务草稿可以编辑');
+      const fields = ['title','objective','acceptanceCriteria','memberAgentIds','teamIds','managerAgentId','workflowTemplateId'];
+      if (!input || typeof input !== 'object' || Array.isArray(input) || !Object.keys(input).length || Object.keys(input).some(key=>!fields.includes(key))) throw new Error('草稿编辑仅接受标题、目标、验收标准、成员、团队、经理和工作流字段，且至少提交一项');
+      const next = Object.fromEntries(fields.filter(key=>key!=='teamIds').map(key=>[key,current[key]]));
+      // Providing either selector replaces the selection; teams remain only an
+      // input convenience and are never retained as a live Task binding.
+      if (Object.hasOwn(input,'memberAgentIds') || Object.hasOwn(input,'teamIds')) next.memberAgentIds = [];
+      const candidate = this.buildTask({...next,...input},current);
+      return this.transaction(() => { Object.assign(current,candidate); save(); return taskReadModel(current); });
+    },
     archiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (current.status !== "done") throw new Error("只有已完成任务可以归档"); if (current.archivedAt) throw new Error("任务已经归档"); if (journal.select("runs", "taskId", taskId).some(run => !this.canCompleteRun(run.id))) throw new Error("仍有未结束协作，不能归档"); current.archivedAt = now(); current.updatedAt = current.archivedAt; const latestRun = taskRuns(taskId)[0]; addEvent({ type: "task.archived", runId: latestRun?.id || null, message: `任务「${current.title}」已归档，交付记录仍可查看。`, data: { taskId, archivedAt: current.archivedAt } }); save(); return taskReadModel(current); },
     unarchiveTask(taskId) { const current = getTask(taskId); if (!current) throw new Error("任务不存在"); if (!current.archivedAt) throw new Error("任务尚未归档"); current.archivedAt = null; current.updatedAt = now(); const latestRun = taskRuns(taskId)[0]; addEvent({ type: "task.unarchived", runId: latestRun?.id || null, message: `任务「${current.title}」已恢复至任务中心。`, data: { taskId } }); save(); return taskReadModel(current); },
     createRun(taskId) {

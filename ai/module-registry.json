@@ -73,6 +73,7 @@
         "docs/24-desktop-updates.md"
       ],
       "tests": [
+        "scripts/test-composer-caret.mjs",
         "tests/application-updates.test.mjs",
         "scripts/test-application-updates.mjs"
       ],
@@ -226,7 +227,7 @@
       "communicationContract": "Private chat uses reply-only; independent groups add explicit mentionAgentIds for peer questions. No handoff fields; Task managerDecision/consultation and frozen historical repository context remain separate.",
       "membershipContract": "Only the Run coordinator ID receives manager/workflow rules. Private replies stay reply-only; independent groups carry explicit mentionAgentIds and per-message peer delivery with per-member FIFO.",
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
-      "communicationPrompt": "Keep chat entry and discussion/file-change boundary; remove fixed language and enumerated Git/publish/credential, self/manager and attachment reminder sentences.",
+      "communicationPrompt": "Private and group chats may directly execute user-requested operations. Complex, collaborative or ongoing work may suggest creating a Task; creation is optional and never a prerequisite. Output schemas, member routing and native-session continuity remain unchanged.",
       "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
       "routingFeedback": "Single manager decisions support instruction and normalize through the same atomic assignment command as batches. Rejected coordination preserves reports/files and failed traces; Store persists original-dispatch feedback for one native-session correction, then fails the Run until explicit recovery. Pending acceptance is deferred behind existing work, not treated as a malformed protocol or allowed to block its own manager queue. No system collaboration messages or external-provider auto retries.",
       "workflowCanvas": "Minimal X6 canvas and authenticated CLI share process/condition node types, description/position and directed edges with condition/description; condition branches are interpreted by the manager, never evaluated by the platform. Store derives node relationships, freezes Task definitions and validates dependency-only cycles; ordinary handoffs may loop. Manager Trace context is deterministic private workflow.md; application instructions reference path/SHA only, workers get current-node text.",
@@ -291,7 +292,10 @@
       "manualFailureRecovery": "Manual failed-Run retry requeues the exact failed Dispatch and prioritizes its next claim, retaining member session, input references, consultation parent, cumulative attempts and failed traces. Completed historical errors are excluded; other pending work remains queued. CLI has no recovery command; progress help documents the client action.",
       "issueCommunication": "Issues, fixes and verification are role Messages only. No independent issue ledger/state, prompt list, UI panel or CLI counts. Retired output fields explicitly reject; stored history is not rewritten.",
       "workflowCanvas": "Minimal X6 canvas and authenticated CLI share process/condition node types, description/position and directed edges with condition/description; condition branches are interpreted by the manager, never evaluated by the platform. Store derives node relationships, freezes Task definitions and validates dependency-only cycles; ordinary handoffs may loop. Manager Trace context is deterministic private workflow.md; application instructions reference path/SHA only, workers get current-node text.",
-      "sharedCollaboration": "Unread public Run messages are caught up on each legitimate member invocation, separate from current work IDs. Only untouched manager tail report notifications coalesce, preserving all source references and idempotency; App/CLI share those references. Native prose before one trailing coordination envelope remains the full public body; no enforced discussion count or review."
+      "sharedCollaboration": "Unread public Run messages are caught up on each legitimate member invocation, separate from current work IDs. Only untouched manager tail report notifications coalesce, preserving all source references and idempotency; App/CLI share those references. Native prose before one trailing coordination envelope remains the full public body; no enforced discussion count or review.",
+      "draftEditing": "Authenticated PUT /api/tasks/:id and CLI tasks update share creation validation for nonempty partial edits of manual backlog Tasks without Runs. Current selection snapshots refresh on save; IDs, creation time and workspace remain fixed. Member/team selectors replace the full set when supplied; manager must belong. UI reuses task form, preserves failed input and saved edits after start failure; no execution on save.",
+      "bareSkillImport": "Root SKILL.md or skills/<directory>/SKILL.md without plugin manifests is wrapped per Skill with exact name/full description, original source retained and generated manifest only in private installation. Same URL/path imports, source identity, Git updates, bindings, frozen history and Runtime compatibility; no Skill CRUD resource.",
+      "optionalSkillTools": "Skill allowed-tools/allowedTools metadata is preserved and never gates target compatibility. Other field/Hook/subagent/integrity rules remain; existing installation detail/resolve and App/CLI explicit compatibility cache refresh share current rules, without reinstall or frozen-history rewrite."
     },
     {
       "id": "server.data-reset",
@@ -682,7 +686,8 @@
       ],
       "tests": [
         "tests/smoke.test.mjs",
-        "scripts/test-communication-media.mjs"
+        "scripts/test-communication-media.mjs",
+        "tests/auth.test.mjs"
       ],
       "allowedDependencies": [
         "server/store.mjs",
@@ -708,7 +713,9 @@
         ]
       },
       "fixedRuntimes": "Exactly one slot per Claude Code/Codex provider. Only model/effort/enabled partial updates; no create/delete/name/executable/profile inputs. Stable employee profileId references and frozen snapshots; current enable gate blocks new invocations without killing in-flight processes.",
-      "communicationPreview": "Authenticated attachment GET preview=1 retains ownership/integrity checks, sniffs raster MIME and returns 415 for non-images; normal download unchanged. See docs/17."
+      "communicationPreview": "Authenticated attachment GET preview=1 retains ownership/integrity checks, sniffs raster MIME and returns 415 for non-images; normal download unchanged. See docs/17.",
+      "startupLoading": "Authentication/connection ready is independent of business SQLite. First business request or configured ten-second recovery tick shares one initialization; JSON configuration reads remain independent. Collection identities/order and bodies are lazy; untouched history stays cold through unrelated commits. Update readiness never treats unknown state as idle.",
+      "draftEditing": "Authenticated PUT /api/tasks/:id and CLI tasks update share creation validation for nonempty partial edits of manual backlog Tasks without Runs. Current selection snapshots refresh on save; IDs, creation time and workspace remain fixed. Member/team selectors replace the full set when supplied; manager must belong. UI reuses task form, preserves failed input and saved edits after start failure; no execution on save."
     },
     {
       "id": "server.domain-store",
@@ -773,7 +780,9 @@
       "workflowCanvas": "Minimal X6 canvas and authenticated CLI share process/condition node types, description/position and directed edges with condition/description; condition branches are interpreted by the manager, never evaluated by the platform. Store derives node relationships, freezes Task definitions and validates dependency-only cycles; ordinary handoffs may loop. Manager Trace context is deterministic private workflow.md; application instructions reference path/SHA only, workers get current-node text.",
       "workspaceContract": "New manual and automation Tasks use <workspace>/tasks/<TaskID>/<RunID>; persisted Task/Run directories remain frozen.",
       "inputCompaction": "Execution input projection includes trace IDs for per-entity deltas and omits the separate recent collaboration-body list; authoritative message receipts remain unchanged.",
-      "sharedCollaboration": "Unread public Run messages are caught up on each legitimate member invocation, separate from current work IDs. Only untouched manager tail report notifications coalesce, preserving all source references and idempotency; App/CLI share those references. Native prose before one trailing coordination envelope remains the full public body; no enforced discussion count or review."
+      "sharedCollaboration": "Unread public Run messages are caught up on each legitimate member invocation, separate from current work IDs. Only untouched manager tail report notifications coalesce, preserving all source references and idempotency; App/CLI share those references. Native prose before one trailing coordination envelope remains the full public body; no enforced discussion count or review.",
+      "startupLoading": "Authentication/connection ready is independent of business SQLite. First business request or configured ten-second recovery tick shares one initialization; JSON configuration reads remain independent. Collection identities/order and bodies are lazy; untouched history stays cold through unrelated commits. Update readiness never treats unknown state as idle.",
+      "draftEditing": "Authenticated PUT /api/tasks/:id and CLI tasks update share creation validation for nonempty partial edits of manual backlog Tasks without Runs. Current selection snapshots refresh on save; IDs, creation time and workspace remain fixed. Member/team selectors replace the full set when supplied; manager must belong. UI reuses task form, preserves failed input and saved edits after start failure; no execution on save."
     },
     {
       "id": "server.sqlite-persistence",
@@ -814,7 +823,8 @@
           "schema",
           "security"
         ]
-      }
+      },
+      "startupLoading": "Authentication/connection ready is independent of business SQLite. First business request or configured ten-second recovery tick shares one initialization; JSON configuration reads remain independent. Collection identities/order and bodies are lazy; untouched history stays cold through unrelated commits. Update readiness never treats unknown state as idle."
     },
     {
       "id": "server.run-files",
@@ -943,7 +953,9 @@
         "scripts/test-ai-minions-real.mjs",
         "scripts/test-console-layout.mjs",
         "tests/plugin-compatibility.test.mjs",
-        "tests/task-parallel.test.mjs"
+        "tests/task-parallel.test.mjs",
+        "tests/plugin-updates.test.mjs",
+        "scripts/test-bare-skills.mjs"
       ],
       "allowedDependencies": [
         "node:crypto",
@@ -992,7 +1004,9 @@
       "installationState": "cli-environment.runtimeInstalled checks executable presence through the invocation PATH without starting a CLI or reading credentials. HTTP injects the fact into Store; installed=false forces effective enabled=false, locks UI switches and rejects enabled writes/new invocations. No stored preference/frozen snapshot rewrite; DeepSeek Harness is the display name, dsh remains the protocol ID.",
       "componentImportIsolation": "Import skips only typed component-definition errors (Markdown schema/YAML, Hook JSON/events/groups/handlers); returns private-source-free warnings. Raw source retained, executable tree excludes invalid Markdown and materializes valid per-dialect manifests/hooks. Runtime plans/integrity stay strict; path/link/manifest/MCP failures abort batch.",
       "nativeRecovery": "An explicit native successful completion plus zero process exit supersedes earlier errors for the current outcome only; preserve immutable diagnostics, latest failure and nonzero/incomplete failure. Codex presentation labels only the error event, never later content.",
-      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。"
+      "dynamicRepositories": "任务执行内置 PostToolUse Hook 经调用级私有 socket 触发 Run Files 登记动态克隆仓库；基准只取明确 clone reflog 起点，私有持久记录不随提交/重试更新。CHANGE 与 diff 动态发现并按最深仓库归属比较；缺少起点明确提示仅未提交差异，读取/轮次结束补查，无额外协作消息或自动 Git 写操作。",
+      "bareSkillImport": "Root SKILL.md or skills/<directory>/SKILL.md without plugin manifests is wrapped per Skill with exact name/full description, original source retained and generated manifest only in private installation. Same URL/path imports, source identity, Git updates, bindings, frozen history and Runtime compatibility; no Skill CRUD resource.",
+      "optionalSkillTools": "Skill allowed-tools/allowedTools metadata is preserved and never gates target compatibility. Other field/Hook/subagent/integrity rules remain; existing installation detail/resolve and App/CLI explicit compatibility cache refresh share current rules, without reinstall or frozen-history rewrite."
     },
     {
       "id": "server.orchestrator",
@@ -1169,6 +1183,7 @@
       "extensionPresentation": "Employee/plugin/MCP cards with same-row search and create/install actions; source-wide plugin installation, lazy component/redacted JSON details with confirmed deletion, and searchable multi-select employee chips. Cards/details/pickers label Claude/Codex support, component applicability and exact incompatibility reasons; Runtime switching preserves but rejects incompatible choices. Empty/loading/no-match/error states occupy a separate full-width region outside the card grid. Human collaboration and communication messages align right based on sender identity only; employees stay left without changing shared projection/CLI fields. Compatibility is static, not a claim of executed account/dependency validation. Removal rules and immutable history belong to Store. Plugin details use one bounded body scroller with sticky component tabs and fixed title/actions, including long overviews; employee/plugin/MCP cards reserve stable heading/description geometry with complete fields available in details/edit. Employee plugin/MCP pickers dismiss on mouse leave, form-outside pointerdown or focus leaving the combo; repeated input clicks reopen, keyboard and candidate traversal remain available, hidden option focus returns to input. Listeners belong to the form, not global per-open document handlers; HTTP/CLI/loading contracts are unchanged.",
       "cliPresentation": "CLI category always belongs to the client; unavailable host methods report a client error rather than selecting a browser product mode. Task workspace text does not select a Web/Desktop target.",
       "rolePresentation": "The BUILD group has a standalone Roles directory with the shared search toolbar, 20-per-page pagination and employee-card styling; role create/edit uses name plus plain-text prompt only; empty/no-match messages reuse the full-width MCP/plugin region outside the grid with only the toolbar create action; all three directories share theme surface-soft backgrounds and 6px corners, deletion shows reference errors in place, and the employee form offers an optional multi-role picker using the same inline-chip control as plugins and MCP, without priority UI. Cards use the avatar column so titles keep full width and show the role ID; same-name roles are distinguished by ID in the employee selector. Roles is registered in NAVIGATION for persisted visibility, empty-group hiding and default restore. Its currentColor SVG identity-badge icon remains legible across themes and narrow navigation without font glyphs; no CLI change.",
+      "composerEditing": "Task and private/group chat share insertComposerLineBreak: native Shift+Enter preserves caret following and undo; other modified Enter shortcuts reveal the current caret without forcing mid-draft edits to the end. Task panel and full workspace refreshes preserve draft focus, selection direction and viewport. IME, mention selection, send and outer reading positions stay unchanged. Covered by isolated test-composer-caret; no HTTP/CLI contract changes.",
       "incrementalReading": "Stable event/Trace rows append or update in place; workspace summary reconciliation preserves the current console subtree, hydrated content, selection and scroll. History pagination preserves the reading anchor. Collaboration panel replacements preserve scroll independently of full-workspace rendering, including send-start and send-finally. Successful replies leave historical browsing and follow the latest page; failed replies retain history, draft and reading position. The explicit latest action follows the same rule; no API/CLI changes.",
       "applicationUpdates": "One Settings/updates tab directly contains application and plugin configuration sections using the standard settings heading level, without a repeated Updates title. Application state/progress/actions are inline only; download percent follows the native progress bar on one unboxed row and the separate note is hidden while downloading; a compact GitHub text link follows the current version and survives status refreshes. Plugin settings preserve drafts and pause hidden-page polling. No notification cards, renderer URL/path arguments or CLI expansion.",
       "employeeMultiSelect": "marketplace.mjs createEmployeeMultiSelect is shared by roles/plugins/MCP: removable chips and searchable input share one field border, wrap inside it, and use continuous hover/focus/keyboard behavior; no role numbering or priority/reorder controls. HTTP/CLI binding arrays and frozen facts unchanged.",
@@ -1181,7 +1196,9 @@
       "directoryTreePresentation": "Current files and CHANGE left trees contain entries and operational controls only; no explanatory, empty-directory, missing-baseline or no-change paragraphs. Actual read errors appear outside the tree; diff baseline remains in the preview header.",
       "clarificationSpacing": "Pending human clarification cards retain 12px inline padding in shared and compact layouts so timestamps, content and actions clear the status accent.",
       "interfaceConsistency": "工作目录页签行移除下分隔线，当前文件/CHANGE 共用右侧无边框刷新图标；CHANGE 移除更改计数工具栏，对比布局/范围移入文件预览标题右侧，与当前文件保持同一标题结构。刷新忙碌/失败恢复及原文件选择语义不变。共享弹窗改用原生 dialog 维护键盘模态与焦点返回，表单仍仅显式关闭；统一 Runtime 同行字段、设置选中态、主题预览和语义焦点 tokens，移除弹窗硬编码阴影并支持减少动画。桌面维持紧凑尺寸，粗指针操作使用 44px 点击区。仅界面/交互变化，无 App/CLI/HTTP/Store 契约变化。",
-      "communicationMedia": "Task collaboration and communication share attachmentControls/draftAttachments: icon-only upload controls, draft pictures and document cards share one row above the text in attachment order, with borderless picture thumbnails and a shared 48px image/file height; shared previews/removal and accessible states. Sent images and files share a wrapping horizontal row in original order; image captions are omitted and image download moves to the viewer header. Inline raster thumbnails and native full-window dialog retain Escape/focus return; original-name downloads and broken-image fallback. HTTP/CLI upload/send inputs unchanged."
+      "communicationMedia": "Task collaboration and communication share attachmentControls/draftAttachments: icon-only upload controls, draft pictures and document cards share one row above the text in attachment order, with borderless picture thumbnails and a shared 48px image/file height; shared previews/removal and accessible states. Sent images and files share a wrapping horizontal row in original order; image captions are omitted and image download moves to the viewer header. Inline raster thumbnails and native full-window dialog retain Escape/focus return; original-name downloads and broken-image fallback. HTTP/CLI upload/send inputs unchanged.",
+      "draftEditing": "Authenticated PUT /api/tasks/:id and CLI tasks update share creation validation for nonempty partial edits of manual backlog Tasks without Runs. Current selection snapshots refresh on save; IDs, creation time and workspace remain fixed. Member/team selectors replace the full set when supplied; manager must belong. UI reuses task form, preserves failed input and saved edits after start failure; no execution on save.",
+      "bareSkillImport": "Root SKILL.md or skills/<directory>/SKILL.md without plugin manifests is wrapped per Skill with exact name/full description, original source retained and generated manifest only in private installation. Same URL/path imports, source identity, Git updates, bindings, frozen history and Runtime compatibility; no Skill CRUD resource."
     },
     {
       "id": "web.manual-graphs",
@@ -2326,7 +2343,8 @@
           "persistence",
           "security"
         ]
-      }
+      },
+      "startupLoading": "Authentication/connection ready is independent of business SQLite. First business request or configured ten-second recovery tick shares one initialization; JSON configuration reads remain independent. Collection identities/order and bodies are lazy; untouched history stays cold through unrelated commits. Update readiness never treats unknown state as idle."
     },
     {
       "id": "scripts.shared-collaboration-real",
@@ -2354,6 +2372,209 @@
           "docs/00-ai-map.md",
           "scripts/README.md",
           "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "scripts.startup-loading",
+      "path": "scripts/test-startup-loading.mjs",
+      "kind": "acceptance",
+      "owner": "quality",
+      "purpose": "Isolated packaged authentication-first startup and configuration-only page requests, retained presentation identity, narrow viewport and deferred business query verification.",
+      "sourceOfTruth": [
+        "docs/02-system-architecture.md",
+        "docs/07-sqlite-persistence.md",
+        "docs/18-electron-client.md"
+      ],
+      "tests": [
+        "scripts/test-startup-loading.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "playwright-core",
+        "scripts/run-tests.mjs"
+      ],
+      "forbiddenDependencies": [
+        "operator-instance"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "scripts/README.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "scripts.task-drafts",
+      "path": "scripts/test-task-drafts.mjs",
+      "kind": "acceptance",
+      "owner": "quality",
+      "purpose": "Isolated Electron/HTTP/CLI draft editing, retained identity and no execution on save, shared validation and failure semantics; optional real edited-task execution to client human acceptance.",
+      "sourceOfTruth": [
+        "docs/03-domain-model.md",
+        "docs/21-configuration-cli.md"
+      ],
+      "tests": [
+        "scripts/test-task-drafts.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "playwright-core",
+        "server/*",
+        "scripts/run-tests.mjs"
+      ],
+      "forbiddenDependencies": [
+        "operator-instance"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "scripts/README.md",
+          "CHANGELOG.md"
+        ]
+      }
+    },
+    {
+      "id": "scripts.bare-skills",
+      "path": "scripts/test-bare-skills.mjs",
+      "kind": "developer-tooling",
+      "owner": "server",
+      "purpose": "Isolated Electron/App/CLI bare Skill import and immutable Git update acceptance, optional real native Skill task to client human confirmation.",
+      "sourceOfTruth": [
+        "docs/15-employee-runtime-configuration.md",
+        "docs/26-runtime-plugin-compatibility.md"
+      ],
+      "tests": [
+        "scripts/test-bare-skills.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "playwright-core",
+        "isolated fixture helpers"
+      ],
+      "forbiddenDependencies": [
+        "operator business data mutation",
+        "global CLI credential mutation"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "scripts/README.md",
+          "CHANGELOG.md"
+        ],
+        "reviewIf": [
+          "test isolation",
+          "plugin updates"
+        ]
+      }
+    },
+    {
+      "id": "web.toast",
+      "path": "web/toast.mjs",
+      "kind": "presentation",
+      "owner": "web",
+      "purpose": "Top-layer non-interactive feedback that stays above native modal/popover surfaces without stealing focus.",
+      "sourceOfTruth": [
+        "docs/06-design-system.md"
+      ],
+      "tests": [
+        "scripts/test-desktop-notifications.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "DOM/Popover API"
+      ],
+      "forbiddenDependencies": [
+        "Provider invocation",
+        "renderer arbitrary URLs/notification content"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "CHANGELOG.md",
+          "web/README.md"
+        ],
+        "reviewIf": [
+          "privacy",
+          "notification lifecycle",
+          "accessibility"
+        ]
+      }
+    },
+    {
+      "id": "apps.notifications",
+      "path": "apps/electron/notifications.mjs",
+      "kind": "desktop-host",
+      "owner": "client-platform",
+      "purpose": "Validate owned-service committed notice metadata, deduplicate native OS notifications and navigate exact authenticated task/chat targets. No renderer send bridge or domain state.",
+      "sourceOfTruth": [
+        "docs/18-electron-client.md"
+      ],
+      "tests": [
+        "tests/desktop-notifications.test.mjs",
+        "scripts/test-desktop-notifications.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "electron (injected)",
+        "server/diagnostics.mjs (pure metadata redaction)"
+      ],
+      "forbiddenDependencies": [
+        "Provider invocation",
+        "renderer arbitrary URLs/notification content"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "CHANGELOG.md",
+          "docs/18-electron-client.md"
+        ],
+        "reviewIf": [
+          "privacy",
+          "notification lifecycle",
+          "accessibility"
+        ]
+      }
+    },
+    {
+      "id": "scripts.desktop-notifications",
+      "path": "scripts/test-desktop-notifications.mjs",
+      "kind": "developer-tooling",
+      "owner": "client-platform",
+      "purpose": "Isolated desktop native notification and top-layer toast acceptance, foreground/background delivery and safe task/chat navigation.",
+      "sourceOfTruth": [
+        "docs/18-electron-client.md",
+        "docs/06-design-system.md"
+      ],
+      "tests": [
+        "scripts/test-desktop-notifications.mjs"
+      ],
+      "allowedDependencies": [
+        "node:*",
+        "playwright-core and isolated fixtures",
+        "sharp (isolated screenshot pixel verification)"
+      ],
+      "forbiddenDependencies": [
+        "operator data mutation",
+        "renderer arbitrary URLs/notification content"
+      ],
+      "whenChanged": {
+        "mustUpdate": [
+          "ai/module-registry.json",
+          "docs/00-ai-map.md",
+          "CHANGELOG.md",
+          "scripts/README.md"
+        ],
+        "reviewIf": [
+          "privacy",
+          "notification lifecycle",
+          "accessibility"
         ]
       }
     }

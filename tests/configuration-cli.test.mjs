@@ -780,6 +780,29 @@ test('CLI search includes employee capabilities and rejects unknown task statuse
   await assert.rejects(execute(['tasks','list','--status','not_a_status','--session-file',f.sessionFile],{fetcher:()=>assert.fail('invalid status must not query tasks')}),error=>error.code==='USAGE');
 });
 
+test('CLI draft updates preserve patch semantics, resolve workflows and retain saved edits on launch failure',async()=>{
+ const f=await fixture(),writes=[];let rejectStart=false,rejectSave=false;
+ const fetcher=async(url,options)=>{
+  if(new URL(url).pathname==='/api/catalog-references')return new Response(JSON.stringify({workflowTemplates:[{id:'flow_one',name:'协作流程'}]}));
+  writes.push({url,method:options.method,body:JSON.parse(options.body)});
+  if(url.endsWith('/run'))return new Response(JSON.stringify(rejectStart?{error:'Runtime 不可用'}:{run:{id:'run_one',taskId:'task_one',status:'running'}}),{status:rejectStart?409:202});
+  return new Response(JSON.stringify(rejectSave?{error:'只有尚未启动的普通任务草稿可以编辑'}:{task:{id:'task_one',title:'新标题',status:'backlog'}}),{status:rejectSave?400:200});
+ };
+ const invoke=(body,args=[])=>execute(['tasks','update','task_one','--file','-',...args,'--session-file',f.sessionFile],{fetcher,stdin:input(body)});
+ const patch={title:'新标题',objective:'新目标',memberAgentIds:['worker'],teamIds:['team_one'],managerAgentId:'worker',workflowTemplateId:null,acceptanceCriteria:[]};
+ const saved=await invoke(patch);assert.equal(saved.task.id,'task_one');assert.equal(saved.run,undefined);assert.deepEqual(writes[0],{url:writes[0].url,method:'PUT',body:patch});assert.ok(writes[0].url.endsWith('/api/tasks/task_one'));assert.match(formatOutput(['tasks','update','task_one'],saved),/草稿修改已保存/);
+ writes.length=0;await invoke({objective:'仅改目标'});assert.deepEqual(writes[0].body,{objective:'仅改目标'});
+ writes.length=0;await invoke({title:'流程修改'},['--workflow','协作流程']);assert.equal(writes[0].body.workflowTemplateId,'flow_one');
+ writes.length=0;await invoke({},['--workflow','协作流程']);assert.deepEqual(writes[0].body,{workflowTemplateId:'flow_one'});
+ writes.length=0;const started=await invoke({title:'启动前保存'},['--start']);assert.equal(started.run.id,'run_one');assert.deepEqual(writes.map(w=>w.method),['PUT','POST']);assert.match(formatOutput(['tasks','update','task_one'],started),/修改已保存并启动/);
+ rejectStart=true;writes.length=0;await assert.rejects(invoke({title:'保留修改'},['--start']),e=>e.code==='TASK_UPDATED_START_FAILED'&&e.taskId==='task_one'&&/不要重复提交修改/.test(e.hint));assert.equal(writes.length,2);
+ const failedOutput=await captured(['tasks','update','task_one','--file','-','--start','--session-file',f.sessionFile,'--json'],{fetcher,stdin:input({title:'保留修改'})});assert.equal(JSON.parse(failedOutput.stdout).error.taskId,'task_one');assert.equal(JSON.parse(failedOutput.stdout).error.code,'TASK_UPDATED_START_FAILED');
+ rejectSave=true;writes.length=0;await assert.rejects(invoke({title:'拒绝'},['--start']),/只有尚未启动/);assert.equal(writes.length,1);
+ const before=writes.length;for(const value of [{},{memberAgentIds:[]},{teamIds:[]},{status:'running'},{workspacePath:'/tmp/override'},{acceptanceCriteria:Array(21).fill('标准')}])await assert.rejects(invoke(value),e=>e.code==='USAGE');assert.equal(writes.length,before);
+ const help=await captured(['tasks','update','--help']);assert.match(help.stdout,/TASK_ID.*--file/);assert.match(help.stdout,/--start/);assert.match(help.stdout,/仅尚未启动|尚未启动/);
+ const schema=await execute(['schema','tasks','update']);assert.deepEqual(schema.schema.required,[]);assert.equal(schema.schema.minProperties,1);assert.equal(schema.schema.additionalProperties,false);
+});
+
 test('automation CLI exposes discovery, trigger IDs, status paging and readable list output', async () => {
   assert.match((await captured(['--help'])).stdout, /automations/);
   for (const operation of ['trigger', 'triggers']) {
@@ -908,4 +931,15 @@ test('plugins and MCPs share explicit compatibility refresh with authenticated A
    await assert.rejects(execute([group,'check-compatibility','extension_one','--file','-'],{fetcher:()=>assert.fail('invalid options must fail offline')}),error=>error.code==='USAGE');
   }
  }finally{await rm(f.root,{recursive:true,force:true});}
+});
+
+test('bare Skill import uses the same plugin url/path schema and discloses update semantics',async()=>{
+  assert.deepEqual(Object.keys(resources.plugins.schema.properties),['url','path']);
+  assert.match(resources.plugins.schema.properties.url.description,/裸 Skill/);assert.match(resources.plugins.schema.properties.path.description,/裸 Skill/);
+  const help=await captured(['plugins','import','--help']),plain=help.stdout.replace(/\s+/g,'');assert.match(plain,/SKILL.md/);assert.match(plain,/每个Skill自动包装/);assert.match(plain,/Git来源支持同一更新机制/);assert.match(plain,/本地目录通过再次导入更新/);
+});
+
+
+test('plugin help treats optional allowed-tools as metadata and explains existing-install refresh',async()=>{
+ const help=await captured(['plugins','import','--help']),plain=help.stdout.replace(/\s+/g,'');assert.match(plain,/allowed-tools\/allowedTools/);assert.match(plain,/不参与平台兼容性判断/);assert.match(plain,/无需重装/);
 });

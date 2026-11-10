@@ -137,3 +137,13 @@ mcps tools支持--search名称/说明筛选后分页，默认每页20条，--pag
 新增六种 Runtime 的基础 Skill/可适配 Command 插件、原生 MCP、私有配置及不兼容组件边界见 [多 Runtime 接入](../docs/29-runtime-providers.md)。App 市场详情“检查兼容性”与 CLI `plugins check-compatibility ID` / `mcps check-compatibility ID` 等价；仅刷新当前目录摘要，不改写安装、员工/角色绑定或历史。
 
 新增六种模型与思考目录及参数映射见 docs/29。App/CLI 共用 label/levels 与保存校验；OpenCode 档位接受所选模型实际提供的 variant 名称（1–64 字符，仅字母数字点横线下划线）。Cursor/Gemini/OpenCode 指定档位须同时有模型。未知模型可手工输入，真实调用失败如实报告。
+
+## 裸 Skill 导入与更新
+
+同一个插件安装入口接受 HTTPS Git 仓库或本机绝对目录。没有插件/市场清单时，先识别根 `SKILL.md`，否则识别 `skills/<目录>/SKILL.md`；只扫描这两种明确结构，不递归发现任意业务目录。根 Skill 优先；集合中的每个 Skill 各生成一个插件。已有清单优先，错误清单不会降级为裸 Skill 导入。
+
+插件名称与完整描述分别取 Skill frontmatter 的 `name`、`description`，不按仓库名推断，不截断描述。要求有效且唯一的插件名称和非空文本描述；无效元信息、重复名称或路径越界整批拒绝。保留 Skill 原文、references/scripts/assets 及可执行标记；不运行其中的安装器或业务命令。安装副本在 `plugin/skills/<name>/` 保存完整 Skill 目录，并生成 `.claude-plugin/plugin.json` 外壳；原始目录另存 `source/` 并校验摘要，来源仓库不写入生成文件。链接边界和现有原子发布/完整性限制继续生效。
+
+来源仍记录原仓库 URL 和 Git 提交。自动更新和立即检查复用现有插件更新链路，以相同 origin URL＋Skill name 识别版本；Skill 正文、描述或支持文件变更均产生新不可变安装，原子切换当前员工与角色绑定，历史任务与排队调用保持旧快照。没有自增虚构版本号。Git Skill 改名或移除视为原插件缺失，本次自动更新失败并保留旧版本；需要用户明确重新导入。新增兄弟 Skill 不因自动更新隐式安装。本地目录更新仍通过再次导入。
+
+包装只改变分发结构，不扩展 Runtime 的语义支持。`allowed-tools` 与 `allowedTools` 是可选元信息，不参与平台兼容性判断，保留字段并由目标 Runtime 自身处理；其他兼容性规则仍生效。App 和 CLI 的 list/search/page/get/import/delete、自动检查设置与检查回执完全复用插件协议，没有单独 Skill 资源或额外选择参数。

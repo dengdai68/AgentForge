@@ -1,10 +1,11 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, shell, session, screen, ipcMain, clipboard, net } from "electron";
+import { createDesktopNotifications } from './notifications.mjs';
+import { app, BrowserWindow, Menu, Tray, nativeImage, shell, session, screen, ipcMain, clipboard, net, Notification } from "electron";
 import { fork, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { join, dirname, isAbsolute } from "node:path";
 import { userInfo, homedir } from "node:os";
-import { chmod, lstat, mkdir, rename, unlink, writeFile, readFile } from "node:fs/promises";
+import { lstat, mkdir, rename, unlink, writeFile, readFile } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { isConsoleURL, isExternalURL, isPreferencesSender, isCliSender, isUpdateSender, health, initialRoute } from "./policy.mjs";
@@ -35,6 +36,28 @@ let shellEnvironment;
 let installingCli = false;
 let applicationUpdates = null, restartReservation = null;
 const shellEnvironmentAbort = new AbortController();
+const desktopNotifications=createDesktopNotifications({
+  Notification,
+  authorized:async()=>{
+    if(quitting||!controlOrigin||!window||window.isDestroyed())return false;
+    const origin=controlOrigin;
+    const response=await session.defaultSession.fetch(origin+'/api/auth/session',{credentials:'include',redirect:'error',signal:AbortSignal.timeout(5000)});
+    return response.ok && origin===controlOrigin && !quitting;
+  },
+  openTarget:async route=>{
+    if(!controlOrigin||quitting||!window||window.isDestroyed())return;
+    const origin=controlOrigin,instance=childInstanceId;
+    if(window.webContents.getURL()===origin+route){showWindow();return;}
+    // A notification click never silently discards an in-progress form.
+    if(isConsoleURL(window.webContents.getURL(),controlOrigin)) {
+      const open=await window.webContents.executeJavaScript('Boolean(document.querySelector("dialog[open] form"))');
+      if(open){showWindow();const choice=await appDialog({parent:window,kind:'question',title:'打开通知',message:'当前有未关闭的编辑窗口，前往通知对应页面？',buttons:['保留编辑','前往'],defaultIndex:0,cancelIndex:0});if(choice!==1)return;}
+    }
+    if(origin!==controlOrigin||instance!==childInstanceId||quitting)return;
+    showWindow();await window.loadURL(origin+route);
+  },
+  onDiagnostic:(event,fields)=>diagnostic('desktop.notification_'+event,fields)
+});
 app.setName("AgentForge");
 const controlRoot=resolveDesktopDataRoot({ packaged: app.isPackaged, env: process.env });
 let storage = desktopStoragePaths(controlRoot,{controlRoot,instance:app.isPackaged?'desktop':'desktop-dev'});
@@ -65,23 +88,23 @@ async function startControlPlane() {
   const inherited = await shellEnvironment;
   if (quitting) return;
   const root = app.isPackaged ? app.getAppPath() : sourceRoot;
-  await mkdir(storage.dataRoot, { recursive: true, mode: 0o700 });
-  await chmod(storage.dataRoot, 0o700);
   if (quitting) return;
   const bootstrapToken = randomBytes(32).toString("hex");
   const environment = desktopControlPlaneEnvironment({ environment: inherited, storage, electronExecutable: process.execPath, bootstrapToken });
   childBootstrapToken = bootstrapToken;
   child = fork(join(root, "server/index.mjs"), [], {
-    cwd: storage.dataRoot, env: { ...environment, ELECTRON_RUN_AS_NODE: "1" }, stdio: ["ignore", "pipe", "pipe", "ipc"]
+    cwd: controlRoot, env: { ...environment, ELECTRON_RUN_AS_NODE: "1" }, stdio: ["ignore", "pipe", "pipe", "ipc"]
   });
   const owned = child;
   owned.on('message',message=>{
-    if(owned!==child||message?.type!=='agentforge-storage-restart'||typeof message.workspaceRoot!=='string')return;
+    if(owned!==child)return;
+    if(message?.type==='agentforge-notification') { void desktopNotifications.receive(message.notice,()=>owned===child&&!quitting);return; }
+    if(message?.type!=='agentforge-storage-restart'||typeof message.workspaceRoot!=='string')return;
     void changeStorageRoot(message.workspaceRoot).catch(error=>diagnostic('desktop.storage_restart_failed',{error})).finally(()=>{if(child===owned&&owned.connected)owned.send({type:'agentforge-update-release',id:message.id},()=>{});});
   });
   for (const stream of ["stdout", "stderr"]) createInterface({ input: owned[stream] }).on("line", text => diagnostic(`desktop.server_${stream}`, { text, childPid: owned.pid }));
-  owned.once("exit", (code, signal) => { diagnostic("desktop.server_exit", { code, signal }); if (child === owned) { child = null; childBootstrapToken = null; controlOrigin = null; childInstanceId = null; } });
-  owned.once("error", error => { diagnostic("desktop.server_error", { error }); if (child === owned) { child = null; childBootstrapToken = null; controlOrigin = null; childInstanceId = null; } });
+  owned.once("exit", (code, signal) => { diagnostic("desktop.server_exit", { code, signal }); if (child === owned) { desktopNotifications.clear(); child = null; childBootstrapToken = null; controlOrigin = null; childInstanceId = null; } });
+  owned.once("error", error => { diagnostic("desktop.server_error", { error }); if (child === owned) { desktopNotifications.clear(); child = null; childBootstrapToken = null; controlOrigin = null; childInstanceId = null; } });
   const ready = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error("本地后台启动超时，请检查服务日志。")), 30000);
     const onMessage = message => { if (message?.type === "agentforge-ready") finish(null, message); };
@@ -132,9 +155,10 @@ function syncCliSession() {
     const origin = controlOrigin, instanceId = childInstanceId;
     const cookies = await session.defaultSession.cookies.get({ url: origin, name: 'agentforge_session' });
     const cookie = cookies.find(item => item.path === '/' && /^[a-f0-9]{64}$/.test(item.value));
-    if (!cookie) { publishedCliParent = null; await unlink(cliSessionFile).catch(error => { if (error.code !== 'ENOENT') throw error; }); return; }
+    if (!cookie) { desktopNotifications.clear(); publishedCliParent = null; await unlink(cliSessionFile).catch(error => { if (error.code !== 'ENOENT') throw error; }); return; }
     const parentKey = `${instanceId}:${cookie.value}`;
     if (publishedCliParent === parentKey) return;
+    desktopNotifications.clear();
     const response = await fetch(`${origin}/api/auth/cli-session`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: `agentforge_session=${cookie.value}` }, body: '{}' });
     if (!response.ok) { await unlink(cliSessionFile).catch(() => {}); return; }
     const grant = await response.json();
@@ -502,4 +526,4 @@ async function start() {
 
 app.on("window-all-closed", () => app.quit());
 app.on("activate", showWindow);
-app.on("before-quit", () => { quitting = true; applicationUpdates?.stop(); shellEnvironmentAbort.abort(); tray?.destroy(); tray = null; child?.kill(); });
+app.on("before-quit", () => { quitting = true; desktopNotifications.stop(); applicationUpdates?.stop(); shellEnvironmentAbort.abort(); tray?.destroy(); tray = null; child?.kill(); });

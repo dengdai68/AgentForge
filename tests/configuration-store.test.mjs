@@ -8,6 +8,18 @@ import {DatabaseSync} from 'node:sqlite';
 import {createConfigurationStore} from '../server/configuration-store.mjs';
 import {createStore} from '../server/store.mjs';
 const setup=t=>{const root=mkdtempSync(join(tmpdir(),'af-json-configuration-'));t.after(()=>rmSync(root,{recursive:true,force:true}));return {root,directory:join(root,'private'),databasePath:join(root,'work/state.sqlite')};};
+test('read-only configuration lists without business storage and never reconciles pending writes', t=>{
+ const options=setup(t),config=createConfigurationStore(options);
+ config.stage({extensionCatalog:[{id:'p',kind:'plugin',name:'Installed',createdAt:'2026-01-01'},{id:'m',kind:'mcp',name:'Tools',createdAt:'2026-01-02'}]});config.commit();
+ const before=readFileSync(join(options.directory,'configuration.json'),'utf8');
+ const preview=createConfigurationStore({...options,readOnly:true});
+ assert.deepEqual(preview.query('plugin'),config.query('plugin'));assert.deepEqual(preview.query('mcp',{search:'tools'}),config.query('mcp',{search:'tools'}));
+ for(const operation of [()=>preview.stage({}),()=>preview.commit(),()=>preview.abort()])assert.throws(operation,/只读/);
+ assert.equal(existsSync(options.databasePath),false);assert.equal(readFileSync(join(options.directory,'configuration.json'),'utf8'),before);
+ config.stage({});const pending=readFileSync(join(options.directory,'configuration.pending.json'),'utf8');
+ assert.throws(()=>createConfigurationStore({...options,readOnly:true}),/未完成提交/);
+ assert.equal(readFileSync(join(options.directory,'configuration.pending.json'),'utf8'),pending);
+});
 test('uncommitted candidates are discarded and committed candidates recover without another write',t=>{
  const options=setup(t),first=createConfigurationStore(options);const revision=first.stage({settings:{pluginAutoUpdate:false}});
  assert.equal(existsSync(join(options.directory,'configuration.json')),false);

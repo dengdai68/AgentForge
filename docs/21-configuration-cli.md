@@ -131,7 +131,7 @@ automations list/get/create/update/delete/trigger/triggers 与 App 使用同一�
 
 同任务并行无需新增输入字段：App/CLI 创建/启动的目标、成员、可选工作流、验收标准及默认值一致。经理可批量派工，不同员工并行，同员工排队。`tasks progress` 文本/JSON 的 activeTraces 返回所有运行 Trace，pendingDispatches 返回所有 claimed/queued/waiting；不再把 currentFocus 当作唯一执行者。failed 且有在途成员时 nextAction 提示收尾，`tasks terminate --yes` 同时停止全部调用（包括失败后收尾者）。重试/最终确认继续保留客户端边界。
 
-任务草稿双端对齐：App「保存草稿」对应 `tasks create --file task.json`，返回 status=backlog 且没有 Run；`tasks list --status backlog` 筛选草稿，`tasks get ID` 查询，`tasks start ID` 显式开始，`tasks delete ID --yes` 删除。App「保存并开始」对应 `tasks create --file task.json --start`。字段、默认值、冻结快照与失败回执保持一致；任务创建校验未放宽。
+任务草稿双端对齐：App「保存草稿」对应 `tasks create --file task.json`，返回 status=backlog 且没有 Run；`tasks list --status backlog` 筛选草稿，`tasks get ID` 查询，`tasks update ID --file patch.json` 编辑，`tasks start ID` 显式开始，`tasks delete ID --yes` 删除。App「保存并开始」对应 `tasks create --file task.json --start`。字段、默认值、冻结快照与失败回执保持一致；任务创建校验未放宽。
 
 插件/MCP list 通过认证 HTTP 使用服务端 page/search，每页20项，--all 逐页收集；默认和 App 相同。delete ID --yes 对齐 App 确认删除：软删除并解除所有员工（含停用）的当前绑定，返回 employees ID/名称及 historyRetained；无需先手工解绑，独立 MCP 不随插件删除。详情/创建/导入/编辑字段不变，删除后的旧 ID 详情404、重新绑定失败。
 
@@ -178,3 +178,11 @@ runtimes models 的新增目标返回原生可选模型与逐模型 levels，非
 ## 共享协作输入与报告通知
 
 任务协作与 App 共用 Run 公开消息增量和经理报告通知合并。collaboration 的多条来源可关联同一个 dispatchId/Trace，代表同一次协调，不代表独立调用；progress 不重复列出已合并通知。当前消息输入、管理字段、创建/启动及最终客户端验收协议不变。
+
+草稿编辑与 App 等价：`tasks update ID --file patch.json [--workflow ID_OR_NAME] [--start]` 仅编辑未启动且没有 Run 的普通任务，返回同一任务 ID/title/status 回执；至少提交一项，省略字段保持，`acceptanceCriteria: []` 清空、`workflowTemplateId: null`/空串恢复默认协作。提交 memberAgentIds/teamIds 中任一字段时以两者并集替换完整成员，省略经理保留原值，移除原经理时须同时指定新经理；团队由 Store 展开，调用者不用手算。保存重新冻结当前所选员工/经理/工作流，创建时间与工作目录不变；其他状态、来源、ID、路径及 Runtime 字段不可写。`--workflow` 解析当前 ID/唯一名称，与文件非空 ID 冲突拒绝。`--start` 先 PUT 保存再 POST 启动，启动未确认时返回 `TASK_UPDATED_START_FAILED` 与 taskId，保留修改；先 progress 查询，勿重复更新。
+
+插件 App/CLI 等价导入：url/path 输入可指向无清单的根 SKILL.md 或 skills/<目录>/SKILL.md，自动每 Skill 一插件，名称/完整描述来自 frontmatter。列表、搜索、分页、详情、导入、删除与 Git 自动/立即更新均沿用插件协议与成功/失败回执；本地目录再次导入更新。无单独 Skill 资源或安装脚本执行。Skill 改名/移除使自动更新保留旧版本并报错；冻结任务与排队调用不变。
+
+可选 Skill 元信息 allowed-tools/allowedTools 不再触发平台不兼容；App 详情检查兼容性与 CLI plugins check-compatibility ID 同步刷新旧目录摘要，保留同一安装 ID、源文件和既有绑定。get、导入、员工/角色选择共用当前兼容性结果，不新增参数，也不改变其他输入/失败规则。
+
+任务和沟通的系统通知属于 Electron 原生呈现，CLI 不新增通知命令或宿主权限。App/CLI 仍通过相同认证 HTTP/Store 触发业务操作；只要客户端在线且登录有效，CLI 产生的同类已提交事件也走同一通知订阅，离线不补发历史。创建、启动、查询、沟通的参数、schema 与成功/失败语义保持不变。

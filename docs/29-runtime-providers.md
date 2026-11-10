@@ -82,3 +82,5 @@ Cursor CLI 的 Markdown 子代理接口只提供 readonly 而非等价 tools/dis
 原生思考传递：Cursor 从已列出的同族档位变体映射原生模型 ID（保留 fast），手工参数化模型使用 effort 覆盖；Gemini 3 在私有 modelConfigs.overrides 为选中模型设置 thinkingLevel（minimal/low/medium/high），Auto 和仅 token-budget 模型保持默认；Qwen 私有 model.reasoningEffort；Kimi 每轮 KIMI_MODEL_THINKING_EFFORT 并按目录 supportEfforts 校验；Pi --thinking（包括 max）；OpenCode --model provider/model#variant。目录错误不把原生 stdout/stderr 或 cause 附到公开错误，缓存只保留投影结果。
 
 思考配置原生依据：[Gemini modelConfigs](https://geminicli.com/docs/cli/generation-settings/)、[Qwen model.reasoningEffort](https://github.com/QwenLM/qwen-code/blob/main/docs/users/configuration/settings.md)、[Kimi 环境变量](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/env-vars.html)、[OpenCode 模型变体](https://opencode.ai/docs/models/)。Cursor/Pi 参数以当次最新版原生 help 和真实目录为准。
+
+Skill 可选字段 allowed-tools/allowedTools 不再构成六种 Runtime 的不兼容原因；源和调用投影保留字段，平台不据此增加工具授权或限制。其他特殊字段/Hook/子代理工具选择及完整性校验不变。已有目录通过 App/CLI 检查兼容性刷新，不必重装。

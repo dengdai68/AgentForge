@@ -59,7 +59,9 @@ export async function pluginExecutionPlan(info, root, target, version = COMPATIB
     for(const hook of info.components.hooks)if(hook.matchers.some(group=>group.hooks?.length))reasons.push(`Hook ${hook.event} 尚无 ${target} 经验证的等价映射`);
     for(const component of info.components.skills){
       const {attributes}=parsePluginMarkdown(await readFile(join(root,component.path),'utf8'),{path:component.path});
-      for(const key of ['context','agent','model','hooks','allowed-tools','allowedTools','disable-model-invocation','user-invocable'])if(attributes[key]!==undefined)reasons.push(`Skill ${component.name} 的 ${key} 尚无 ${target} 等价映射`);
+      // Optional tool pre-approval metadata does not gate Skill compatibility.
+      // Keep it in source/native projections; target Runtime permissions apply.
+      for(const key of ['context','agent','model','hooks','disable-model-invocation','user-invocable'])if(attributes[key]!==undefined)reasons.push(`Skill ${component.name} 的 ${key} 尚无 ${target} 等价映射`);
       nativeSkills.push({path:component.path,name:attributes.name || component.name,description:attributes.description || component.description || ''});
     }
   }

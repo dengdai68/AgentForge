@@ -91,3 +91,7 @@ model-catalog 投影新增六种原生模型目录与思考档位，忽略提供
 业务配置根与认证分离：插件/MCP、DSH 受管会话等位于配置数据根，Git 托管凭据位于宿主传入的 credentials/。local-cli 日志入口对 Runtime 副本解析受管旧地址，marketplace 读取目录/冻结清单也使用相同解析；完整性与计划摘要照常验证，不更改旧快照或全局 CLI 配置。docs/30 说明物理整理边界。
 
 当前存储归属以 [配置目录与工作目录](../../docs/30-storage-layout.md) 为准：配置、认证、Runtime、插件/MCP 清单及源文件保存在 `~/.agentforge`；员工、角色、团队、工作流、自动化、任务与沟通及执行内容保存在工作目录，默认 `~/.agentforge/workspace`。清除所有数据删除整个当前工作目录，保留配置和登录。插件/MCP 列表与 Runtime 设置使用私有 JSON，SQLite 只存业务关联及配置提交 revision。
+
+裸 Skill：configuration 无清单时仅识别根 SKILL.md 或 skills/<目录>/SKILL.md，安全读取 name/description；marketplace 在 plugin/skills/<name>/ 复制完整目录并生成外壳，source 保留原字节。Git 更新复用 source.origin 与名称身份，不改 Runtime 协议；本地重新导入更新。完整描述不截断，元信息无效整批失败。测试见 marketplace/plugin-updates 与 test-bare-skills。
+
+plugin-compatibility 不检查 Skill 可选 allowed-tools/allowedTools 来决定支持与否；保持源字节和 native 投影元信息，其他字段/Hook/子代理与摘要校验不变。已有安装 detail/resolve 直接按当前规则重新计算，显式 compatibility 命令刷新目录缓存。portable-extensions 测试覆盖九 Runtime 绑定、六 Runtime 字段保留与旧摘要刷新，真实 OpenCode 验证含会话续接。

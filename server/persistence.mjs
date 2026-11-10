@@ -9,19 +9,25 @@ const SNAPSHOT_ID = 1;
 // Cold rows retain identities/order only; bodies are loaded when a command reads them.
 // A bounded clean-row cache is safe because dirty rows stay pinned until commit.
 export const ROW_SOURCE = Symbol.for('agentforge.rows');
-function lazyRows(metadata, read, readField, cacheLimit = 256) {
-  const target = new Array(metadata.length), cache = new Map(), live = new Map(), pinned = new Set();
+function lazyRows(loadMetadata, read, readField, cacheLimit = 256) {
+  let metadata;
+  const target = [], cache = new Map(), live = new Map(), pinned = new Set();
+  const ensureMetadata = () => {
+    if (!metadata) { metadata = loadMetadata(); target.length = metadata.length; }
+    return metadata;
+  };
   const row = index => {
     if (Object.hasOwn(target,index)) return target[index];
-    const meta = metadata[index]; if (!meta) return undefined;
+    const meta = ensureMetadata()[index]; if (!meta) return undefined;
     if (!cache.has(meta.id)) { const value=live.get(meta.id)?.deref() || JSON.parse(read(meta.id).value_json);cache.set(meta.id,value);live.set(meta.id,new WeakRef(value)); }
     return cache.get(meta.id);
   };
   const source = {
-    idAt: index => Object.hasOwn(target,index) ? target[index]?.id : metadata[index]?.id,
+    idAt: index => Object.hasOwn(target,index) ? target[index]?.id : ensureMetadata()[index]?.id,
     field: name => readField(name),
     pin: id => pinned.add(id),
     release() {
+      if (!metadata) return;
       // Appended/edited rows become cold-readable after their durable commit.
       // A live proxy keeps identity through WeakRef, without pinning all history.
       for(const key of Object.keys(target)) if(/^\d+$/.test(key)) {
@@ -34,13 +40,13 @@ function lazyRows(metadata, read, readField, cacheLimit = 256) {
     size: () => cache.size
   };
   return new Proxy(target, {
-    get(array,key,receiver) {if(key===ROW_SOURCE)return source;if(/^\d+$/.test(String(key)))return row(Number(key));return Reflect.get(array,key,receiver);},
-    has(array,key) {return /^\d+$/.test(String(key)) && Number(key)<array.length || Reflect.has(array,key);},
-    set(array,key,value) {return Reflect.set(array,key,value);}
+    get(array,key,receiver) {if(key===ROW_SOURCE)return source;if(/^\d+$/.test(String(key)))return row(Number(key));if(key==='length')ensureMetadata();return Reflect.get(array,key,receiver);},
+    has(array,key) {if(/^\d+$/.test(String(key)))ensureMetadata();return /^\d+$/.test(String(key)) && Number(key)<array.length || Reflect.has(array,key);},
+    set(array,key,value) {if(key==='length'||/^\d+$/.test(String(key)))ensureMetadata();return Reflect.set(array,key,value);}
   });
 }
 
-export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagnostic, configurationDirectory, configurationPublish } = {}) {
+export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagnostic, onLoadDiagnostic, configurationDirectory, configurationPublish } = {}) {
   if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
   const database = new DatabaseSync(databasePath);
   database.exec(`
@@ -108,11 +114,21 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
   try{configuration=createConfigurationStore({directory:configurationDirectory??(databasePath===':memory:'?null:dirname(databasePath)),databasePath,committedRevision:database.prepare('SELECT revision FROM configuration_revision WHERE id=1').get()?.revision,publish:configurationPublish});}catch(error){database.close();throw error;}
 
   let cached = new Map();
+  let metadataLoaders = new Map();
+  const metadataFor = (table, name, cache) => {
+    const started = performance.now();
+    const rows = database.prepare(`SELECT id,position FROM ${table} WHERE collection=? ORDER BY position`).all(name);
+    const read = id => database.prepare(`SELECT value_json FROM ${table} WHERE collection=? AND id=?`).get(name,id);
+    for (const entry of rows) cache.set(entry.id, { position: entry.position, get json() { return read(entry.id).value_json; } });
+    try { onLoadDiagnostic?.({ collection: name, rows: rows.length, elapsedMs: performance.now() - started }); } catch { /* Diagnostics do not change stored facts. */ }
+    return rows;
+  };
 
   return {
     configurationBlocked(){return configuration.blocked();},
     configurationValues(){return configuration.values();},
     load({lazy = false} = {}) {
+      metadataLoaders = new Map();
       const row = loadSnapshot.get(SNAPSHOT_ID);
       if (!row) { cached = new Map(); return null; }
       const state = JSON.parse(row.state_json);
@@ -120,13 +136,14 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
       for (const {name} of entityCollections.all()) {
         const cache = new Map();
         if (lazy) {
-          const meta=database.prepare('SELECT id,position FROM workspace_entities WHERE collection=? ORDER BY position').all(name);
           const read=id=>database.prepare('SELECT value_json FROM workspace_entities WHERE collection=? AND id=?').get(name,id);
-          state[name]=lazyRows(meta,read,field=>{
+          let metadata;
+          const loadMetadata=()=>metadata ||= metadataFor('workspace_entities',name,cache);
+          metadataLoaders.set(name,loadMetadata);
+          state[name]=lazyRows(loadMetadata,read,field=>{
             if(!/^[a-zA-Z]+$/.test(field))throw new Error('Invalid entity field');
             return database.prepare(`SELECT id,json_extract(value_json,'$.${field}') value FROM workspace_entities WHERE collection=? ORDER BY position`).all(name);
           });
-          for(const entry of meta)cache.set(entry.id,{position:entry.position,get json(){return read(entry.id).value_json;}});
         } else state[name] = entityRows.all(name).map(item => {cache.set(item.id,{json:item.value_json,position:item.position});return JSON.parse(item.value_json);});
         entities.set(name,cache);
       }
@@ -137,13 +154,14 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
       for (const { name } of readCollections.all()) {
         const entries = new Map();
         if (lazy) {
-          const meta=database.prepare('SELECT id,position FROM workspace_event_rows WHERE collection=? ORDER BY position').all(name);
           const read=id=>database.prepare('SELECT value_json FROM workspace_event_rows WHERE collection=? AND id=?').get(name,id);
-          state[name]=lazyRows(meta,read,field=>{
+          let metadata;
+          const loadMetadata=()=>metadata ||= metadataFor('workspace_event_rows',name,entries);
+          metadataLoaders.set(name,loadMetadata);
+          state[name]=lazyRows(loadMetadata,read,field=>{
             if(!/^[a-zA-Z]+$/.test(field))throw new Error('Invalid event field');
             return database.prepare(`SELECT id,json_extract(value_json,'$.${field}') value FROM workspace_event_rows WHERE collection=? ORDER BY position`).all(name);
           });
-          for(const entry of meta) entries.set(entry.id,{position:entry.position,get json(){return read(entry.id).value_json;}});
         } else state[name] = readEvents.all(name).map((item) => {
           const value = JSON.parse(item.value_json);
           entries.set(item.id, { json: item.value_json, position: item.position });
@@ -315,6 +333,7 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
           // still need a complete first write before the snapshot can omit them.
           const initialized = cached.has(key);
           if (journal && initialized && !dirty) {next.set(key,old);continue;}
+          metadataLoaders.get(key)?.();
           const partial = initialized && dirty && !dirty.has(null);
           const entries = partial ? new Map() : new Map();
           const values = partial ? [...dirty].map(id => journal.entry(key,id)).filter(Boolean) : state[key].map((value,position)=>({value,position}));
@@ -339,6 +358,7 @@ export function createSqlitePersistence(databasePath = ":memory:", { onSaveDiagn
           const old = entities.get(name) || new Map(), dirty = journal?.changes.get(name);
           const initialized = entities.has(name);
           if (journal && initialized && !dirty) continue;
+          metadataLoaders.get(name)?.();
           const partial = initialized && dirty && !dirty.has(null);
           const updates = new Map();
           const values = partial ? [...dirty].map(id => journal.entry(name,id)).filter(Boolean) : rows.map((value,position)=>({value,position}));

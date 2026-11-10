@@ -93,3 +93,21 @@ test('a shared failing dependency is probed only once per cycle across origins',
   const updater=createPluginUpdates({getStore:()=>store,marketplace,probe:async spec=>{counts.set(spec.url,(counts.get(spec.url)||0)+1);if(spec.url.includes('shared'))throw Error('offline');return 'current'}});t.after(()=>updater.stop());
   assert.equal((await updater.check()).errors.length,2);assert.equal(counts.get('https://shared.invalid/plugin.git'),1);
 });
+
+test('bare Skill Git updates replace current employee and role bindings while preserving frozen Skill bytes',async t=>{
+  const origin=await gitOrigin(t),skill=join(origin.source,'skills/bare-update');await mkdir(join(skill,'references'),{recursive:true});
+  const content=description=>`---\nname: bare-update\ndescription: ${description}\n---\nRead references/facts.txt.`;
+  await writeFile(join(skill,'SKILL.md'),content('before'));await writeFile(join(skill,'references/facts.txt'),'BEFORE');const first=await origin.commit();await origin.git('-C',join(origin.root,'repos/repo.git'),'symbolic-ref','HEAD','refs/heads/main');
+  const market=createMarketplace(join(origin.root,'runtime')),store=createStore({databasePath:join(origin.root,'state.sqlite')});t.after(()=>store.close());
+  const old=(await market.import({url:origin.url})).plugins[0];store.registerExtensions([old]);assert.equal(old.source.revision,first);
+  const frozen=await market.resolve({pluginIds:[old.id],mcpIds:[]},'claude-code');const employee=store.createAgent({name:'bare employee',runtime:{provider:'claude-code',...frozen}});
+  const role=store.createRole({name:'bare role',prompt:'Use skill',...await market.resolveRole({pluginIds:[old.id],mcpIds:[]})});const inherited=store.createAgent({name:'inherited',roleIds:[role.id],runtime:{provider:'claude-code'}});
+  const updater=createPluginUpdates({getStore:()=>store,marketplace:market});t.after(()=>updater.stop());
+  await writeFile(join(skill,'SKILL.md'),content('after'));await writeFile(join(skill,'references/facts.txt'),'AFTER');const revision=await origin.commit();
+  const result=await updater.check();assert.equal(result.updatedPlugins,1);assert.deepEqual(result.errors,[]);
+  const current=store.listExtensions('plugin');assert.equal(current.length,1);assert.equal(current[0].description,'after');assert.equal(current[0].source.revision,revision);assert.notEqual(current[0].id,old.id);
+  assert.deepEqual(store.getRole(role.id).extensionSelection.pluginIds,[current[0].id]);assert.deepEqual(store.listAgents().find(a=>a.id===inherited.id).inheritedExtensionSelection.pluginIds,[current[0].id]);
+  const runtime=store.listAgents().find(a=>a.id===employee.id).runtime;assert.deepEqual(runtime.extensionSelection.pluginIds,[current[0].id]);assert.match(await readFile(runtime.skillPaths[0],'utf8'),/description: after/);assert.equal(await readFile(resolve(runtime.skillPaths[0],'../references/facts.txt'),'utf8'),'AFTER');assert.match(await readFile(frozen.skillPaths[0],'utf8'),/description: before/);assert.equal(await readFile(resolve(frozen.skillPaths[0],'../references/facts.txt'),'utf8'),'BEFORE');
+  assert.equal((await updater.check()).updatedPlugins,0);
+  await writeFile(join(skill,'SKILL.md'),'---\nname: renamed\ndescription: renamed\n---\nnew');await origin.commit();const rejected=await updater.check();assert.equal(rejected.updatedPlugins,0);assert.equal(rejected.errors.length,1);assert.deepEqual(store.listExtensions('plugin').map(p=>p.id),[current[0].id]);
+});

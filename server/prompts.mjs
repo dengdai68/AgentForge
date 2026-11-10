@@ -8,7 +8,7 @@ const managerRules = "你是任务级项目经理，身份由本任务选择决�
 const nodeRules = "完成本次待办，自行说明结果、风险和证据，不编排其他节点。需要接收人继续处理时使用 {\"summary\":\"完整沟通正文\",\"handoff\":{\"recipientAgentId\":\"真实成员ID\"}}，可交给相关同事或经理；需要答复时先 consultation，不必一律交回经理。普通文字可作为交接；若使用 JSON，deliveryReview 必须为 null。";
 const consultationMode = "你正回答角色咨询，完整答案写 summary，平台沿原链回传。managerDecision、deliveryReview 为 null；仍缺信息时再 consultation。";
 const inquiryMode = "你正回答人类对任务的咨询。本轮不调度业务节点，managerDecision、deliveryReview 为 null。若有真实操作或文件变化如实记录；答案写 summary 或普通文字。";
-const chatRules = '你在 AgentForge 的人类沟通中回答，不是在执行 Task/Run。仅讨论和答疑，不修改业务文件或更改系统配置；实际交付请引导创建任务。';
+const chatRules = '你正在与用户沟通，可以根据用户要求直接执行操作。对于复杂、需要多人协作或持续跟进的工作，可以提醒用户创建任务；是否创建由用户决定，不作为继续处理的前提。';
 const chatOutput = '只输出 JSON 对象 {"reply":"完整回复"}，reply 内可使用 Markdown。只答复本次人类消息，不转交、不安排其他成员，不声称已唤醒或收到其他成员回复。';
 
 function persona(agent) {

@@ -148,3 +148,17 @@ DeepSeek Harness 为第三个固定 Runtime，设置与员工选择复用现有�
 ## 共享协作输入与报告通知
 
 协作共享投影识别经理报告的多来源合并引用，各条来源消息链接同一个真实投递/本轮控制台；不新增宿主接口，不把背景已读显示为已执行。
+
+## 分阶段启动
+
+子服务在认证就绪后报告 ready，业务库打开与恢复不再位于三十秒握手门禁内；超时阈值不变。子进程 cwd 使用配置目录；保留宿主对已保存数据盘的存在性检查。业务故障通过接口 503 与 `business.start_failed` 阶段日志报告，不能把未知执行状态当空闲；更新安装的 IPC 空闲预约必须等待业务初始化成功后判断。
+
+## 系统通知与页面反馈
+
+`apps/electron/notifications.mjs` 只接收自有子服务通过 IPC 发出的 `agentforge-notification` 元数据。Store 在成功提交后发布临时通知：`run.awaiting_acceptance` 提交验收、`run.completed` 最终完成、`communication.message` 员工的新沟通回复（私聊和群聊）。通知不新增业务事件类型、不读取历史事件、不轮询数据库；历史读取、重启恢复历史、失败回滚和重复完成沟通不发送通知。业务状态、冻结会话与人类验收规则不变。
+
+宿主逐项验证通知类型与业务 ID，在当前 Session 经同源 `/api/auth/session` 认证后才调用 Electron Notification；不增加 renderer 发送通知的方法，不开放浏览器 Notification 权限。IPC 仅携带事件/消息 ID、任务/Run 或会话 ID、任务/会话名称及发送员工姓名；系统通知不含消息正文、附件、提示词、Trace 或路径，文本经过凭据形态脱敏、控制字符清理和长度限制。每个存活宿主内按事件/消息 ID 去重，缓存有上限，退出登录、后台更换和退出时清理原通知。通知失败只记录诊断，不影响业务提交，也不自动重试。
+
+任务通知点击打开 `/runs/<RunID>`，消息通知点击打开 `/communication/<会话ID>` 并显示窗口；点击时重新认证并核对原子服务身份。目标页面已经打开时只唤回窗口、不重新加载；其他页面存在未关闭的编辑表单时先询问是否前往，取消保留编辑。前台和后台均可通知，实际横幅、通知中心及声音由操作系统的 AgentForge 通知授权和专注模式决定，应用不绕过系统偏好。签名安装包验证真实通知显示事件；源码夹具只验证 IPC、元数据和路由，不冒充系统显示或真实模型。
+
+页面 toast 使用 `web/toast.mjs` 的手动 Popover 顶层，后来打开的 dialog/popover 会重新置顶通知；不靠提高 z-index 绕过浏览器顶层规则，不抢焦点或拦截点击。隔离验收：`node scripts/test-desktop-notifications.mjs`；安装包设 `AGENTFORGE_NOTIFICATIONS_APP=/path/AgentForge.app`，真实系统显示另设 `AGENTFORGE_NOTIFICATIONS_NATIVE=1`，真实模型另设 `AGENTFORGE_NOTIFICATIONS_REAL=1`。所有模式使用隔离 HOME、工作目录、认证和浏览器资料。

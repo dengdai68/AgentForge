@@ -7,6 +7,29 @@ import { DatabaseSync } from 'node:sqlite';
 import { createStateJournal, copyState } from '../server/state-journal.mjs';
 import { createSqlitePersistence } from '../server/persistence.mjs';
 
+test('untouched history loads neither identities nor bodies across unrelated commits', () => {
+  const root=mkdtempSync(join(tmpdir(),'af-cold-collections-')),path=join(root,'db.sqlite'),loaded=[];
+  let disk=createSqlitePersistence(path);
+  try {
+    const history=Array.from({length:2000},(_,i)=>({id:'row'+i,value:i}));
+    disk.save({tasks:[{id:'t',title:'Before'}],artifacts:history,events:history,communicationEvents:history});disk.close();
+    disk=createSqlitePersistence(path,{onLoadDiagnostic:entry=>loaded.push(entry)});
+    const journal=createStateJournal(disk.load({lazy:true}));
+    assert.deepEqual(loaded,[]);
+    journal.begin();journal.get('tasks','t').title='After';disk.save(journal.state,journal);journal.commit();
+    assert.deepEqual(loaded.map(item=>item.collection),['tasks']);
+    assert.equal(journal.state.events.length,2000);
+    assert.deepEqual(loaded.map(item=>item.collection),['tasks','events']);
+    assert.equal(journal.state.events[1999].value,1999);
+    // Replacing an untouched cold collection must still delete its old rows.
+    journal.begin();journal.state.artifacts=[{id:'replacement',value:1}];disk.save(journal.state,journal);journal.commit();
+    assert.deepEqual(loaded.map(item=>item.collection),['tasks','events','artifacts']);
+    const reopened=disk.load();
+    assert.deepEqual(reopened.artifacts,[{id:'replacement',value:1}]);
+    assert.equal(reopened.communicationEvents.length,2000);assert.equal(reopened.tasks[0].title,'After');
+  } finally {disk.close();rmSync(root,{recursive:true,force:true});}
+});
+
 test('entity journal rolls back nested edits, truncation, unshift and collection replacement without breaking held references', () => {
   const journal = createStateJournal({rows:[{id:'a',nested:{value:1}},{id:'b',nested:{value:2}}],settings:{enabled:true}});
   const {state}=journal, held=state.rows[0];

@@ -224,3 +224,15 @@ test-portable-runtimes 支持 AGENTFORGE_PORTABLE_EFFORT，真实模式先经 CL
 `AGENTFORGE_SHARED_COLLABORATION_REAL=1 node scripts/test-shared-collaboration-real.mjs` 使用隔离HOME/实例与真实Claude：分别发言、读取发给经理的同伴公开报告、员工间咨询及原生续接、完整公开正文、无背景唤醒与客户端最终确认。可指定 AGENTFORGE_SHARED_COLLABORATION_APP=/absolute/AgentForge.app 核验构建包；不修改操作者实例，证据仅在忽略的 .data/shared-collaboration-*。
 
 共享协作真实验收可用 `AGENTFORGE_SHARED_COLLABORATION_RESUME=/absolute/.data/shared-collaboration-XXX` 重新核对同一隔离实例并完成客户端验收；只允许本脚本证据目录且 Run 须已待验收，不重新派工、不覆盖首次失败记录。
+
+`node scripts/test-composer-caret.mjs` 在隔离 Electron 中验证私聊、群聊与任务协作长草稿的光标跟随，覆盖四种修饰键换行、末尾/中间编辑、软换行、撤销、选区替换、输入法按键守卫、@/发送优先级及编辑中收到新协作记录的草稿保持；两主题、1280/760px。发送由测试捕获，不调用 Provider、不修改操作者实例；`AGENTFORGE_COMPOSER_APP=/absolute/AgentForge.app` 检查实际安装包。
+
+`AGENTFORGE_PACKAGED_APP=/path/AgentForge.app node scripts/test-startup-loading.mjs` 在临时 HOME 验证首次设置前无业务库、设置/市场只发连接与配置查询、偏好身份保留，以及进入任务中心后业务就绪。独立于操作者资料，不调用真实模型。
+
+`node scripts/test-task-drafts.mjs` 使用临时 HOME、真实隔离 Electron/HTTP/CLI 验证草稿编辑、回填/取消、两主题宽窄布局、错误/重复提交、双端回读和启动拒绝保留修改。`AGENTFORGE_TASK_DRAFTS_REAL=1` 另调用真实 Claude，从编辑后的同一 Task 启动、读取产出核验并在客户端确认完成。`AGENTFORGE_TASK_DRAFTS_APP=/path/AgentForge.app` 可验证打包版；所有资料保存在系统临时目录，不改真实实例。
+
+`node scripts/test-bare-skills.mjs`：隔离 Electron 的裸 Skill Git/本地导入、App/CLI 详情/搜索/分页/重导入、Git 更新与员工/角色换绑、冻结版本保留、失败保留和宽窄主题验收；`AGENTFORGE_BARE_SKILLS_REAL=1` 加真实 Claude 原生 Skill 读取支持文件至客户端人类验收，`AGENTFORGE_BARE_SKILLS_APP=/path/AgentForge.app` 使用安装包及包内 CLI，`AGENTFORGE_BARE_SKILLS_REFERENCE=/path/wecom-unified` 额外核验参考仓库原文与资源。均不调用企业微信业务、不写操作者数据。
+
+裸 Skill 与 portable-extensions-real 验收源均包含可选 allowed-tools，验证不会因该字段阻止加载。`AGENTFORGE_PORTABLE_EXTENSIONS_REAL=1 AGENTFORGE_PORTABLE_PROVIDERS=opencode node scripts/test-portable-extensions-real.mjs` 核验 OpenCode 原生 Skill、支持文件、MCP 实际调用与原生会话续接，不执行企业微信业务。
+
+`node scripts/test-desktop-notifications.mjs`：隔离 HOME/配置/工作目录验证两主题宽窄窗口 toast 覆盖原生 dialog、晚开模态/Popover、保留编辑与焦点；真实 HTTP/受控 Provider 产生任务待验收/完成和私聊/后台群聊通知，验证精确跳转和不回放历史。设 `AGENTFORGE_NOTIFICATIONS_APP` 指定安装包，`AGENTFORGE_NOTIFICATIONS_NATIVE=1` 验证真实 OS show 事件，`AGENTFORGE_NOTIFICATIONS_REAL=1` 使用当前已授权 Claude 认证完成真实任务及沟通；受控协议输出不是真实模型证据。截图/诊断只保存到系统临时目录。

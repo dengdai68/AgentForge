@@ -730,7 +730,8 @@ test("Console initializes Settings with ready validation helpers", async () => {
   let dependencies;
   runWithCache(initialization, {
     location: { pathname: "/settings/repositories", hash: "" },
-    document: {}, window: { addEventListener() {} },
+    document: { querySelector(){return {};} }, window: { addEventListener() {} },
+    createToast: () => () => {},
     createCommunicationUI: () => ({}), readPreferences: () => normalizePreferences(null), applyPreferences() {},
     createSettingsUI: (value) => { dependencies = value; return {}; },
     createMarketplaceUI: () => ({}), createMcpMarketplaceUI: () => ({}), openModal() {}, closeModal() {},

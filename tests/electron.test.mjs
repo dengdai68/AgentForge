@@ -378,7 +378,7 @@ test('app dialog accepts only exact local main-frame choices, sizes to content a
   const module = await readFile(new URL('../apps/electron/app-dialog.mjs', import.meta.url), 'utf8');
   assert.match(module, /Math\.max\(document\.documentElement\.scrollHeight, document\.body\.scrollHeight\)/);
   const main = await readFile(new URL('../apps/electron/main.mjs', import.meta.url), 'utf8');
-  assert.equal((main.match(/appDialog\(\{/g) || []).length, 8, 'system dialog scenes, About, legacy refusal and storage relocation errors use the shared app dialog');
+  assert.equal((main.match(/appDialog\(\{/g) || []).length, 9, 'system dialog scenes, notification draft protection, About, legacy refusal and storage relocation errors use the shared app dialog');
   assert.match(main, /需要先搬迁实例数据/);
   assert.doesNotMatch(main, /role:\s*["']about["']/, 'the macOS menu no longer triggers the system About panel');
   assert.match(main, /关于 AgentForge/);

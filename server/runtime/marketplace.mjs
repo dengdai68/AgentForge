@@ -383,9 +383,14 @@ export function createMarketplace(root) {
         if(plugin.disabled) throw new Error(`插件 ${plugin.name} 引用了外部来源，请直接安装对应仓库；本批次未安装`);
         const id=randomUUID(), target=join(staging,'plugins',id,'plugin');
         await mkdir(target,{recursive:true,mode:0o700});
-        try { await tree(plugin.path,target,plugin.sourceRoot || plugin.path); }
+        const skillRoot=plugin.bareSkill?join(target,'skills',plugin.name):target;
+        try { await tree(plugin.path,skillRoot,plugin.sourceRoot || plugin.path); }
         catch(cause) { throw new Error(`插件「${plugin.name}」无法安装：${cause.message}；本批次未安装`,{cause}); }
         const originalTreeSha256=await tree(plugin.path,join(staging,'plugins',id,'source'),plugin.sourceRoot || plugin.path);
+        if(plugin.bareSkill) {
+          await mkdir(join(target,'.claude-plugin'),{recursive:true,mode:0o700});
+          await writeFile(join(target,'.claude-plugin/plugin.json'),JSON.stringify({name:plugin.name,description:plugin.description,skills:['./skills/'+plugin.name]}),{mode:0o600,flag:'wx'});
+        }
         const variants=Object.fromEntries(await Promise.all(RUNTIME_IDS.map(async provider=>[provider,await pluginInfo({...plugin,path:target},provider,{tolerant:true})])));
         // Preserve all source bytes separately. Only the executable installation
         // excludes rejected Markdown and uses sanitized, dialect-specific manifests.
@@ -437,7 +442,7 @@ export function createMarketplace(root) {
         await writeFile(join(target,'.claude-plugin/plugin.json'),JSON.stringify(info.manifest),{mode:0o600});
         await mkdir(join(target,'.agentforge'),{recursive:true,mode:0o700});
         await writeFile(join(target,'.agentforge/codex.json'),JSON.stringify({hooks:codex.components.hooks,agents:codex.components.agents}),{mode:0o600});
-        const entry={protocol:3,warnings:warnings.filter(item=>item.plugin===plugin.name),originalTreeSha256,sourceDialects:Object.fromEntries(Object.entries(variants).map(([provider,info])=>[provider,info.sourceDialect])),id,kind:'plugin',name:plugin.name,description:String(plugin.description || info.manifest.description || '').slice(0,500),version:info.manifest.version || '',createdAt:new Date().toISOString(),source:{...(plugin.source || {url:catalog.url,revision:catalog.revision}),origin:{url:catalog.url,revision:catalog.revision}},components,compatibility,runtimeComponents:Object.fromEntries(Object.entries(variants).map(([provider,variant])=>[provider,{skills:variant.components.skills.map(item=>item.path)}])),providers:Object.keys(variants).filter(provider=>compatibility[provider].supported),sha256:digest(await readFile(join(target,'.claude-plugin/plugin.json'))),treeSha256:await tree(target)};
+        const entry={protocol:3,warnings:warnings.filter(item=>item.plugin===plugin.name),originalTreeSha256,sourceDialects:Object.fromEntries(Object.entries(variants).map(([provider,info])=>[provider,info.sourceDialect])),id,kind:'plugin',name:plugin.name,description:plugin.bareSkill?plugin.description:String(plugin.description || info.manifest.description || '').slice(0,500),version:info.manifest.version || '',createdAt:new Date().toISOString(),source:{...(plugin.source || {url:catalog.url,revision:catalog.revision}),origin:{url:catalog.url,revision:catalog.revision}},components,compatibility,runtimeComponents:Object.fromEntries(Object.entries(variants).map(([provider,variant])=>[provider,{skills:variant.components.skills.map(item=>item.path)}])),providers:Object.keys(variants).filter(provider=>compatibility[provider].supported),sha256:digest(await readFile(join(target,'.claude-plugin/plugin.json'))),treeSha256:await tree(target)};
         await writeFile(join(dirname(target),'entry.json'),JSON.stringify(entry),{flag:'wx',mode:0o600}); entries.push(entry);
         for(const {name,service,providers} of includeMcps?mcpVariants:[]) {
           const expand=value=>typeof value==='string'?value.replaceAll('${CLAUDE_PLUGIN_ROOT}',join(final,'plugins',id,'plugin')).replaceAll('${PLUGIN_ROOT}',join(final,'plugins',id,'plugin')):Array.isArray(value)?value.map(expand):value && typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,item])=>[key,expand(item)])):value;

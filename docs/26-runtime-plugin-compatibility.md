@@ -44,6 +44,14 @@ HTTP/CLI 安装响应 `warnings` 为 `{plugin, component, path, message}[]`，�
 
 ## 六种新增 Runtime
 
-Cursor、Gemini、Qwen、Kimi、Pi、OpenCode 使用 portable-extensions 的原生 Skill 和 MCP 投影，详见 docs/29。基础 Skill、无预处理的 Command 和已验证的独立子代理可映射。Gemini/Qwen/Kimi/OpenCode 使用原生 Agent，Pi 使用原生扩展启动独立进程并等待；Cursor 仅接受未声明工具约束的子代理，含 tools/disallowedTools 明确拒绝；Pi 要求显式基础工具清单。指定模型仅支持 inherit 或已映射的源别名；未映射工具拒绝。Hook 及 context/agent/model/hooks/allowed-tools/allowedTools/disable-model-invocation/user-invocable 等专用 Skill 行为目前整插件明确拒绝，不对外声明完整 Claude/Codex 插件方言兼容。源组件没有被偷偷删除或改为提示词拼接。新增计划只影响这些新目标；已有三种目标的冻结计划摘要不改变。
+Cursor、Gemini、Qwen、Kimi、Pi、OpenCode 使用 portable-extensions 的原生 Skill 和 MCP 投影，详见 docs/29。基础 Skill、无预处理的 Command 和已验证的独立子代理可映射。Gemini/Qwen/Kimi/OpenCode 使用原生 Agent，Pi 使用原生扩展启动独立进程并等待；Cursor 仅接受未声明工具约束的子代理，含 tools/disallowedTools 明确拒绝；Pi 要求显式基础工具清单。指定模型仅支持 inherit 或已映射的源别名；未映射工具拒绝。Hook 及 context/agent/model/hooks/disable-model-invocation/user-invocable 等专用 Skill 行为目前整插件明确拒绝，不对外声明完整 Claude/Codex 插件方言兼容。源组件没有被偷偷删除或改为提示词拼接。新增计划只影响这些新目标；已有三种目标的冻结计划摘要不改变。
 
 原三种完整方言桥仍由 test-plugin-runtimes-real 验证；六种新增目标由 test-portable-extensions-real 验证，另跑 test-portable-runtimes 的扩展模式到客户端验收。市场兼容性摘要可由显式 App/CLI 检查命令更新；摘要刷新不迁移或重写扩展协议。
+
+## 裸 Skill 的插件外壳
+
+无插件清单的根 Skill 或 skills/<目录>/SKILL.md 由 configuration 读取安全 frontmatter 形成虚拟条目；marketplace 只在私有安装副本中生成清单，保持技能目录内相对资源路径。每个 Skill 一插件，元信息完整沿用 Skill，原始 source 与执行 plugin 分离。后续兼容计划、完整性、来源身份与不可变更新均复用已有协议，不新增依赖、配置资源或运行时适配器。边界及更新失败语义见 docs/15。
+
+## 可选工具预批准元信息
+
+Skill 的 `allowed-tools`（及 `allowedTools` 拼写）不参与平台 Runtime 兼容性判断，也不因字段内容增加拒绝原因。原始文件、安装副本与调用投影保留该元信息，平台不把它转换为工具限制或额外授权；实际工具调用继续由目标 Runtime 自身配置处理。其他专用字段、子代理工具选择、Hook 与完整性校验保持原规则。没有新协议版本：既有可用绑定的计划结构和摘要不变；之前因该字段被拒绝的目标没有有效冻结计划。已有插件可通过检查兼容性更新目录摘要，无需重装，不改历史文件或绑定。

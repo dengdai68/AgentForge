@@ -51,7 +51,7 @@ async function executeParsed({ args, flags }, { stdin = process.stdin, stderr = 
     if (['delete', 'terminate', 'test'].includes(operation)) allowed.push('yes');
     if (group === 'automations' && ['list','triggers'].includes(operation)) allowed.push('status', 'page', 'all');
     if (group === 'tasks') {
-      if (operation === 'create') allowed.push('start', 'workflow');
+      if (['create','update'].includes(operation)) allowed.push('start', 'workflow');
       if (['message', 'reply', 'members'].includes(operation)) allowed.push('file');
       if (operation === 'list') allowed.push('status', 'archived', 'workflow');
       if (['progress', 'collaboration', 'questions', 'message', 'reply', 'artifacts', 'terminate', 'members'].includes(operation)) allowed.push('run');
@@ -199,10 +199,10 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
     return { task: keyFields(result.task, ['id', 'title', 'status']), runIds: result.runIds, runFileCleanup: result.runFileCleanup || 'completed' };
   }
   const paginate = items => ({ items: flags.all ? items : items.slice((page - 1) * 20, page * 20), total: items.length, page: flags.all ? null : page, pageSize: flags.all ? null : 20, hasMore: !flags.all && page * 20 < items.length });
-  if (operation === 'create') {
+  if (['create','update'].includes(operation)) {
     const input = await readInput(flags.file, stdin);
-    validateInput(input, resources.tasks.schema);
-    if (!(input.memberAgentIds?.length || input.teamIds?.length)) throw usage('至少选择一位员工或一个团队');
+    validateInput(input, operation === 'update' ? {...resources.tasks.operationInputs.update.schema,minProperties:flags.workflow?0:1} : resources.tasks.schema);
+    if ((operation === 'create' || Object.hasOwn(input,'memberAgentIds') || Object.hasOwn(input,'teamIds')) && !(input.memberAgentIds?.length || input.teamIds?.length)) throw usage('至少选择一位员工或一个团队');
     if (flags.workflow) {
       const refs = await client.request('/api/catalog-references');
       const exact = refs.workflowTemplates.find(item => item.id === flags.workflow);
@@ -212,12 +212,13 @@ async function executeTaskCommand(client, operation, id, flags, page, stdin) {
       if (input.workflowTemplateId && input.workflowTemplateId !== workflowId) throw usage('--workflow 与文件中的 workflowTemplateId 冲突', '只指定一个工作流，或让两处使用相同 ID。');
       input.workflowTemplateId = workflowId;
     }
-    const { task } = await client.request('/api/tasks', { method: 'POST', body: input });
+    const { task } = await client.request(operation==='update'?`/api/tasks/${id}`:'/api/tasks', { method: operation==='update'?'PUT':'POST', body: input });
     if (!flags.start) return { task: keyFields(task, ['id', 'title', 'status']) };
     try {
       const { run } = await client.request(`/api/tasks/${task.id}/run`, { method: 'POST', body: {} });
       return { task: { ...keyFields(task, ['id', 'title']), status: run.status }, run: runReceipt(run) };
     } catch (error) {
+      if (operation === 'update') throw Object.assign(new CliError('TASK_UPDATED_START_FAILED', `任务修改已保存（${task.id}），启动未能确认`, `任务 ID：${task.id}。先用 tasks progress ${task.id} 核实状态；若尚未启动，再用 tasks start ${task.id}。不要重复提交修改。${error instanceof CliError ? ' ' + error.message : ''}`, error.exitCode || 5), { taskId: task.id });
       throw Object.assign(new CliError('TASK_CREATED_START_FAILED', `任务已创建（${task.id}），启动未能确认`, `任务 ID：${task.id}。先用 tasks progress ${task.id} 核实状态；若尚未启动，再用 tasks start ${task.id}。不要重复创建。${error instanceof CliError ? ' ' + error.message : ''}`, error.exitCode || 5), { taskId: task.id });
     }
   }
@@ -323,7 +324,7 @@ export async function run(argv, options = {}) {
   }
   catch (error) {
     const known = error instanceof CliError, exitCode = known ? error.exitCode : 5;
-    const safe = known ? { code: error.code, message: error.message, hint: error.hint, ...(error.status ? { status: error.status } : {}), ...(error.code === 'TASK_CREATED_START_FAILED' ? { taskId: error.taskId } : {}) } : { code: 'CLI_FAILURE', message: 'CLI未能完成命令', hint: guide.exitCodes[5] };
+    const safe = known ? { code: error.code, message: error.message, hint: error.hint, ...(error.status ? { status: error.status } : {}), ...(['TASK_CREATED_START_FAILED','TASK_UPDATED_START_FAILED'].includes(error.code) ? { taskId: error.taskId } : {}) } : { code: 'CLI_FAILURE', message: 'CLI未能完成命令', hint: guide.exitCodes[5] };
     if (json) write(JSON.stringify({ ok: false, error: safe }, null, 2));
     else writeError(formatError(safe, exitCode, presentation));
     return exitCode;

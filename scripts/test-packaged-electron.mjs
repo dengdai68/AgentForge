@@ -299,7 +299,7 @@ const workspace = (prompt.split("任务工作目录：")[1] || "").split(String.
 if (process.env.ELECTRON_RUN_AS_NODE || process.env.AGENTFORGE_BOOTSTRAP_TOKEN) throw new Error("control-plane bootstrap environment leaked to Provider fixture");
 if (process.env.AF_SHELL_PROOF !== ${JSON.stringify(shellProof)} || process.env.AF_PROFILE_LOADED !== 'yes') throw new Error('shell environment did not reach the Provider');
 let result = { kind: "node_result", summary: "Packaged execution content fixture", artifacts: [], decisions: [], needsHuman: false, consultation: null, inputAssessment: { sufficient: true, sourceNodeIds: [], rationale: "fixture input is sufficient", missingEvidence: [] }, deliveryReview: null, managerDecision: null };
-if (prompt.includes("人类沟通中回答")) result = { reply: "Packaged unread fixture reply", ...(responseSchema?.properties?.mentionAgentIds ? { mentionAgentIds: [] } : {}) };
+if (responseSchema?.properties?.reply) result = { reply: "Packaged unread fixture reply", ...(responseSchema?.properties?.mentionAgentIds ? { mentionAgentIds: [] } : {}) };
 else if (prompt.includes('"purpose":"delivery_review"')) result.deliveryReview = { verdict: "pass", restartFromNodeId: "packaged_verify", findings: ["packaged fixture evidence reviewed"] };
 else if (prompt.includes("任务级项目经理")) result.managerDecision = { nextNodeId: (await import('node:fs')).existsSync(join(workspace,'docs/packaged/report.md')) ? null : "packaged_verify", nextAgentId: (await import('node:fs')).existsSync(join(workspace,'docs/packaged/report.md')) ? null : roster.find(member => member.type === "agent" && member.taskRole === "member")?.id, rationale: "fixture selects a business member from the frozen roster" };
 else {

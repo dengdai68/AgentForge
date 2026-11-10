@@ -110,3 +110,7 @@ Provider 重试和错误的详细正文通过 execution content 保存：错误�
 ## 提示词输入精简
 
 大输入正文经 Run Files 在调用前物化为私有 SHA256 资料文件，Provider 收到真实 path/摘要并按需读取；资料目录通过现有 contextDirectories 传递。冻结工作流提供稳定 Run 级入口且保留 Trace 证据。未修改 Runtime CLI 接入、系统指令原生通道或会话协议，文件读取仍计入上下文，见 docs/22。
+
+裸 Skill 导入先包装为插件（根 SKILL.md 或 skills/<名称>/SKILL.md），原生加载、完整性与兼容性仍使用同一插件链路；不会自动安装技能声明的 CLI 或执行脚本。Git 更新保持冻结版本隔离，详见 docs/15、26。
+
+Skill 的 allowed-tools/allowedTools 为可选元信息，不作为平台 Runtime 兼容性门禁；保留原字段，实际执行由目标 Runtime 自身规则处理。无需修改原始插件或历史快照，详情按当前规则重算，列表可通过检查兼容性刷新。

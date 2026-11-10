@@ -270,3 +270,21 @@ Runtime 扩展：portable-extensions.mjs 在既有市场完整性校验后物化
 共享协作输入：store.memberInputMessages 按成员回执补齐当前 Run 全部公开外部消息，prompts 明确本轮处理消息与背景，orchestrator 在附件异步校验前固定水位并保留正文加尾部 JSON 的自然正文。Store 合并经理队尾未尝试报告并保留多来源/幂等键，console-projections 同时服务 App/CLI 关联。契约 docs/22、03，覆盖 prompts/task-parallel/smoke。
 
 真实共享协作验收：scripts/test-shared-collaboration-real.mjs；随机标记仅配置给各自员工，通过公开报告传递，再经同伴咨询和原生续接回忆，最后客户端确认。不用Provider夹具代替。
+
+输入框换行：web/communication.js 的 insertComposerLineBreak 由沟通和任务协作共用，保留 Shift + Enter 原生编辑与撤销，其他修饰键显式保持当前光标可见；任务局部/整体刷新保持草稿焦点、选区和视口；不改变消息、投递或 CLI 契约。scripts/test-composer-caret.mjs 覆盖长草稿末尾/中间编辑、软换行、选择替换、输入法守卫、@ 选择和发送，隔离 HOME/数据且不调用模型。
+
+## 按需业务启动
+
+认证/连接就绪与业务初始化分离：`server/index.mjs` → `ensureBusiness`；集合元数据懒加载：`server/persistence.mjs`；纯 JSON 配置读视图：`server/configuration-store.mjs`；页面连接/通知边界：`web/app.js`。架构决策见 docs/02、SQL 行为见 docs/07。验证包含 tests/auth.test.mjs、tests/state-journal.test.mjs 与 tests/configuration-store.test.mjs。
+
+打包后启动边界验收：`scripts/test-startup-loading.mjs`，以临时 HOME 实际操作设置、插件/MCP市场和任务中心；真实模型协作续接继续使用 scripts/test-task-collaboration-real.mjs。
+
+沟通执行指引：server/prompts.mjs 的共享 chatRules 允许按用户要求直接操作，复杂工作仅建议创建任务。私聊/群聊共用行为指引，输出路由、会话和 Task 协调协议保持；见 docs/17、docs/22，回归覆盖 tests/prompts.test.mjs。
+
+草稿编辑：server/store.mjs 的 updateTask 复用 buildTask 校验并保持身份/目录，经 server/index.mjs PUT /api/tasks/:id 暴露；web/app.js 复用任务表单回填与保存，cli tasks update 同步部分字段、--workflow/--start、schema/help 与启动未确认回执。仅普通 backlog 且无 Run 可编辑；验证见 configuration-catalog/configuration-cli 与 scripts/test-task-drafts.mjs（可选真实模型到人类验收）。
+
+裸 Skill 分发：server/runtime/configuration.mjs 无清单结构识别 → marketplace.mjs 私有插件外壳与原始副本 → 既有 plugin-updates/Store 原子换绑；App/CLI 同一 url/path 导入，测试 marketplace/plugin-updates，实际验收 scripts/test-bare-skills.mjs；契约 docs/15、26。
+
+Skill 可选工具元信息：plugin-compatibility 不以 allowed-tools/allowedTools 拒绝目标，portable-extensions 保留字段；marketplace 的 detail/resolve 当前计算与 App/CLI 显式兼容性摘要刷新共用。tests/portable-extensions 覆盖旧安装刷新及源/投影保留；scripts/test-portable-extensions-real 使用含该字段的原生 Skill 验证会话续接。
+
+桌面通知：`server/store.mjs` 与 `server/communication-store.mjs` 发布提交后的临时元数据，`server/index.mjs` 沿自有 IPC 发给 `apps/electron/notifications.mjs`，main 完成认证/生命周期/原生显示和精确路由；无 renderer 通用桥或历史轮询。`web/toast.mjs` 管理始终在 dialog/Popover 之上的页面反馈。契约 docs/18、06、17；单测 `tests/desktop-notifications.test.mjs`，隔离界面/安装包验收 `scripts/test-desktop-notifications.mjs`。

@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile, realpath, lstat, rename, unlink, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, realpath, lstat, rename, unlink, rm, readdir } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {diagnostic} from '../diagnostics.mjs';
+import {parsePluginMarkdown} from './plugin-compatibility.mjs';
 
 const exec = promisify(execFile);
 const object = (value) => value && typeof value === "object" && !Array.isArray(value);
@@ -77,7 +78,38 @@ export async function readPluginCatalog(directory) {
     try { catalog = {plugins:[{...await readManifest(name),source:'./'}]}; marketplace=false; break; }
     catch (error) { if (error.code !== 'ENOENT') throw new Error('插件 JSON 无效或清单路径越界'); }
   }
-  if (!catalog) throw new Error('仓库未包含 Claude、Codex 或 Agent Plugins 清单');
+  if (!catalog) {
+    // Only known Skill layouts are discovered; a real plugin/marketplace
+    // manifest always wins. Never write a generated manifest into the source.
+    const contained = async path => {
+      const actual = await realpath(path), rel = relative(canonicalRoot, actual);
+      if (isAbsolute(rel) || rel === '..' || rel.startsWith('../')) throw new Error('Skill 路径越界');
+      return actual;
+    };
+    const skillAt = async path => {
+      try {
+        const file = await contained(join(path, 'SKILL.md')), info = await lstat(file);
+        if (!info.isFile() || info.size > 128 * 1024) throw new Error('SKILL.md 必须为不超过 128 KB 的文件');
+        const {attributes} = parsePluginMarkdown(await readFile(file, 'utf8'), {path:relative(canonicalRoot,file)});
+        if (typeof attributes.name !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(attributes.name)) throw new Error('Skill name 必须为 1–80 位字母、数字、点、横线或下划线');
+        if (typeof attributes.description !== 'string' || !attributes.description.trim()) throw new Error('Skill description 必须为非空文本');
+        return {name:attributes.name,description:attributes.description,path:await contained(path),sourceRoot:canonicalRoot,bareSkill:true};
+      } catch(error) { if(error.code === 'ENOENT') return null; throw error; }
+    };
+    const rootSkill = await skillAt(canonicalRoot);
+    if (rootSkill) return {plugins:[rootSkill]};
+    let children = [];
+    try {
+      const directory = await contained(join(canonicalRoot,'skills'));
+      for(const child of (await readdir(directory,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
+        if(!child.isDirectory() && !child.isSymbolicLink()) continue;
+        const skill = await skillAt(join(directory,child.name));
+        if(skill) children.push(skill);
+      }
+    } catch(error) { if(error.code !== 'ENOENT') throw error; }
+    if(children.length) return {plugins:children};
+    throw new Error('仓库未包含插件清单、根 SKILL.md 或 skills/<名称>/SKILL.md');
+  }
   if (!Array.isArray(catalog.plugins)) throw new Error("插件清单需要 plugins 数组");
   const plugins = [];
   for (const plugin of catalog.plugins) {

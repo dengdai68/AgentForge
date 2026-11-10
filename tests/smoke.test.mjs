@@ -212,13 +212,11 @@ test("HTTP save diagnostic injection logs errors and inclusive slow saves withou
   const source = await readFile(new URL("../server/index.mjs", import.meta.url), "utf8");
   const start = source.indexOf("const storeOptions ="), end = source.indexOf("\nconst { version }", start);
   assert.ok(start >= 0 && end > start);
-  let options;
   const calls = [];
   const databasePath = "PRIVATE_DATABASE_SENTINEL", workspaceRoot = "PRIVATE_WORKSPACE_SENTINEL";
-  const evaluate = new Function("createStore", "databasePath", "workspaceRoot", "diagnostic", "runtimeInstalled", "storage", `${source.slice(start, end)}; return store;`);
-  const sentinelStore = {};
+  const evaluate = new Function("databasePath", "workspaceRoot", "diagnostic", "runtimeInstalled", "storage", `${source.slice(start, end)}; return storeOptions;`);
   const installation = () => true;
-  assert.equal(evaluate(input => { options = input; return sentinelStore; }, databasePath, workspaceRoot, (...args) => calls.push(args), installation, {controlRoot:"PRIVATE_CONFIG_SENTINEL"}), sentinelStore);
+  const options = evaluate(databasePath, workspaceRoot, (...args) => calls.push(args), installation, {controlRoot:"PRIVATE_CONFIG_SENTINEL"});
   assert.equal(options.runtimeInstalled, installation);
   assert.equal(options.databasePath, databasePath); assert.equal(options.workspaceRoot, workspaceRoot);
   const record = (outcome, elapsedMs) => ({ operation: "save", outcome, elapsedMs, transactionOutcome: outcome === "success" ? "committed" : "not_started", phases: [] });
@@ -692,7 +690,7 @@ test("composer lists real members once and supports selection, newline and IME-s
   let options = [option];
   const list = { classList: { contains: () => true, remove() {} }, querySelectorAll: () => options };
   const register = source.slice(source.indexOf('document.addEventListener("keydown",'), source.indexOf('window.addEventListener("popstate",'));
-  new Function("document", "$", "state", "Event", "closeModal", register)({ addEventListener: (_, fn) => handler = fn }, () => list, { workspace: { run: { task: {} } } }, class {}, () => {});
+  new Function("document", "$", "state", "Event", "closeModal", "insertComposerLineBreak", register)({ addEventListener: (_, fn) => handler = fn }, () => list, { workspace: { run: { task: {} } } }, class {}, () => {}, () => newlines++);
   const input = { id: "instruction-text", selectionStart: 0, selectionEnd: 0, setRangeText: () => newlines++, dispatchEvent() {}, form: { requestSubmit: () => submits++ } };
   const press = (key, extra = {}) => handler({ key, target: input, preventDefault() {}, ...extra });
   press("Tab"); press("Enter"); assert.equal(selected, 2); assert.equal(submits, 0);

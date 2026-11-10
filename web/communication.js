@@ -1,5 +1,34 @@
 import { ByteCache } from "../client/byte-cache.mjs";
 import { consoleEventWindow } from "../client/console-projections.mjs";
+
+// Let the browser own ordinary line breaks, caret following and undo. Other
+// modifier+Enter shortcuts need an explicit insertion on macOS Chromium.
+export function insertComposerLineBreak(event) {
+  if (event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey) return;
+  event.preventDefault();
+  const input = event.target;
+  input.setRangeText("\n", input.selectionStart, input.selectionEnd, "end");
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  if (input.selectionEnd === input.value.length) { input.scrollTop = input.scrollHeight; return; }
+
+  // Mid-draft edits must reveal the caret, rather than jump to the last line.
+  const doc = input.ownerDocument, style = doc.defaultView.getComputedStyle(input);
+  const mirror = doc.createElement("div"), caret = doc.createElement("span");
+  mirror.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;box-sizing:border-box;border:0;margin:0;top:0;left:0;white-space:pre-wrap;overflow-wrap:break-word;";
+  for (const key of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight", "letterSpacing", "tabSize", "textIndent", "textAlign", "direction", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "wordBreak"]) mirror.style[key] = style[key];
+  mirror.style.width = `${input.clientWidth}px`;
+  mirror.textContent = input.value.slice(0, input.selectionEnd);
+  caret.textContent = "\u200b";
+  mirror.append(caret); doc.body.append(mirror);
+  try {
+    const top = caret.getBoundingClientRect().top - mirror.getBoundingClientRect().top;
+    const bottom = top + (parseFloat(style.lineHeight) || caret.getBoundingClientRect().height);
+    const paddingTop = parseFloat(style.paddingTop) || 0, paddingBottom = parseFloat(style.paddingBottom) || 0;
+    if (top < input.scrollTop + paddingTop) input.scrollTop = top - paddingTop;
+    else if (bottom > input.scrollTop + input.clientHeight - paddingBottom) input.scrollTop = bottom + paddingBottom - input.clientHeight;
+  } finally { mirror.remove(); }
+}
+
 export function attachmentImageError(event) {
   if (event.target.matches?.('.communication-image img')) event.target.closest('.communication-image').dataset.imageError = 'true';
 }
@@ -484,9 +513,8 @@ export function createCommunicationUI({ api, navigate, notify, prepareContent = 
       }
       if (event.key === "Escape") closeFloatingList(menu);
       if (event.key === "Enter") {
-        event.preventDefault();
-        if (modified) { input.setRangeText("\n", input.selectionStart, input.selectionEnd, "end"); input.dispatchEvent(new Event("input")); }
-        else form.requestSubmit();
+        if (modified) insertComposerLineBreak(event);
+        else { event.preventDefault(); form.requestSubmit(); }
       }
     };
     form.onsubmit = async (event) => {

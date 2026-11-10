@@ -190,6 +190,37 @@ test('saved task drafts persist without execution and start explicitly exactly o
   } finally { store.close(); }
 });
 
+test('draft edits reuse creation rules, freeze current choices and retain identity without execution', t=>{
+ const root=mkdtempSync(join(tmpdir(),'af-draft-edit-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const options={databasePath:join(root,'state.sqlite'),workspaceRoot:join(root,'work')};let store=createStore(options);t.after(()=>store.close());
+ const a=store.createAgent({name:'原经理'}),b=store.createAgent({name:'新经理',systemPrompt:'旧职责'}),c=store.createAgent({name:'成员'});
+ const team=store.createTeam({name:'编辑选人团队',memberAgentIds:[b.id,c.id]});
+ const flow=store.createWorkflowTemplate({name:'新流程',nodes:[{id:'work',title:'完成工作',description:'当前流程要求'}]});
+ const original=store.createTask({title:'草稿',objective:'原目标',memberAgentIds:[a.id],managerAgentId:a.id,acceptanceCriteria:['原标准']});
+ store.updateAgent(b.id,{systemPrompt:'当前职责'});
+ const edited=store.updateTask(original.id,{title:'修改标题',objective:'修改目标',teamIds:[team.id],memberAgentIds:[b.id],managerAgentId:b.id,workflowTemplateId:flow.id,acceptanceCriteria:['新标准']});
+ assert.equal(edited.id,original.id);assert.equal(edited.createdAt,original.createdAt);assert.equal(edited.workspacePath,original.workspacePath);assert.equal(edited.workspaceManaged,original.workspaceManaged);
+ assert.deepEqual(edited.memberAgentIds,[b.id,c.id]);assert.equal(edited.managerSnapshot.systemPrompt,'当前职责');assert.equal(edited.workflowSnapshot.nodes[0].description,'当前流程要求');assert.equal(edited.status,'backlog');assert.equal(edited.teamIds,undefined);
+ assert.equal(existsSync(edited.workspacePath),false);assert.equal(store.listRuns().length,0);assert.equal(store.listTasks().length,1);
+ const cleared=store.updateTask(original.id,{workflowTemplateId:null,acceptanceCriteria:[]});assert.equal(cleared.title,'修改标题');assert.deepEqual(cleared.memberAgentIds,edited.memberAgentIds);assert.equal(cleared.workflowTemplateId,null);assert.deepEqual(cleared.acceptanceCriteria,[]);
+ store.close();store=createStore(options);assert.deepEqual(store.getTask(original.id),cleared);
+ const run=store.createRun(original.id);assert.equal(run.taskId,original.id);assert.equal(run.manager.sourceAgentId,b.id);assert.equal(run.taskId,cleared.id);
+ assert.throws(()=>store.updateTask(original.id,{title:'不可更改'}),/尚未启动/);assert.equal(store.getTask(original.id).title,'修改标题');
+});
+
+test('invalid draft changes and edits after cancellation leave saved state unchanged',()=>{
+ const store=createStore({workspaceRoot:tmpdir()});
+ try{
+  const a=store.createAgent({name:'经理'}),b=store.createAgent({name:'成员'}),off=store.createAgent({name:'停用员工',status:'inactive'});
+  const task=store.createTask({title:'保留草稿',objective:'原目标',memberAgentIds:[a.id,b.id],managerAgentId:a.id});
+  for(const patch of [{},null,[],{title:''},{objective:''},{memberAgentIds:[]},{memberAgentIds:[b.id]},{memberAgentIds:[off.id],managerAgentId:off.id},{teamIds:['missing']},{memberAgentIds:[a.id,a.id]},{workflowTemplateId:'missing'},{acceptanceCriteria:Array(21).fill('标准')},{acceptanceCriteria:['x'.repeat(501)]},{status:'running'},{workspacePath:'/tmp/changed'},{managerRuntime:{provider:'codex'}}]){
+   assert.throws(()=>store.updateTask(task.id,patch));assert.deepEqual(store.getTask(task.id),task);
+  }
+  assert.throws(()=>store.updateTask('missing',{title:'没有'}),/任务不存在/);
+  store.setTaskStatus(task.id,'cancelled');assert.throws(()=>store.updateTask(task.id,{title:'不能编辑'}),/尚未启动/);
+ }finally{store.close();}
+});
+
 test('any selected employee can coordinate a task without changing global kind; snapshots and role survive catalog edits',()=>{
  const store=createStore({workspaceRoot:tmpdir()});
  try{

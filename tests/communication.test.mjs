@@ -632,7 +632,8 @@ test("communication execution queues replies, resumes exact sessions, separates 
     assert.ok(!calls[1].prompt.includes("真实协议测试回复"), "native assistant replies are not replayed");
     assert.ok(!calls[1].prompt.includes('"content":"first"'), "previous user messages are not replayed");
     assert.ok(calls[1].prompt.includes('"content":"second"'));
-    assert.match(calls[1].systemPrompt, /人类沟通中回答/);
+    assert.match(calls[1].systemPrompt, /根据用户要求直接执行操作/);
+    assert.match(calls[1].systemPrompt, /是否创建由用户决定，不作为继续处理的前提/);
     const group = store.openCommunication({kind:"group",name:"测试群聊",memberAgentIds:store.listTeams().find(team=>team.id===("team_product_delivery")).memberAgentIds});
     send(store, group.id, "hello", ["agent_analyst"]);
     await service.kick(group.id);

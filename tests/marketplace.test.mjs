@@ -603,3 +603,38 @@ test('the source Hook wildcard is valid and retained rather than mistaken for ma
   for(const provider of ['claude-code','codex','dsh'])assert.equal((await market.resolve({pluginIds:[result.plugins[0].id],mcpIds:[]},provider)).extensionManifest.length,1);
   assert.equal((await market.detail(result.plugins[0].id,'plugin')).components.hooks[0].matchers[0].matcher,'*');
 });
+
+test('bare root Skill is wrapped without changing source; metadata and relative resources remain exact',async t=>{
+  const {root,market}=await fixture(t),source=join(root,'bare'),description='完整技能说明'.repeat(120);
+  await mkdir(join(source,'references'),{recursive:true});await mkdir(join(source,'scripts'));
+  const body=`---\nname: bare-proof\ndescription: ${JSON.stringify(description)}\n---\nRead references/proof.md and scripts/proof.sh.`;
+  await writeFile(join(source,'SKILL.md'),body);await writeFile(join(source,'references/proof.md'),'exact support');await writeFile(join(source,'scripts/proof.sh'),'#!/bin/sh\necho proof\n',{mode:0o700});
+  const result=await market.import({path:source}),entry=result.plugins[0];assert.equal(result.plugins.length,1);assert.deepEqual(result.mcps,[]);assert.equal(entry.name,'bare-proof');assert.equal(entry.description,description);
+  await assert.rejects(stat(join(source,'.claude-plugin')),{code:'ENOENT'});assert.equal(await readFile(join(source,'SKILL.md'),'utf8'),body);
+  const detail=await market.detail(entry.id,'plugin');assert.equal(detail.manifest.name,entry.name);assert.equal(detail.manifest.description,description);assert.equal(detail.components.skills.length,1);assert.equal(detail.components.skills[0].path,'skills/bare-proof/SKILL.md');
+  assert.deepEqual(detail.components.agents,[]);assert.deepEqual(detail.components.hooks,[]);
+  for(const provider of RUNTIME_IDS){const loaded=await market.resolve({pluginIds:[entry.id],mcpIds:[]},provider);assert.equal(loaded.skillPaths.length,1);assert.equal(await readFile(loaded.skillPaths[0],'utf8'),body);assert.equal(await readFile(resolve(loaded.skillPaths[0],'../references/proof.md'),'utf8'),'exact support');assert.ok((await stat(resolve(loaded.skillPaths[0],'../scripts/proof.sh'))).mode&0o100);}
+});
+
+test('bare skills collection wraps each Skill only, and actual plugin manifests retain precedence',async t=>{
+  const {root,market}=await fixture(t),source=join(root,'skills-only');
+  for(const name of ['alpha','beta']){await mkdir(join(source,'skills',name),{recursive:true});await writeFile(join(source,'skills',name,'SKILL.md'),`---\nname: ${name}\ndescription: ${name} description\n---\n${name}`);}
+  const result=await market.import({path:source});assert.deepEqual(result.plugins.map(p=>p.name),['alpha','beta']);
+  for(const entry of result.plugins){const detail=await market.detail(entry.id,'plugin');assert.deepEqual(detail.components.skills.map(s=>s.name),[entry.name]);}
+  await mkdir(join(source,'.claude-plugin'));await writeFile(join(source,'.claude-plugin/plugin.json'),' {"name":"actual-plugin"}');
+  const actual=await market.import({path:source});assert.deepEqual(actual.plugins.map(p=>p.name),['actual-plugin']);assert.equal(actual.plugins[0].components.skills,2);
+  await writeFile(join(source,'.claude-plugin/plugin.json'),'{broken');await assert.rejects(market.import({path:source}),/插件 JSON 无效/);
+});
+
+test('bare Skill metadata and containment errors reject the batch without publishing installations',async t=>{
+  const {root,market}=await fixture(t),source=join(root,'invalid-bare');await mkdir(join(source,'skills/valid'),{recursive:true});await mkdir(join(source,'skills/invalid'));
+  await writeFile(join(source,'skills/valid/SKILL.md'),'---\nname: valid\ndescription: valid\n---\nOK');
+  for(const header of ['name: ../bad\ndescription: no','name: invalid\ndescription: 123','description: missing name','name: invalid\ndescription: !!js/function nope']){
+    await writeFile(join(source,'skills/invalid/SKILL.md'),'---\n'+header+'\n---\nPRIVATE_BODY');
+    await assert.rejects(market.import({path:source}),error=>!error.message.includes('PRIVATE_BODY'));
+    assert.equal((await market.catalog()).plugins.length,0);
+  }
+  await rm(join(source,'skills/invalid'),{recursive:true});await symlink(join(root,'outside'),join(source,'skills/invalid'));await mkdir(join(root,'outside'));await writeFile(join(root,'outside/SKILL.md'),'---\nname: outside\ndescription: outside\n---\nPRIVATE_BODY');
+  await assert.rejects(market.import({path:source}),/Skill 路径越界/);assert.equal((await market.catalog()).plugins.length,0);
+  await rm(join(source,'skills/invalid'));await writeFile(join(source,'skills/valid/SKILL.md'),'---\nname: duplicate\ndescription: a\n---\nA');await mkdir(join(source,'skills/other'));await writeFile(join(source,'skills/other/SKILL.md'),'---\nname: duplicate\ndescription: b\n---\nB');await assert.rejects(market.import({path:source}),/重复/);
+});

@@ -132,3 +132,9 @@ Runtime list/get/update/test/models 覆盖九项，可用固定 ID、Provider ID
 ## 共享协作输入与报告通知
 
 任务协作读模型与 App 共用多来源报告通知合并：多条角色消息可以关联同一个真实投递/Trace；不增加 CLI 命令或输入字段，不把背景已读当执行结束。
+
+tasks update ID --file patch.json [--workflow ID_OR_NAME] [--start] 与 App 编辑草稿等价，仅普通 backlog 且没有 Run 可写。部分字段省略保持；memberAgentIds/teamIds 任一提交则替换完整成员，经理须属于最终集合，验收 [] 清空、工作流 null/空串恢复默认。保存冻结当前选择，保留 Task ID/创建时间/目录，不创建执行。启动未确认用 TASK_UPDATED_START_FAILED 回报 taskId，修改保留，先查询状态勿重复提交。
+
+`plugins import --file source.json` 同样支持裸 Skill 仓库或目录（根 SKILL.md 或 skills/<名称>/SKILL.md），每个 Skill 自动包装为同名同描述插件。后续 list/get/delete、updates/check-updates/auto-update 与普通插件相同；本地目录重新 import 更新，不新增 Skill 命令。
+
+Skill allowed-tools/allowedTools 不参与平台兼容性判断；已有插件用 `plugins check-compatibility ID` 刷新目录摘要即可，无需重新导入。get、员工/角色绑定与 App 使用同一当前计算，字段保留，其他不兼容原因仍拒绝。

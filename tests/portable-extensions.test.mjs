@@ -51,3 +51,21 @@ test('native subagents preserve source instructions and mapped tool selection wi
   else {const home=provider==='gemini'?join(environment.GEMINI_CLI_HOME,'.gemini'):config;const native=await readFile(join(home,'agents',agent.name+'.md'),'utf8');assert.match(native,/Review independently/);assert.match(native,/tools:/);assert.match(native,/name: selected-plugin-agent-reviewer-/);}
  }
 });
+
+test('optional Skill allowed-tools metadata never blocks a Runtime and remains in immutable/native files',async t=>{
+ const {root,source,market}=await fixture(t);
+ for(const header of ['allowed-tools: Bash, Read','allowed-tools: [Bash, Read]','allowed-tools: []','allowedTools: [Bash, Read]']){
+  const original='---\nname: proof\ndescription: Optional tool metadata\n'+header+'\n---\nRead resources.txt beside this file.';
+  await writeFile(join(source,'skills/proof/SKILL.md'),original);const {plugins:[entry]}=await market.import({path:source});
+  for(const provider of RUNTIME_IDS){assert.equal(entry.compatibility[provider].supported,true,provider);assert.deepEqual(entry.compatibility[provider].reasons,[]);const runtime={provider,...await market.resolve({pluginIds:[entry.id],mcpIds:[]},provider)};assert.equal(await readFile(runtime.skillPaths[0],'utf8'),original);
+   if(PORTABLE_RUNTIME_IDS.includes(provider)){const traceDirectory=join(root,entry.id,provider);await mkdir(traceDirectory,{recursive:true});const projection=await preparePortableExtensions({runtime,traceDirectory});const {parsePluginMarkdown}=await import('../server/runtime/plugin-compatibility.mjs');const native=parsePluginMarkdown(await readFile(join(projection.skills[0].path,'SKILL.md'),'utf8')).attributes;const attributes=parsePluginMarkdown(original).attributes;assert.deepEqual(native['allowed-tools'],attributes['allowed-tools']);assert.deepEqual(native.allowedTools,attributes.allowedTools);assert.equal(await readFile(join(projection.skills[0].path,'resources.txt'),'utf8'),'relative selected resource');}
+  }
+ }
+});
+
+test('existing optional-field compatibility cache can refresh without reinstalling or changing identity',async t=>{
+ const {root,source,market}=await fixture(t);await writeFile(join(source,'skills/proof/SKILL.md'),'---\nname: proof\ndescription: Existing installation\nallowed-tools: Bash, Read\n---\nRead resources.txt');
+ const {plugins:[entry]}=await market.import({path:source}),store=createStore({databasePath:join(root,'cached.sqlite')});t.after(()=>store.close());const stale={...entry,providers:['claude-code','codex','dsh'],compatibility:{...entry.compatibility,...Object.fromEntries(PORTABLE_RUNTIME_IDS.map(p=>[p,{supported:false,reasons:['old allowed-tools rejection']}]))}};store.registerExtensions([stale]);
+ const before=store.getExtension('plugin',entry.id);assert.equal(before.compatibility.opencode.supported,false);const current=await market.detail(entry.id,'plugin');const refreshed=store.refreshExtensionCompatibility('plugin',entry.id,current);assert.equal(refreshed.id,entry.id);assert.deepEqual(refreshed.source,before.source);for(const provider of RUNTIME_IDS)assert.equal(refreshed.compatibility[provider].supported,true);
+ const binding=await market.resolve({pluginIds:[entry.id],mcpIds:[]},'opencode');assert.match(await readFile(binding.skillPaths[0],'utf8'),/allowed-tools: Bash, Read/);
+});
